@@ -171,6 +171,18 @@ void o_rmlocal(long addr)
 	sp = addr;
 }
 
+long o_arg(int i)
+{
+	char mov[3];
+	long addr = o_mklocal();
+	mov[0] = "\x48\x48\x48\x48\x4c\x4c"[i];
+	mov[1] = '\x89';
+	mov[2] = "\xbd\xb5\x95\x8d\x85\x8d"[i];
+	os(mov, 3);			/* mov %xxx, addr(%rbp) */
+	oi(-addr, 4);
+	return addr;
+}
+
 void o_assign(void)
 {
 	if (tmp_pop() == TMP_ADDR)

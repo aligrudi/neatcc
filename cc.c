@@ -15,6 +15,13 @@ static struct local {
 } locals[MAXLOCALS];
 static int nlocals;
 
+static void local_add(char *name, long addr)
+{
+	strcpy(locals[nlocals].name, tok_id());
+	locals[nlocals].addr = addr;
+	nlocals++;
+}
+
 static void die(char *s)
 {
 	print(s);
@@ -128,9 +135,7 @@ static void readstmt(void)
 	}
 	if (!readtype()) {
 		tok_expect(TOK_NAME);
-		strcpy(locals[nlocals].name, tok_id());
-		locals[nlocals].addr = o_mklocal();
-		nlocals++;
+		local_add(tok_id(), o_mklocal());
 		/* initializer */
 		if (!tok_jmp('=')) {
 			o_local(locals[nlocals - 1].addr);
@@ -181,6 +186,8 @@ static void readstmt(void)
 	tok_expect(';');
 }
 
+#define MAXARGS			(1 << 5)
+
 static void readdecl(void)
 {
 	char name[NAMELEN];
@@ -191,11 +198,22 @@ static void readdecl(void)
 		return;
 	if (!tok_jmp('(')) {
 		/* read args */
-		while (tok_get() != ')')
-			;
+		char args[MAXARGS][NAMELEN];
+		int nargs = 0;
+		int i;
+		while (tok_see() != ')') {
+			readtype();
+			if (!tok_jmp(TOK_NAME))
+				strcpy(args[nargs++], tok_id());
+			if (tok_jmp(','))
+				break;
+		}
+		tok_expect(')');
 		if (!tok_jmp(';'))
 			return;
 		o_func_beg(name);
+		for (i = 0; i < nargs; i++)
+			local_add(args[i], o_arg(i));
 		readstmt();
 		o_func_end();
 		return;

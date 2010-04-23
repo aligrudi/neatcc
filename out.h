@@ -11,6 +11,7 @@ void o_assign(void);
 void o_deref(void);
 
 long o_mklocal(void);
+long o_arg(int i);
 void o_rmlocal(long addr);
 long o_mklabel(void);
 void o_jz(long addr);
