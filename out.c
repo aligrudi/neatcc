@@ -85,8 +85,8 @@ static void oi(long n, int l)
 
 static int tmp_pop(void)
 {
-	os("\x48\x8b\x45", 3);	/* mov top(%rbp), %rax */
-	oi(-tmp[--ntmp].addr, 1);
+	os("\x48\x8b\x85", 3);	/* mov top(%rbp), %rax */
+	oi(-tmp[--ntmp].addr, 4);
 	return tmp[ntmp].type;
 }
 
@@ -95,8 +95,8 @@ static void tmp_push(int type)
 	tmp[ntmp].addr = sp;
 	tmp[ntmp].type = type;
 	sp += 8;
-	os("\x48\x89\x45", 3);	/* mov %rax, top(%rbp) */
-	oi(-tmp[ntmp++].addr, 1);
+	os("\x48\x89\x85", 3);	/* mov %rax, top(%rbp) */
+	oi(-tmp[ntmp++].addr, 4);
 }
 
 
