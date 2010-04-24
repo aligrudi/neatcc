@@ -91,6 +91,7 @@ static void readprimary(void)
 				return;
 			}
 		}
+		o_symaddr(tok_id());
 		return;
 	}
 	if (!tok_jmp('(')) {
@@ -114,6 +115,7 @@ static void readpost(void)
 			readexpr();
 		}
 		tok_expect(')');
+		o_call();
 	}
 }
 

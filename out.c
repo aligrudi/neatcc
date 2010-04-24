@@ -23,7 +23,6 @@ static int nsymstr = 1;
 static struct sec {
 	char buf[SECSIZE];
 	int len;
-	int shnum;
 	Elf64_Rela rela[MAXRELA];
 	int nrela;
 	Elf64_Shdr *sec_shdr;
@@ -44,7 +43,7 @@ static struct tmp {
 } tmp[MAXTEMP];
 static int ntmp;
 
-static char *putint(char *s, long n, int l)
+static void putint(char *s, long n, int l)
 {
 	while (l--) {
 		*s++ = n;
@@ -107,10 +106,13 @@ void o_func_beg(char *name)
 	sym->st_shndx = nshdr;
 	sec->sec_shdr = &shdr[nshdr++];
 	sec->rel_shdr = &shdr[nshdr++];
+	sec->rel_shdr->sh_link = SEC_SYMS;
+	sec->rel_shdr->sh_info = sec->sec_shdr - shdr;
 	cur = sec->buf;
 	os("\x55", 1);
 	os("\x48\x89\xe5", 3);
 	sp = 8;
+	ntmp = 0;
 	os("\x48\x83\xec", 3);
 	oi(56, 1);
 }
@@ -154,8 +156,8 @@ void o_func_end(void)
 void o_local(long addr)
 {
 	os("\x48\x89\xe8", 3);		/* mov %rbp, %rax */
-	os("\x48\x83\xc0", 3);		/* add $addr, %rax */
-	oi(-addr, 1);
+	os("\x48\x05", 2);		/* add $addr, %rax */
+	oi(-addr, 4);
 	tmp_push(TMP_ADDR);
 }
 
@@ -224,6 +226,32 @@ void out_init(void)
 {
 }
 
+static int sym_find(char *name)
+{
+	int i;
+	for (i = 0; i < nsyms; i++)
+		if (!strcmp(name, symstr + syms[i].st_name))
+			return i;
+	return nsyms;
+}
+
+void o_symaddr(char *name)
+{
+	Elf64_Rela *rela = &sec->rela[sec->nrela++];
+	os("\x48\xc7\xc0", 3);		/* mov $addr, %rax */
+	rela->r_offset = codeaddr();
+	rela->r_info = ELF64_R_INFO(sym_find(name), R_X86_64_32);
+	oi(0, 4);
+	tmp_push(TMP_ADDR);
+}
+
+void o_call(void)
+{
+	tmp_pop();
+	os("\xff\xd0", 2);		/* callq *%rax */
+	tmp_push(TMP_CONST);
+}
+
 void out_write(int fd)
 {
 	Elf64_Shdr *symstr_shdr = &shdr[SEC_SYMSTR];
@@ -275,7 +303,6 @@ void out_write(int fd)
 		sec->rel_shdr->sh_offset = offset;
 		sec->rel_shdr->sh_size = sec->nrela * sizeof(sec->rela[0]);
 		sec->rel_shdr->sh_entsize = sizeof(sec->rela[0]);
-		sec->rel_shdr->sh_link = sec->sec_shdr - shdr;
 		offset += sec->rel_shdr->sh_size;
 	}
 

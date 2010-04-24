@@ -9,6 +9,8 @@ void o_num(int n);
 void o_local(long addr);
 void o_assign(void);
 void o_deref(void);
+void o_symaddr(char *name);
+void o_call(void);
 
 long o_mklocal(void);
 long o_arg(int i);
