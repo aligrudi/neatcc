@@ -16,7 +16,7 @@ void o_sub(void);
 
 long o_mklocal(void);
 long o_arg(int i);
-void o_rmlocal(long addr);
+void o_droptmp(void);
 long o_mklabel(void);
 void o_jz(long addr);
 long o_stubjz(void);

@@ -23,6 +23,7 @@ static int nsymstr = 1;
 static struct sec {
 	char buf[SECSIZE];
 	int len;
+	Elf64_Sym *sym;
 	Elf64_Rela rela[MAXRELA];
 	int nrela;
 	Elf64_Shdr *sec_shdr;
@@ -37,6 +38,8 @@ static struct sec *sec;
 
 static char *cur;
 static long sp;
+static long spsub_addr;
+static long maxsp;
 static struct tmp {
 	long addr;
 	int type;
@@ -82,39 +85,61 @@ static void oi(long n, int l)
 	}
 }
 
+static long sp_push(int size)
+{
+	long osp = sp;
+	sp += size;
+	if (sp > maxsp)
+		maxsp = sp;
+	return osp;
+}
+
 static int tmp_pop(void)
 {
 	os("\x48\x8b\x85", 3);	/* mov top(%rbp), %rax */
 	oi(-tmp[--ntmp].addr, 4);
+	sp = tmp[ntmp].addr;
 	return tmp[ntmp].type;
 }
 
 static void tmp_push(int type)
 {
-	tmp[ntmp].addr = sp;
+	tmp[ntmp].addr = sp_push(8);
 	tmp[ntmp].type = type;
-	sp += 8;
 	os("\x48\x89\x85", 3);	/* mov %rax, top(%rbp) */
 	oi(-tmp[ntmp++].addr, 4);
 }
 
+void o_droptmp(void)
+{
+	if (ntmp)
+		sp = tmp[0].addr;
+	ntmp = 0;
+}
+
+static long codeaddr(void)
+{
+	return cur - sec->buf;
+}
 
 void o_func_beg(char *name)
 {
-	Elf64_Sym *sym = put_sym(name);
 	sec = &secs[nsecs++];
-	sym->st_shndx = nshdr;
+	sec->sym = put_sym(name);
+	sec->sym->st_shndx = nshdr;
 	sec->sec_shdr = &shdr[nshdr++];
 	sec->rel_shdr = &shdr[nshdr++];
 	sec->rel_shdr->sh_link = SEC_SYMS;
 	sec->rel_shdr->sh_info = sec->sec_shdr - shdr;
 	cur = sec->buf;
-	os("\x55", 1);
-	os("\x48\x89\xe5", 3);
+	os("\x55", 1);			/* push %rbp */
+	os("\x48\x89\xe5", 3);		/* mov %rsp, %rbp */
 	sp = 8;
+	maxsp = 0;
 	ntmp = 0;
-	os("\x48\x83\xec", 3);
-	oi(56, 1);
+	os("\x48\x81\xec", 3);		/* sub $xxx, %rsp */
+	spsub_addr = codeaddr();
+	oi(0, 4);
 }
 
 void o_num(int n)
@@ -174,6 +199,8 @@ void o_func_end(void)
 {
 	os("\xc9\xc3", 2);		/* leave; ret; */
 	sec->len = cur - sec->buf;
+	sec->sym->st_size = sec->len;
+	putint(sec->buf + spsub_addr, maxsp + 8, 4);
 }
 
 void o_local(long addr)
@@ -186,14 +213,7 @@ void o_local(long addr)
 
 long o_mklocal(void)
 {
-	long addr = sp;
-	sp += 8;
-	return addr;
-}
-
-void o_rmlocal(long addr)
-{
-	sp = addr;
+	return sp_push(8);
 }
 
 long o_arg(int i)
@@ -215,11 +235,6 @@ void o_assign(void)
 	os("\x48\x89\xc3", 3);		/* mov %rax, %rbx */
 	tmp_pop();
 	os("\x48\x89\x18", 3);		/* mov %rbx, (%rax) */
-}
-
-static long codeaddr(void)
-{
-	return cur - sec->buf;
 }
 
 long o_mklabel(void)

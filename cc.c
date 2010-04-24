@@ -148,6 +148,7 @@ static void readexpr(void)
 
 static void readstmt(void)
 {
+	o_droptmp();
 	if (!tok_jmp('{')) {
 		while (tok_jmp('}'))
 			readstmt();
