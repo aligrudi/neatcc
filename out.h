@@ -11,6 +11,8 @@ void o_assign(void);
 void o_deref(void);
 void o_symaddr(char *name);
 void o_call(int argc);
+void o_add(void);
+void o_sub(void);
 
 long o_mklocal(void);
 long o_arg(int i);

@@ -147,6 +147,29 @@ void o_ret(int ret)
 	os("\xc9\xc3", 2);		/* leave; ret; */
 }
 
+static void binop(void)
+{
+	if (tmp_pop() == TMP_ADDR)
+		deref();
+	os("\x48\x89\xc3", 3);		/* mov %rax, %rbx */
+	if (tmp_pop() == TMP_ADDR)
+		deref();
+}
+
+void o_add(void)
+{
+	binop();
+	os("\x48\x01\xd8", 3);		/* add %rax, %rbx */
+	tmp_push(TMP_CONST);
+}
+
+void o_sub(void)
+{
+	binop();
+	os("\x48\x29\xd8", 3);		/* sub %rax, %rbx */
+	tmp_push(TMP_CONST);
+}
+
 void o_func_end(void)
 {
 	os("\xc9\xc3", 2);		/* leave; ret; */

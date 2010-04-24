@@ -124,9 +124,22 @@ static void readpost(void)
 	}
 }
 
-static void readexpr(void)
+static void readadd(void)
 {
 	readpost();
+	if (!tok_jmp('+')) {
+		readpost();
+		o_add();
+	}
+	if (!tok_jmp('-')) {
+		readpost();
+		o_sub();
+	}
+}
+
+static void readexpr(void)
+{
+	readadd();
 	if (!tok_jmp('=')) {
 		readexpr();
 		o_assign();
