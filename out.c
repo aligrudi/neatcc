@@ -229,10 +229,13 @@ void out_init(void)
 static int sym_find(char *name)
 {
 	int i;
+	Elf64_Sym *sym;
 	for (i = 0; i < nsyms; i++)
 		if (!strcmp(name, symstr + syms[i].st_name))
 			return i;
-	return nsyms;
+	sym = put_sym(name);
+	sym->st_shndx = SHN_UNDEF;
+	return sym - syms;
 }
 
 void o_symaddr(char *name)
