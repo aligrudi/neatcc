@@ -110,12 +110,17 @@ static void readpost(void)
 		return;
 	}
 	if (!tok_jmp('(')) {
-		readexpr();
+		int argc = 0;
+		if (tok_see() != ')') {
+			readexpr();
+			argc++;
+		}
 		while (!tok_jmp(',')) {
 			readexpr();
+			argc++;
 		}
 		tok_expect(')');
-		o_call();
+		o_call(argc);
 	}
 }
 
@@ -170,10 +175,10 @@ static void readstmt(void)
 		tok_expect('(');
 		readexpr();
 		tok_expect(')');
-		l1 = o_stubjz();
+		l2 = o_stubjz();
 		readstmt();
 		o_jz(l1);
-		o_filljz(l1);
+		o_filljz(l2);
 		return;
 	}
 	if (!tok_jmp(TOK_RETURN)) {

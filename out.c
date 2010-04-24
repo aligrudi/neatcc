@@ -245,8 +245,25 @@ void o_symaddr(char *name)
 	tmp_push(TMP_ADDR);
 }
 
-void o_call(void)
+static void setarg(int i)
 {
+	char mov[3];
+	mov[0] = "\x48\x48\x48\x48\x49\x49"[i];
+	mov[1] = '\x89';
+	mov[2] = "\xc7\xc6\xc2\xc1\xc0\xc1"[i];
+	os(mov, 3);			/* mov %rax, %xxx */
+}
+
+void o_call(int argc)
+{
+	int i;
+	if (!argc)
+		os("\x48\x31\xc0", 3);	/* xor %rax, %rax */
+	for (i = 0; i < argc; i++) {
+		if (tmp_pop() == TMP_ADDR)
+			deref();
+		setarg(argc - i - 1);
+	}
 	tmp_pop();
 	os("\xff\xd0", 2);		/* callq *%rax */
 	tmp_push(TMP_CONST);
