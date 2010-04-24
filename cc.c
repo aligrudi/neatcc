@@ -127,13 +127,18 @@ static void readpost(void)
 static void readadd(void)
 {
 	readpost();
-	if (!tok_jmp('+')) {
-		readpost();
-		o_add();
-	}
-	if (!tok_jmp('-')) {
-		readpost();
-		o_sub();
+	while (1) {
+		if (!tok_jmp('+')) {
+			readpost();
+			o_add();
+			continue;
+		}
+		if (!tok_jmp('-')) {
+			readpost();
+			o_sub();
+			continue;
+		}
+		break;
 	}
 }
 
