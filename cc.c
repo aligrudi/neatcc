@@ -7,17 +7,19 @@
 #include "tok.h"
 
 #define MAXLOCALS	(1 << 10)
+#define MAXARGS		(1 << 5)
 #define print(s)	write(2, (s), strlen(s));
 
 static struct local {
 	char name[NAMELEN];
 	long addr;
+	unsigned vs;
 } locals[MAXLOCALS];
 static int nlocals;
 
 static void local_add(char *name, long addr)
 {
-	strcpy(locals[nlocals].name, tok_id());
+	strcpy(locals[nlocals].name, name);
 	locals[nlocals].addr = addr;
 	nlocals++;
 }
@@ -81,17 +83,17 @@ static void readprimary(void)
 {
 	int i;
 	if (!tok_jmp(TOK_NUM)) {
-		o_num(atoi(tok_id()));
+		o_num(atoi(tok_id()), VS_SIGNED | 4);
 		return;
 	}
 	if (!tok_jmp(TOK_NAME)) {
 		for (i = 0; i < nlocals; i++) {
 			if (!strcmp(locals[i].name, tok_id())) {
-				o_local(locals[i].addr);
+				o_local(locals[i].addr, locals[i].vs);
 				return;
 			}
 		}
-		o_symaddr(tok_id());
+		o_symaddr(tok_id(), 8);
 		return;
 	}
 	if (!tok_jmp('(')) {
@@ -111,16 +113,17 @@ static void readpost(void)
 	}
 	if (!tok_jmp('(')) {
 		int argc = 0;
+		unsigned vs[MAXARGS];
 		if (tok_see() != ')') {
 			readexpr();
-			argc++;
+			vs[argc++] = 4 | VS_SIGNED;
 		}
 		while (!tok_jmp(',')) {
 			readexpr();
-			argc++;
+			vs[argc++] = 4 | VS_SIGNED;
 		}
 		tok_expect(')');
-		o_call(argc);
+		o_call(argc, vs, 4 | VS_SIGNED);
 	}
 }
 
@@ -147,7 +150,7 @@ static void readexpr(void)
 	readadd();
 	if (!tok_jmp('=')) {
 		readexpr();
-		o_assign();
+		o_assign(4 | VS_SIGNED);
 	}
 }
 
@@ -160,13 +163,14 @@ static void readstmt(void)
 		return;
 	}
 	if (!readtype()) {
+		unsigned vs = 4 | VS_SIGNED;
 		tok_expect(TOK_NAME);
-		local_add(tok_id(), o_mklocal());
+		local_add(tok_id(), o_mklocal(vs));
 		/* initializer */
 		if (!tok_jmp('=')) {
-			o_local(locals[nlocals - 1].addr);
+			o_local(locals[nlocals - 1].addr, vs);
 			readexpr();
-			o_assign();
+			o_assign(4 | VS_SIGNED);
 			tok_expect(';');
 		}
 		return;
@@ -205,14 +209,12 @@ static void readstmt(void)
 		if (ret)
 			readexpr();
 		tok_expect(';');
-		o_ret(ret);
+		o_ret(4 | VS_SIGNED);
 		return;
 	}
 	readexpr();
 	tok_expect(';');
 }
-
-#define MAXARGS			(1 << 5)
 
 static void readdecl(void)
 {
@@ -239,7 +241,7 @@ static void readdecl(void)
 			return;
 		o_func_beg(name);
 		for (i = 0; i < nargs; i++)
-			local_add(args[i], o_arg(i));
+			local_add(args[i], o_arg(i, 4 | VS_SIGNED));
 		readstmt();
 		o_func_end();
 		return;

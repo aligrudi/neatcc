@@ -1,21 +1,25 @@
+#define VS_SIZEMASK		0x0fffffffu
+#define VS_SIGNED		0x10000000u
+#define VS_FLOAT		0x20000000u
+
 void out_init(void);
 void out_write(int fd);
 
 void o_func_beg(char *name);
 void o_func_end(void);
-void o_ret(int ret);
+void o_ret(unsigned vs);
 
-void o_num(int n);
-void o_local(long addr);
-void o_assign(void);
-void o_deref(void);
-void o_symaddr(char *name);
-void o_call(int argc);
+void o_num(int n, unsigned vs);
+void o_local(long addr, unsigned vs);
+void o_assign(unsigned vs);
+void o_deref(unsigned vs);
+void o_symaddr(char *name, unsigned vs);
+void o_call(int argc, unsigned *vs, unsigned ret_vs);
 void o_add(void);
 void o_sub(void);
 
-long o_mklocal(void);
-long o_arg(int i);
+long o_mklocal(unsigned vs);
+long o_arg(int i, unsigned vs);
 void o_droptmp(void);
 long o_mklabel(void);
 void o_jz(long addr);

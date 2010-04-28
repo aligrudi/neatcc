@@ -1,5 +1,6 @@
 #include <unistd.h>
 #include <elf.h>
+#include "out.h"
 #include "tok.h"
 
 #define MAXSECS		(1 << 7)
@@ -43,6 +44,7 @@ static long maxsp;
 static struct tmp {
 	long addr;
 	int type;
+	unsigned vs;
 } tmp[MAXTEMP];
 static int ntmp;
 
@@ -71,6 +73,24 @@ static Elf64_Sym *put_sym(char *name)
 	return sym;
 }
 
+#define R_RAX		0x00
+#define R_RCX		0x01
+#define R_RDX		0x02
+#define R_RBX		0x03
+#define R_RSP		0x04
+#define R_RBP		0x05
+#define R_RSI		0x06
+#define R_RDI		0x07
+#define R_R8		0x08
+#define R_R9		0x09
+#define R_R10		0x10
+#define R_R11		0x11
+
+#define MOV_M2R		0x8b
+#define MOV_R2X		0x89
+#define ADD_R2R		0x01
+#define SUB_R2R		0x29
+
 static void os(char *s, int n)
 {
 	while (n--)
@@ -85,6 +105,40 @@ static void oi(long n, int l)
 	}
 }
 
+static void o_op(int op, int r1, int r2, unsigned vs)
+{
+	int rex = 0;
+	if (r1 & 0x8)
+		rex |= 4;
+	if (r2 & 0x8)
+		rex |= 1;
+	if (rex || (vs & VS_SIZEMASK) == 8)
+		oi(0x48 | rex, 1);
+	if ((vs & VS_SIZEMASK) == 2)
+		oi(0x66, 1);
+	if ((vs & VS_SIZEMASK) == 1)
+		op &= ~0x1;
+	oi(op, 1);
+}
+
+static void memop(int op, int src, int base, int off, unsigned vs)
+{
+	int dis = off == (char) off ? 1 : 4;
+	int mod = off == 4 ? 2 : 1;
+	o_op(op, src, base, vs);
+	if (!off)
+		mod = 0;
+	oi((mod << 6) | ((src & 0x07) << 3) | (base & 0x07), 1);
+	if (off)
+		oi(off, dis);
+}
+
+static void regop(int op, int src, int dst, unsigned vs)
+{
+	o_op(op, src, dst, vs);
+	oi((3 << 6) | (src << 3) | (dst & 0x07), 1);
+}
+
 static long sp_push(int size)
 {
 	long osp = sp;
@@ -94,20 +148,30 @@ static long sp_push(int size)
 	return osp;
 }
 
-static int tmp_pop(void)
+#define TMP_VS(t)		((t)->type == TMP_ADDR ? 8 : (t)->vs)
+
+static void deref(unsigned vs)
 {
-	os("\x48\x8b\x85", 3);	/* mov top(%rbp), %rax */
-	oi(-tmp[--ntmp].addr, 4);
-	sp = tmp[ntmp].addr;
-	return tmp[ntmp].type;
+	memop(MOV_M2R, R_RAX, R_RAX, 0, vs);
 }
 
-static void tmp_push(int type)
+static unsigned tmp_pop(int rval)
 {
-	tmp[ntmp].addr = sp_push(8);
-	tmp[ntmp].type = type;
-	os("\x48\x89\x85", 3);	/* mov %rax, top(%rbp) */
-	oi(-tmp[ntmp++].addr, 4);
+	struct tmp *t = &tmp[--ntmp];
+	memop(MOV_M2R, R_RAX, R_RBP, -t->addr, TMP_VS(t));
+	sp = t->addr;
+	if (!rval && t->type == TMP_ADDR)
+		deref(t->vs);
+	return t->vs;
+}
+
+static void tmp_push(int type, unsigned vs)
+{
+	struct tmp *t = &tmp[ntmp++];
+	t->addr = sp_push(8);
+	t->vs = vs;
+	t->type = type;
+	memop(MOV_R2X, R_RAX, R_RBP, -t->addr, TMP_VS(t));
 }
 
 void o_droptmp(void)
@@ -142,57 +206,49 @@ void o_func_beg(char *name)
 	oi(0, 4);
 }
 
-void o_num(int n)
+void o_num(int n, unsigned vs)
 {
 	os("\xb8", 1);
 	oi(n, 4);
-	tmp_push(TMP_CONST);
+	tmp_push(TMP_CONST, vs);
 }
 
-static void deref(void)
+void o_deref(unsigned vs)
 {
-	os("\x48\x8b\x00", 3);	/* mov (%rax), %rax */
+	tmp_pop(0);
+	tmp_push(TMP_ADDR, vs);
 }
 
-void o_deref(void)
+void o_ret(unsigned vs)
 {
-	if (tmp_pop() == TMP_ADDR)
-		deref();
-	tmp_push(TMP_ADDR);
-}
-
-void o_ret(int ret)
-{
-	if (ret) {
-		if (tmp_pop() == TMP_ADDR)
-			deref();
-	} else {
-		os("\x48\x31\xc0", 3);	/* xor %rax, %rax */
-	}
+	if (vs)
+		tmp_pop(0);
+	else
+		os("\x31\xc0", 3);	/* xor %eax, %eax */
 	os("\xc9\xc3", 2);		/* leave; ret; */
 }
 
-static void binop(void)
+static int binop(void)
 {
-	if (tmp_pop() == TMP_ADDR)
-		deref();
-	os("\x48\x89\xc3", 3);		/* mov %rax, %rbx */
-	if (tmp_pop() == TMP_ADDR)
-		deref();
+	int vs1, vs2;
+	vs1 = tmp_pop(0);
+	regop(MOV_R2X, R_RAX, R_RBX, vs1);
+	vs2 = tmp_pop(0);
+	return vs1;
 }
 
 void o_add(void)
 {
-	binop();
-	os("\x48\x01\xd8", 3);		/* add %rax, %rbx */
-	tmp_push(TMP_CONST);
+	int vs = binop();
+	regop(ADD_R2R, R_RBX, R_RAX, vs);
+	tmp_push(TMP_CONST, vs);
 }
 
 void o_sub(void)
 {
-	binop();
-	os("\x48\x29\xd8", 3);		/* sub %rax, %rbx */
-	tmp_push(TMP_CONST);
+	int vs = binop();
+	regop(SUB_R2R, R_RBX, R_RAX, vs);
+	tmp_push(TMP_CONST, vs);
 }
 
 void o_func_end(void)
@@ -203,38 +259,34 @@ void o_func_end(void)
 	putint(sec->buf + spsub_addr, maxsp + 8, 4);
 }
 
-void o_local(long addr)
+void o_local(long addr, unsigned vs)
 {
 	os("\x48\x89\xe8", 3);		/* mov %rbp, %rax */
 	os("\x48\x05", 2);		/* add $addr, %rax */
 	oi(-addr, 4);
-	tmp_push(TMP_ADDR);
+	tmp_push(TMP_ADDR, vs);
 }
 
-long o_mklocal(void)
+long o_mklocal(unsigned vs)
 {
 	return sp_push(8);
 }
 
-long o_arg(int i)
+static int arg_regs[] = {R_RDI, R_RSI, R_RDX, R_RCX, R_R8, R_R9};
+
+long o_arg(int i, unsigned vs)
 {
-	char mov[3];
-	long addr = o_mklocal();
-	mov[0] = "\x48\x48\x48\x48\x4c\x4c"[i];
-	mov[1] = '\x89';
-	mov[2] = "\xbd\xb5\x95\x8d\x85\x8d"[i];
-	os(mov, 3);			/* mov %xxx, addr(%rbp) */
-	oi(-addr, 4);
+	long addr = o_mklocal(vs);
+	memop(MOV_R2X, arg_regs[i], R_RBP, -addr, vs);
 	return addr;
 }
 
-void o_assign(void)
+void o_assign(unsigned vs)
 {
-	if (tmp_pop() == TMP_ADDR)
-		deref();
-	os("\x48\x89\xc3", 3);		/* mov %rax, %rbx */
-	tmp_pop();
-	os("\x48\x89\x18", 3);		/* mov %rbx, (%rax) */
+	int vs2 = tmp_pop(0);
+	regop(MOV_R2X, R_RAX, R_RBX, vs2);
+	tmp_pop(1);
+	memop(MOV_R2X, R_RBX, R_RAX, 0, vs);
 }
 
 long o_mklabel(void)
@@ -276,38 +328,27 @@ static int sym_find(char *name)
 	return sym - syms;
 }
 
-void o_symaddr(char *name)
+void o_symaddr(char *name, unsigned vs)
 {
 	Elf64_Rela *rela = &sec->rela[sec->nrela++];
 	os("\x48\xc7\xc0", 3);		/* mov $addr, %rax */
 	rela->r_offset = codeaddr();
 	rela->r_info = ELF64_R_INFO(sym_find(name), R_X86_64_32);
 	oi(0, 4);
-	tmp_push(TMP_ADDR);
+	tmp_push(TMP_ADDR, vs);
 }
 
-static void setarg(int i)
-{
-	char mov[3];
-	mov[0] = "\x48\x48\x48\x48\x49\x49"[i];
-	mov[1] = '\x89';
-	mov[2] = "\xc7\xc6\xc2\xc1\xc0\xc1"[i];
-	os(mov, 3);			/* mov %rax, %xxx */
-}
-
-void o_call(int argc)
+void o_call(int argc, unsigned *vs, unsigned ret_vs)
 {
 	int i;
-	if (!argc)
-		os("\x48\x31\xc0", 3);	/* xor %rax, %rax */
 	for (i = 0; i < argc; i++) {
-		if (tmp_pop() == TMP_ADDR)
-			deref();
-		setarg(argc - i - 1);
+		tmp_pop(0);
+		regop(MOV_R2X, R_RAX, arg_regs[i], vs[i]);
 	}
-	tmp_pop();
+	tmp_pop(1);
 	os("\xff\xd0", 2);		/* callq *%rax */
-	tmp_push(TMP_CONST);
+	if (ret_vs)
+		tmp_push(TMP_CONST, ret_vs);
 }
 
 void out_write(int fd)
