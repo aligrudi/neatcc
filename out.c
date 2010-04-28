@@ -1,14 +1,11 @@
-#include <unistd.h>
 #include <elf.h>
-#include "out.h"
-#include "tok.h"
+#include <string.h>
+#include <unistd.h>
+#include "gen.h"
 
 #define MAXSECS		(1 << 7)
 #define MAXSYMS		(1 << 10)
-
-#define SECSIZE		(1 << 12)
 #define MAXRELA		(1 << 10)
-
 #define SEC_SYMS		1
 #define SEC_SYMSTR		2
 #define SEC_BEG			3
@@ -33,29 +30,6 @@ static struct sec {
 static int nsecs;
 static struct sec *sec;
 
-#define MAXTEMP		(1 << 12)
-#define TMP_CONST	1
-#define TMP_ADDR	2
-
-static char *cur;
-static long sp;
-static long spsub_addr;
-static long maxsp;
-static struct tmp {
-	long addr;
-	int type;
-	unsigned vs;
-} tmp[MAXTEMP];
-static int ntmp;
-
-static void putint(char *s, long n, int l)
-{
-	while (l--) {
-		*s++ = n;
-		n >>= 8;
-	}
-}
-
 static char *putstr(char *s, char *r)
 {
 	while (*r)
@@ -73,249 +47,6 @@ static Elf64_Sym *put_sym(char *name)
 	return sym;
 }
 
-#define R_RAX		0x00
-#define R_RCX		0x01
-#define R_RDX		0x02
-#define R_RBX		0x03
-#define R_RSP		0x04
-#define R_RBP		0x05
-#define R_RSI		0x06
-#define R_RDI		0x07
-#define R_R8		0x08
-#define R_R9		0x09
-#define R_R10		0x10
-#define R_R11		0x11
-
-#define MOV_M2R		0x8b
-#define MOV_R2X		0x89
-#define ADD_R2R		0x01
-#define SUB_R2R		0x29
-
-static void os(char *s, int n)
-{
-	while (n--)
-		*cur++ = *s++;
-}
-
-static void oi(long n, int l)
-{
-	while (l--) {
-		*cur++ = n;
-		n >>= 8;
-	}
-}
-
-static void o_op(int op, int r1, int r2, unsigned vs)
-{
-	int rex = 0;
-	if (r1 & 0x8)
-		rex |= 4;
-	if (r2 & 0x8)
-		rex |= 1;
-	if (rex || (vs & VS_SIZEMASK) == 8)
-		oi(0x48 | rex, 1);
-	if ((vs & VS_SIZEMASK) == 2)
-		oi(0x66, 1);
-	if ((vs & VS_SIZEMASK) == 1)
-		op &= ~0x1;
-	oi(op, 1);
-}
-
-static void memop(int op, int src, int base, int off, unsigned vs)
-{
-	int dis = off == (char) off ? 1 : 4;
-	int mod = off == 4 ? 2 : 1;
-	o_op(op, src, base, vs);
-	if (!off)
-		mod = 0;
-	oi((mod << 6) | ((src & 0x07) << 3) | (base & 0x07), 1);
-	if (off)
-		oi(off, dis);
-}
-
-static void regop(int op, int src, int dst, unsigned vs)
-{
-	o_op(op, src, dst, vs);
-	oi((3 << 6) | (src << 3) | (dst & 0x07), 1);
-}
-
-static long sp_push(int size)
-{
-	long osp = sp;
-	sp += size;
-	if (sp > maxsp)
-		maxsp = sp;
-	return osp;
-}
-
-#define TMP_VS(t)		((t)->type == TMP_ADDR ? 8 : (t)->vs)
-
-static void deref(unsigned vs)
-{
-	memop(MOV_M2R, R_RAX, R_RAX, 0, vs);
-}
-
-static unsigned tmp_pop(int rval)
-{
-	struct tmp *t = &tmp[--ntmp];
-	memop(MOV_M2R, R_RAX, R_RBP, -t->addr, TMP_VS(t));
-	sp = t->addr;
-	if (!rval && t->type == TMP_ADDR)
-		deref(t->vs);
-	return t->vs;
-}
-
-static void tmp_push(int type, unsigned vs)
-{
-	struct tmp *t = &tmp[ntmp++];
-	t->addr = sp_push(8);
-	t->vs = vs;
-	t->type = type;
-	memop(MOV_R2X, R_RAX, R_RBP, -t->addr, TMP_VS(t));
-}
-
-void o_droptmp(void)
-{
-	if (ntmp)
-		sp = tmp[0].addr;
-	ntmp = 0;
-}
-
-static long codeaddr(void)
-{
-	return cur - sec->buf;
-}
-
-void o_func_beg(char *name)
-{
-	sec = &secs[nsecs++];
-	sec->sym = put_sym(name);
-	sec->sym->st_shndx = nshdr;
-	sec->sec_shdr = &shdr[nshdr++];
-	sec->rel_shdr = &shdr[nshdr++];
-	sec->rel_shdr->sh_link = SEC_SYMS;
-	sec->rel_shdr->sh_info = sec->sec_shdr - shdr;
-	cur = sec->buf;
-	os("\x55", 1);			/* push %rbp */
-	os("\x48\x89\xe5", 3);		/* mov %rsp, %rbp */
-	sp = 8;
-	maxsp = 0;
-	ntmp = 0;
-	os("\x48\x81\xec", 3);		/* sub $xxx, %rsp */
-	spsub_addr = codeaddr();
-	oi(0, 4);
-}
-
-void o_num(int n, unsigned vs)
-{
-	os("\xb8", 1);
-	oi(n, 4);
-	tmp_push(TMP_CONST, vs);
-}
-
-void o_deref(unsigned vs)
-{
-	tmp_pop(0);
-	tmp_push(TMP_ADDR, vs);
-}
-
-void o_ret(unsigned vs)
-{
-	if (vs)
-		tmp_pop(0);
-	else
-		os("\x31\xc0", 3);	/* xor %eax, %eax */
-	os("\xc9\xc3", 2);		/* leave; ret; */
-}
-
-static int binop(void)
-{
-	int vs1, vs2;
-	vs1 = tmp_pop(0);
-	regop(MOV_R2X, R_RAX, R_RBX, vs1);
-	vs2 = tmp_pop(0);
-	return vs1;
-}
-
-void o_add(void)
-{
-	int vs = binop();
-	regop(ADD_R2R, R_RBX, R_RAX, vs);
-	tmp_push(TMP_CONST, vs);
-}
-
-void o_sub(void)
-{
-	int vs = binop();
-	regop(SUB_R2R, R_RBX, R_RAX, vs);
-	tmp_push(TMP_CONST, vs);
-}
-
-void o_func_end(void)
-{
-	os("\xc9\xc3", 2);		/* leave; ret; */
-	sec->len = cur - sec->buf;
-	sec->sym->st_size = sec->len;
-	putint(sec->buf + spsub_addr, maxsp + 8, 4);
-}
-
-void o_local(long addr, unsigned vs)
-{
-	os("\x48\x89\xe8", 3);		/* mov %rbp, %rax */
-	os("\x48\x05", 2);		/* add $addr, %rax */
-	oi(-addr, 4);
-	tmp_push(TMP_ADDR, vs);
-}
-
-long o_mklocal(unsigned vs)
-{
-	return sp_push(8);
-}
-
-static int arg_regs[] = {R_RDI, R_RSI, R_RDX, R_RCX, R_R8, R_R9};
-
-long o_arg(int i, unsigned vs)
-{
-	long addr = o_mklocal(vs);
-	memop(MOV_R2X, arg_regs[i], R_RBP, -addr, vs);
-	return addr;
-}
-
-void o_assign(unsigned vs)
-{
-	int vs2 = tmp_pop(0);
-	regop(MOV_R2X, R_RAX, R_RBX, vs2);
-	tmp_pop(1);
-	memop(MOV_R2X, R_RBX, R_RAX, 0, vs);
-}
-
-long o_mklabel(void)
-{
-	return codeaddr();
-}
-
-void o_jz(long addr)
-{
-	os("\x48\x85\xc0", 3);		/* test %rax, %rax */
-	os("\x0f\x84", 2);		/* jz $addr */
-	oi(codeaddr() - addr - 4, 4);
-}
-
-long o_stubjz(void)
-{
-	o_jz(codeaddr());
-	return cur - sec->buf - 4;
-}
-
-void o_filljz(long addr)
-{
-	putint(sec->buf + addr, codeaddr() - addr - 4, 4);
-}
-
-void out_init(void)
-{
-}
-
 static int sym_find(char *name)
 {
 	int i;
@@ -328,27 +59,29 @@ static int sym_find(char *name)
 	return sym - syms;
 }
 
-void o_symaddr(char *name, unsigned vs)
+void out_func_beg(char *name)
 {
-	Elf64_Rela *rela = &sec->rela[sec->nrela++];
-	os("\x48\xc7\xc0", 3);		/* mov $addr, %rax */
-	rela->r_offset = codeaddr();
-	rela->r_info = ELF64_R_INFO(sym_find(name), R_X86_64_32);
-	oi(0, 4);
-	tmp_push(TMP_ADDR, vs);
+	sec = &secs[nsecs++];
+	sec->sym = put_sym(name);
+	sec->sym->st_shndx = nshdr;
+	sec->sec_shdr = &shdr[nshdr++];
+	sec->rel_shdr = &shdr[nshdr++];
+	sec->rel_shdr->sh_link = SEC_SYMS;
+	sec->rel_shdr->sh_info = sec->sec_shdr - shdr;
 }
 
-void o_call(int argc, unsigned *vs, unsigned ret_vs)
+void out_func_end(char *buf, int len)
 {
-	int i;
-	for (i = 0; i < argc; i++) {
-		tmp_pop(0);
-		regop(MOV_R2X, R_RAX, arg_regs[i], vs[i]);
-	}
-	tmp_pop(1);
-	os("\xff\xd0", 2);		/* callq *%rax */
-	if (ret_vs)
-		tmp_push(TMP_CONST, ret_vs);
+	memcpy(sec->buf, buf, len);
+	sec->len = len;
+	sec->sym->st_size = len;
+}
+
+void out_rela(char *name, int off)
+{
+	Elf64_Rela *rela = &sec->rela[sec->nrela++];
+	rela->r_offset = off;
+	rela->r_info = ELF64_R_INFO(sym_find(name), R_X86_64_32);
 }
 
 void out_write(int fd)

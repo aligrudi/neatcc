@@ -1,9 +1,10 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <stdlib.h>
+#include <string.h>
 #include <sys/stat.h>
 #include <sys/types.h>
-#include "out.h"
+#include "gen.h"
 #include "tok.h"
 
 #define MAXLOCALS	(1 << 10)
@@ -263,7 +264,6 @@ int main(int argc, char *argv[])
 	ifd = open(src, O_RDONLY);
 	tok_init(ifd);
 	close(ifd);
-	out_init();
 	parse();
 
 	strcpy(obj, src);

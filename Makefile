@@ -5,7 +5,7 @@ LDFLAGS = -g
 all: cc
 .c.o:
 	$(CC) -c $(CFLAGS) $<
-cc: cc.o tok.o out.o
+cc: cc.o tok.o gen.o out.o
 	$(CC) $(LDFLAGS) -o $@ $^
 
 clean:
