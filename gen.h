@@ -23,11 +23,13 @@ void o_sub(void);
 
 long o_mklocal(int size);
 long o_arg(int i, unsigned bt);
-void o_droptmp(void);
+void o_droptmp(int n);
 long o_mklabel(void);
 void o_jz(long addr);
-long o_stubjz(void);
-void o_filljz(long addr);
+void o_jmp(long addr);
+long o_jmpstub(void);
+long o_jzstub(void);
+void o_filljmp(long addr);
 
 void out_init(void);
 void out_write(int fd);

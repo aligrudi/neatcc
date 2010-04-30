@@ -20,7 +20,7 @@ struct type {
 
 /* type stack */
 static struct type ts[MAXTMP];
-static nts;
+static int nts;
 
 static void ts_push_bt(unsigned bt)
 {
@@ -229,12 +229,14 @@ static void readadd(void)
 	readpre();
 	while (1) {
 		if (!tok_jmp('+')) {
-			readpost();
+			readpre();
+			ts_binop();
 			o_add();
 			continue;
 		}
 		if (!tok_jmp('-')) {
-			readpost();
+			readpre();
+			ts_binop();
 			o_sub();
 			continue;
 		}
@@ -242,9 +244,26 @@ static void readadd(void)
 	}
 }
 
-static void readexpr(void)
+static void readcexpr(void)
 {
 	readadd();
+	if (!tok_jmp('?')) {
+		long l2;
+		long l1 = o_jzstub();
+		readadd();
+		l2 = o_jmpstub();
+		tok_expect(':');
+		o_filljmp(l1);
+		/* this is needed to fix tmp stack position */
+		o_droptmp(1);
+		readadd();
+		o_filljmp(l2);
+	}
+}
+
+static void readexpr(void)
+{
+	readcexpr();
 	if (!tok_jmp('=')) {
 		readexpr();
 		o_assign(4 | BT_SIGNED);
@@ -254,7 +273,7 @@ static void readexpr(void)
 static void readstmt(void)
 {
 	struct type base;
-	o_droptmp();
+	o_droptmp(-1);
 	nts = 0;
 	if (!tok_jmp('{')) {
 		while (tok_jmp('}'))
@@ -283,15 +302,15 @@ static void readstmt(void)
 		tok_expect('(');
 		readexpr();
 		tok_expect(')');
-		l1 = o_stubjz();
+		l1 = o_jzstub();
 		readstmt();
 		if (!tok_jmp(TOK_ELSE)) {
-			l2 = o_stubjz();
-			o_filljz(l1);
-				readstmt();
-			o_filljz(l2);
+			l2 = o_jmpstub();
+			o_filljmp(l1);
+			readstmt();
+			o_filljmp(l2);
 		} else {
-			o_filljz(l1);
+			o_filljmp(l1);
 		}
 		return;
 	}
@@ -301,10 +320,10 @@ static void readstmt(void)
 		tok_expect('(');
 		readexpr();
 		tok_expect(')');
-		l2 = o_stubjz();
+		l2 = o_jzstub();
 		readstmt();
 		o_jz(l1);
-		o_filljz(l2);
+		o_filljmp(l2);
 		return;
 	}
 	if (!tok_jmp(TOK_RETURN)) {

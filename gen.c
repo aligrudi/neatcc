@@ -106,12 +106,12 @@ static void deref(unsigned bt)
 	memop(MOV_M2R, R_RAX, R_RAX, 0, bt);
 }
 
-static unsigned tmp_pop(int rval)
+static unsigned tmp_pop(int lval)
 {
 	struct tmp *t = &tmp[--ntmp];
 	memop(MOV_M2R, R_RAX, R_RBP, -t->addr, TMP_BT(t));
 	sp = t->addr;
-	if (!rval && t->type == TMP_ADDR)
+	if (!lval && t->type == TMP_ADDR)
 		deref(t->bt);
 	return t->bt;
 }
@@ -125,11 +125,13 @@ static void tmp_push(int type, unsigned bt)
 	memop(MOV_R2X, R_RAX, R_RBP, -t->addr, TMP_BT(t));
 }
 
-void o_droptmp(void)
+void o_droptmp(int n)
 {
-	if (ntmp)
-		sp = tmp[0].addr;
-	ntmp = 0;
+	if (n == -1 || n > ntmp)
+		n = ntmp;
+	if (n)
+		sp = tmp[ntmp - n].addr;
+	ntmp = ntmp - n;
 }
 
 static long codeaddr(void)
@@ -246,18 +248,31 @@ long o_mklabel(void)
 
 void o_jz(long addr)
 {
+	tmp_pop(0);
 	os("\x48\x85\xc0", 3);		/* test %rax, %rax */
 	os("\x0f\x84", 2);		/* jz $addr */
 	oi(codeaddr() - addr - 4, 4);
 }
 
-long o_stubjz(void)
+void o_jmp(long addr)
 {
-	o_jz(codeaddr());
-	return cur - buf - 4;
+	os("\xe9", 1);			/* jmp $addr */
+	oi(codeaddr() - addr - 4, 4);
 }
 
-void o_filljz(long addr)
+long o_jzstub(void)
+{
+	o_jz(0);
+	return codeaddr() - 4;
+}
+
+long o_jmpstub(void)
+{
+	o_jmp(0);
+	return codeaddr() - 4;
+}
+
+void o_filljmp(long addr)
 {
 	putint(buf + addr, codeaddr() - addr - 4, 4);
 }

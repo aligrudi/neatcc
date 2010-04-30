@@ -68,7 +68,7 @@ int tok_get(void)
 				return kwds[i].id;
 		return TOK_NAME;
 	}
-	if (strchr(";,{}()[]*&=+-/", buf[cur]))
+	if (strchr(";,{}()[]*&=+-/?:", buf[cur]))
 		return buf[cur++];
 	return -1;
 }
