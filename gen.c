@@ -205,8 +205,8 @@ void o_sub(void)
 void o_func_end(void)
 {
 	os("\xc9\xc3", 2);		/* leave; ret; */
-	out_func_end(buf, cur - buf);
 	putint(buf + spsub_addr, maxsp + 8, 4);
+	out_func_end(buf, cur - buf);
 }
 
 void o_local(long addr, unsigned bt)
