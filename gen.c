@@ -94,11 +94,10 @@ static void regop(int op, int src, int dst, unsigned bt)
 
 static long sp_push(int size)
 {
-	long osp = sp;
 	sp += size;
 	if (sp > maxsp)
 		maxsp = sp;
-	return osp;
+	return sp;
 }
 
 static void deref(unsigned bt)
@@ -110,7 +109,7 @@ static unsigned tmp_pop(int lval)
 {
 	struct tmp *t = &tmp[--ntmp];
 	memop(MOV_M2R, R_RAX, R_RBP, -t->addr, TMP_BT(t));
-	sp = t->addr;
+	sp = t->addr - 8;
 	if (!lval && t->type == TMP_ADDR)
 		deref(t->bt);
 	return t->bt;
@@ -130,7 +129,7 @@ void o_droptmp(int n)
 	if (n == -1 || n > ntmp)
 		n = ntmp;
 	if (n)
-		sp = tmp[ntmp - n].addr;
+		sp = tmp[ntmp - n].addr - 8;
 	ntmp = ntmp - n;
 }
 
@@ -145,7 +144,7 @@ void o_func_beg(char *name)
 	cur = buf;
 	os("\x55", 1);			/* push %rbp */
 	os("\x48\x89\xe5", 3);		/* mov %rsp, %rbp */
-	sp = 8;
+	sp = 0;
 	maxsp = 0;
 	ntmp = 0;
 	os("\x48\x81\xec", 3);		/* sub $xxx, %rsp */
@@ -166,6 +165,20 @@ void o_deref(unsigned bt)
 	tmp_push(TMP_ADDR, bt);
 }
 
+void o_arrayderef(unsigned bt)
+{
+	tmp_pop(0);
+	if (BT_SZ(bt) > 1) {
+		os("\xbb", 1);		/* mov $x, %ebx */
+		oi(BT_SZ(bt), 4);
+		os("\xf7\xeb", 2);	/* mul %ebx */
+	}
+	regop(MOV_R2X, R_RAX, R_RBX, 4);
+	tmp_pop(0);
+	regop(ADD_R2R, R_RBX, R_RAX, 8);
+	tmp_push(TMP_ADDR, bt);
+}
+
 void o_addr(void)
 {
 	tmp[ntmp - 1].type = TMP_CONST;
@@ -177,7 +190,7 @@ void o_ret(unsigned bt)
 	if (bt)
 		tmp_pop(0);
 	else
-		os("\x31\xc0", 3);	/* xor %eax, %eax */
+		os("\x31\xc0", 2);	/* xor %eax, %eax */
 	os("\xc9\xc3", 2);		/* leave; ret; */
 }
 
@@ -207,7 +220,7 @@ void o_sub(void)
 void o_func_end(void)
 {
 	os("\xc9\xc3", 2);		/* leave; ret; */
-	putint(buf + spsub_addr, maxsp + 8, 4);
+	putint(buf + spsub_addr, (maxsp + 7) & ~0x07, 4);
 	out_func_end(buf, cur - buf);
 }
 
@@ -221,14 +234,14 @@ void o_local(long addr, unsigned bt)
 
 long o_mklocal(int size)
 {
-	return sp_push(8);
+	return sp_push((size + 7) & ~0x07);
 }
 
 static int arg_regs[] = {R_RDI, R_RSI, R_RDX, R_RCX, R_R8, R_R9};
 
 long o_arg(int i, unsigned bt)
 {
-	long addr = o_mklocal(bt);
+	long addr = o_mklocal(BT_SZ(bt));
 	memop(MOV_R2X, arg_regs[i], R_RBP, -addr, bt);
 	return addr;
 }

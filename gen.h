@@ -5,7 +5,7 @@
 #define BT_SZMASK		0x00ff
 #define BT_SIGNED		0x0100
 #define BT_FLOAT		0x0200
-#define BT_SZ(bt)		(1 << ((bt) & BT_SZMASK))
+#define BT_SZ(bt)		((bt) & BT_SZMASK)
 
 void o_func_beg(char *name);
 void o_func_end(void);
@@ -15,6 +15,7 @@ void o_num(int n, unsigned bt);
 void o_local(long addr, unsigned bt);
 void o_assign(unsigned bt);
 void o_deref(unsigned bt);
+void o_arrayderef(unsigned bt);
 void o_addr(void);
 void o_symaddr(char *name, unsigned bt);
 void o_call(int argc, unsigned *bt, unsigned ret_vs);

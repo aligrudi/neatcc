@@ -13,8 +13,11 @@
 #define TYPE_BT(t)	((t)->ptr ? 8 : (t)->bt)
 #define TYPE_SZ(t)	((t)->ptr ? 8 : (t)->bt & BT_SZMASK)
 
+#define T_ARRAY		0x01
+
 struct type {
 	unsigned bt;
+	unsigned flags;
 	int ptr;
 };
 
@@ -25,6 +28,7 @@ static int nts;
 static void ts_push_bt(unsigned bt)
 {
 	ts[nts].ptr = 0;
+	ts[nts].flags = 0;
 	ts[nts++].bt = bt;
 }
 
@@ -146,10 +150,12 @@ static void readprimary(void)
 	}
 	if (!tok_jmp(TOK_NAME)) {
 		for (i = 0; i < nlocals; i++) {
+			struct type *t = &locals[nlocals - 1].type;
 			if (!strcmp(locals[i].name, tok_id())) {
-				ts_push(&locals[i].type);
-				o_local(locals[i].addr,
-					TYPE_BT(&locals[i].type));
+				ts_push(t);
+				o_local(locals[i].addr, TYPE_BT(t));
+				if (t->flags & T_ARRAY)
+					o_addr();
 				return;
 			}
 		}
@@ -168,8 +174,14 @@ static void readpost(void)
 {
 	readprimary();
 	if (!tok_jmp('[')) {
+		struct type t1;
+		ts_pop(&t1);
 		readexpr();
+		ts_pop(NULL);
 		tok_expect(']');
+		o_arrayderef(TYPE_BT(&t1));
+		t1.ptr--;
+		ts_push(&t1);
 		return;
 	}
 	if (!tok_jmp('(')) {
@@ -272,7 +284,7 @@ static void readexpr(void)
 
 static void readstmt(void)
 {
-	struct type base;
+	struct type base = {0};
 	o_droptmp(-1);
 	nts = 0;
 	if (!tok_jmp('{')) {
@@ -282,17 +294,27 @@ static void readstmt(void)
 	}
 	if (!basetype(&base)) {
 		struct type type = base;
+		char name[NAMELEN];
+		int n = 1;
 		readptrs(&type);
 		tok_expect(TOK_NAME);
-		local_add(tok_id(), o_mklocal(TYPE_SZ(&type)), type);
+		strcpy(name, tok_id());
+		if (!tok_jmp('[')) {
+			tok_expect(TOK_NUM);
+			n = atoi(tok_id());
+			type.ptr++;
+			type.flags = T_ARRAY;
+			tok_expect(']');
+		}
+		local_add(name, o_mklocal(TYPE_SZ(&type) * n), type);
 		/* initializer */
 		if (!tok_jmp('=')) {
-			o_local(locals[nlocals - 1].addr,
-				TYPE_BT(&locals[nlocals - 1].type));
+			struct type *t = &locals[nlocals - 1].type;
+			o_local(locals[nlocals - 1].addr, TYPE_BT(t));
 			readexpr();
 			ts_pop(NULL);
-			ts_push_bt(4 | BT_SIGNED);
-			o_assign(4 | BT_SIGNED);
+			ts_push_bt(TYPE_BT(t));
+			o_assign(TYPE_BT(t));
 			tok_expect(';');
 		}
 		return;
