@@ -1,7 +1,6 @@
 #include "gen.h"
 #include "tok.h"
 
-#define MAXTEMP		(1 << 12)
 #define TMP_CONST	1
 #define TMP_ADDR	2
 
@@ -34,7 +33,7 @@ static struct tmp {
 	long addr;
 	int type;
 	unsigned bt;
-} tmp[MAXTEMP];
+} tmp[MAXTMP];
 static int ntmp;
 
 static void putint(char *s, long n, int l)
@@ -165,6 +164,12 @@ void o_deref(unsigned bt)
 	tmp_push(TMP_ADDR, bt);
 }
 
+void o_addr(void)
+{
+	tmp[ntmp - 1].type = TMP_CONST;
+	tmp[ntmp - 1].bt = 8;
+}
+
 void o_ret(unsigned bt)
 {
 	if (bt)
@@ -212,7 +217,7 @@ void o_local(long addr, unsigned bt)
 	tmp_push(TMP_ADDR, bt);
 }
 
-long o_mklocal(unsigned bt)
+long o_mklocal(int size)
 {
 	return sp_push(8);
 }

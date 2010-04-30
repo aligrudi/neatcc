@@ -1,4 +1,5 @@
 #define SECSIZE		(1 << 12)
+#define MAXTMP		(1 << 12)
 
 /* basic types */
 #define BT_SZMASK		0x00ff
@@ -14,12 +15,13 @@ void o_num(int n, unsigned bt);
 void o_local(long addr, unsigned bt);
 void o_assign(unsigned bt);
 void o_deref(unsigned bt);
+void o_addr(void);
 void o_symaddr(char *name, unsigned bt);
 void o_call(int argc, unsigned *bt, unsigned ret_vs);
 void o_add(void);
 void o_sub(void);
 
-long o_mklocal(unsigned bt);
+long o_mklocal(int size);
 long o_arg(int i, unsigned bt);
 void o_droptmp(void);
 long o_mklabel(void);
