@@ -14,14 +14,15 @@
 static struct local {
 	char name[NAMELEN];
 	long addr;
-	unsigned vs;
+	unsigned type;
 } locals[MAXLOCALS];
 static int nlocals;
 
-static void local_add(char *name, long addr)
+static void local_add(char *name, long addr, unsigned type)
 {
 	strcpy(locals[nlocals].name, name);
 	locals[nlocals].addr = addr;
+	locals[nlocals].type = type;
 	nlocals++;
 }
 
@@ -47,34 +48,50 @@ static void tok_expect(int tok)
 
 static void readexpr(void);
 
+static unsigned type;
+
 static int readtype(void)
 {
-	int found = 0;
-	while (!found) {
+	int sign = 1;
+	int size = 4;
+	int done = 0;
+	int i = 0;
+	while (!done) {
 		switch (tok_see()) {
 		case TOK_VOID:
+			done = 1;
+			break;
 		case TOK_INT:
+			done = 1;
+			break;
 		case TOK_CHAR:
-			found = 1;
-			tok_get();
+			size = 1;
+			done = 1;
 			break;
 		case TOK_SHORT:
+			size = 2;
+			break;
 		case TOK_LONG:
+			size = 8;
+			break;
 		case TOK_UNSIGNED:
-			found = 1;
-			tok_get();
+			sign = 0;
 			break;
 		case TOK_ENUM:
 		case TOK_STRUCT:
-			found = 1;
-			tok_get();
 			tok_expect(TOK_NAME);
+			done = 1;
 			break;
-		case TOK_EOF:
 		default:
-			return 1;
+			if (!i)
+				return 1;
+			done = 1;
+			continue;
 		}
+		i++;
+		tok_get();
 	}
+	type = size | (sign ? BT_SIGNED : 0);
 	while (!tok_jmp('*'))
 		;
 	return 0;
@@ -84,13 +101,13 @@ static void readprimary(void)
 {
 	int i;
 	if (!tok_jmp(TOK_NUM)) {
-		o_num(atoi(tok_id()), VS_SIGNED | 4);
+		o_num(atoi(tok_id()), BT_SIGNED | 4);
 		return;
 	}
 	if (!tok_jmp(TOK_NAME)) {
 		for (i = 0; i < nlocals; i++) {
 			if (!strcmp(locals[i].name, tok_id())) {
-				o_local(locals[i].addr, locals[i].vs);
+				o_local(locals[i].addr, locals[i].type);
 				return;
 			}
 		}
@@ -114,17 +131,17 @@ static void readpost(void)
 	}
 	if (!tok_jmp('(')) {
 		int argc = 0;
-		unsigned vs[MAXARGS];
+		unsigned bt[MAXARGS];
 		if (tok_see() != ')') {
 			readexpr();
-			vs[argc++] = 4 | VS_SIGNED;
+			bt[argc++] = 4 | BT_SIGNED;
 		}
 		while (!tok_jmp(',')) {
 			readexpr();
-			vs[argc++] = 4 | VS_SIGNED;
+			bt[argc++] = 4 | BT_SIGNED;
 		}
 		tok_expect(')');
-		o_call(argc, vs, 4 | VS_SIGNED);
+		o_call(argc, bt, 4 | BT_SIGNED);
 	}
 }
 
@@ -151,7 +168,7 @@ static void readexpr(void)
 	readadd();
 	if (!tok_jmp('=')) {
 		readexpr();
-		o_assign(4 | VS_SIGNED);
+		o_assign(4 | BT_SIGNED);
 	}
 }
 
@@ -164,14 +181,14 @@ static void readstmt(void)
 		return;
 	}
 	if (!readtype()) {
-		unsigned vs = 4 | VS_SIGNED;
 		tok_expect(TOK_NAME);
-		local_add(tok_id(), o_mklocal(vs));
+		local_add(tok_id(), o_mklocal(type), type);
 		/* initializer */
 		if (!tok_jmp('=')) {
-			o_local(locals[nlocals - 1].addr, vs);
+			o_local(locals[nlocals - 1].addr,
+				locals[nlocals - 1].type);
 			readexpr();
-			o_assign(4 | VS_SIGNED);
+			o_assign(4 | BT_SIGNED);
 			tok_expect(';');
 		}
 		return;
@@ -210,7 +227,7 @@ static void readstmt(void)
 		if (ret)
 			readexpr();
 		tok_expect(';');
-		o_ret(4 | VS_SIGNED);
+		o_ret(4 | BT_SIGNED);
 		return;
 	}
 	readexpr();
@@ -228,10 +245,12 @@ static void readdecl(void)
 	if (!tok_jmp('(')) {
 		/* read args */
 		char args[MAXARGS][NAMELEN];
+		unsigned types[MAXARGS];
 		int nargs = 0;
 		int i;
 		while (tok_see() != ')') {
 			readtype();
+			types[nargs] = type;
 			if (!tok_jmp(TOK_NAME))
 				strcpy(args[nargs++], tok_id());
 			if (tok_jmp(','))
@@ -242,7 +261,7 @@ static void readdecl(void)
 			return;
 		o_func_beg(name);
 		for (i = 0; i < nargs; i++)
-			local_add(args[i], o_arg(i, 4 | VS_SIGNED));
+			local_add(args[i], o_arg(i, types[i]), types[i]);
 		readstmt();
 		o_func_end();
 		return;

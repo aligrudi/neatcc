@@ -23,7 +23,7 @@
 #define ADD_R2R		0x01
 #define SUB_R2R		0x29
 
-#define TMP_VS(t)		((t)->type == TMP_ADDR ? 8 : (t)->vs)
+#define TMP_BT(t)		((t)->type == TMP_ADDR ? 8 : (t)->bt)
 
 static char buf[SECSIZE];
 static char *cur;
@@ -33,7 +33,7 @@ static long maxsp;
 static struct tmp {
 	long addr;
 	int type;
-	unsigned vs;
+	unsigned bt;
 } tmp[MAXTEMP];
 static int ntmp;
 
@@ -59,27 +59,27 @@ static void oi(long n, int l)
 	}
 }
 
-static void o_op(int op, int r1, int r2, unsigned vs)
+static void o_op(int op, int r1, int r2, unsigned bt)
 {
 	int rex = 0;
 	if (r1 & 0x8)
 		rex |= 4;
 	if (r2 & 0x8)
 		rex |= 1;
-	if (rex || (vs & VS_SIZEMASK) == 8)
+	if (rex || (bt & BT_SZMASK) == 8)
 		oi(0x48 | rex, 1);
-	if ((vs & VS_SIZEMASK) == 2)
+	if ((bt & BT_SZMASK) == 2)
 		oi(0x66, 1);
-	if ((vs & VS_SIZEMASK) == 1)
+	if ((bt & BT_SZMASK) == 1)
 		op &= ~0x1;
 	oi(op, 1);
 }
 
-static void memop(int op, int src, int base, int off, unsigned vs)
+static void memop(int op, int src, int base, int off, unsigned bt)
 {
 	int dis = off == (char) off ? 1 : 4;
 	int mod = off == 4 ? 2 : 1;
-	o_op(op, src, base, vs);
+	o_op(op, src, base, bt);
 	if (!off)
 		mod = 0;
 	oi((mod << 6) | ((src & 0x07) << 3) | (base & 0x07), 1);
@@ -87,9 +87,9 @@ static void memop(int op, int src, int base, int off, unsigned vs)
 		oi(off, dis);
 }
 
-static void regop(int op, int src, int dst, unsigned vs)
+static void regop(int op, int src, int dst, unsigned bt)
 {
-	o_op(op, src, dst, vs);
+	o_op(op, src, dst, bt);
 	oi((3 << 6) | (src << 3) | (dst & 0x07), 1);
 }
 
@@ -102,28 +102,28 @@ static long sp_push(int size)
 	return osp;
 }
 
-static void deref(unsigned vs)
+static void deref(unsigned bt)
 {
-	memop(MOV_M2R, R_RAX, R_RAX, 0, vs);
+	memop(MOV_M2R, R_RAX, R_RAX, 0, bt);
 }
 
 static unsigned tmp_pop(int rval)
 {
 	struct tmp *t = &tmp[--ntmp];
-	memop(MOV_M2R, R_RAX, R_RBP, -t->addr, TMP_VS(t));
+	memop(MOV_M2R, R_RAX, R_RBP, -t->addr, TMP_BT(t));
 	sp = t->addr;
 	if (!rval && t->type == TMP_ADDR)
-		deref(t->vs);
-	return t->vs;
+		deref(t->bt);
+	return t->bt;
 }
 
-static void tmp_push(int type, unsigned vs)
+static void tmp_push(int type, unsigned bt)
 {
 	struct tmp *t = &tmp[ntmp++];
 	t->addr = sp_push(8);
-	t->vs = vs;
+	t->bt = bt;
 	t->type = type;
-	memop(MOV_R2X, R_RAX, R_RBP, -t->addr, TMP_VS(t));
+	memop(MOV_R2X, R_RAX, R_RBP, -t->addr, TMP_BT(t));
 }
 
 void o_droptmp(void)
@@ -152,22 +152,22 @@ void o_func_beg(char *name)
 	oi(0, 4);
 }
 
-void o_num(int n, unsigned vs)
+void o_num(int n, unsigned bt)
 {
 	os("\xb8", 1);
 	oi(n, 4);
-	tmp_push(TMP_CONST, vs);
+	tmp_push(TMP_CONST, bt);
 }
 
-void o_deref(unsigned vs)
+void o_deref(unsigned bt)
 {
 	tmp_pop(0);
-	tmp_push(TMP_ADDR, vs);
+	tmp_push(TMP_ADDR, bt);
 }
 
-void o_ret(unsigned vs)
+void o_ret(unsigned bt)
 {
-	if (vs)
+	if (bt)
 		tmp_pop(0);
 	else
 		os("\x31\xc0", 3);	/* xor %eax, %eax */
@@ -185,16 +185,16 @@ static int binop(void)
 
 void o_add(void)
 {
-	int vs = binop();
-	regop(ADD_R2R, R_RBX, R_RAX, vs);
-	tmp_push(TMP_CONST, vs);
+	int bt = binop();
+	regop(ADD_R2R, R_RBX, R_RAX, bt);
+	tmp_push(TMP_CONST, bt);
 }
 
 void o_sub(void)
 {
-	int vs = binop();
-	regop(SUB_R2R, R_RBX, R_RAX, vs);
-	tmp_push(TMP_CONST, vs);
+	int bt = binop();
+	regop(SUB_R2R, R_RBX, R_RAX, bt);
+	tmp_push(TMP_CONST, bt);
 }
 
 void o_func_end(void)
@@ -204,34 +204,34 @@ void o_func_end(void)
 	putint(buf + spsub_addr, maxsp + 8, 4);
 }
 
-void o_local(long addr, unsigned vs)
+void o_local(long addr, unsigned bt)
 {
 	os("\x48\x89\xe8", 3);		/* mov %rbp, %rax */
 	os("\x48\x05", 2);		/* add $addr, %rax */
 	oi(-addr, 4);
-	tmp_push(TMP_ADDR, vs);
+	tmp_push(TMP_ADDR, bt);
 }
 
-long o_mklocal(unsigned vs)
+long o_mklocal(unsigned bt)
 {
 	return sp_push(8);
 }
 
 static int arg_regs[] = {R_RDI, R_RSI, R_RDX, R_RCX, R_R8, R_R9};
 
-long o_arg(int i, unsigned vs)
+long o_arg(int i, unsigned bt)
 {
-	long addr = o_mklocal(vs);
-	memop(MOV_R2X, arg_regs[i], R_RBP, -addr, vs);
+	long addr = o_mklocal(bt);
+	memop(MOV_R2X, arg_regs[i], R_RBP, -addr, bt);
 	return addr;
 }
 
-void o_assign(unsigned vs)
+void o_assign(unsigned bt)
 {
 	int vs2 = tmp_pop(0);
 	regop(MOV_R2X, R_RAX, R_RBX, vs2);
 	tmp_pop(1);
-	memop(MOV_R2X, R_RBX, R_RAX, 0, vs);
+	memop(MOV_R2X, R_RBX, R_RAX, 0, bt);
 }
 
 long o_mklabel(void)
@@ -257,23 +257,23 @@ void o_filljz(long addr)
 	putint(buf + addr, codeaddr() - addr - 4, 4);
 }
 
-void o_symaddr(char *name, unsigned vs)
+void o_symaddr(char *name, unsigned bt)
 {
 	os("\x48\xc7\xc0", 3);		/* mov $addr, %rax */
 	out_rela(name, codeaddr());
 	oi(0, 4);
-	tmp_push(TMP_ADDR, vs);
+	tmp_push(TMP_ADDR, bt);
 }
 
-void o_call(int argc, unsigned *vs, unsigned ret_vs)
+void o_call(int argc, unsigned *bt, unsigned ret_bt)
 {
 	int i;
 	for (i = 0; i < argc; i++) {
 		tmp_pop(0);
-		regop(MOV_R2X, R_RAX, arg_regs[i], vs[i]);
+		regop(MOV_R2X, R_RAX, arg_regs[i], bt[i]);
 	}
 	tmp_pop(1);
 	os("\xff\xd0", 2);		/* callq *%rax */
-	if (ret_vs)
-		tmp_push(TMP_CONST, ret_vs);
+	if (ret_bt)
+		tmp_push(TMP_CONST, ret_bt);
 }
