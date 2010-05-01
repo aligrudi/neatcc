@@ -10,8 +10,11 @@
 #define MAXLOCALS	(1 << 10)
 #define MAXARGS		(1 << 5)
 #define print(s)	write(2, (s), strlen(s));
-#define TYPE_BT(t)	((t)->ptr ? 8 : (t)->bt)
-#define TYPE_SZ(t)	((t)->ptr ? 8 : (t)->bt & BT_SZMASK)
+
+#define TYPE_BT(t)		((t)->ptr ? 8 : (t)->bt)
+#define TYPE_SZ(t)		((t)->ptr ? 8 : (t)->bt & BT_SZMASK)
+#define TYPE_DEREF_BT(t)	((t)->ptr > 1 ? 8 : (t)->bt)
+#define TYPE_DEREF_SZ(t)	((t)->ptr > 1 ? 8 : (t)->bt & BT_SZMASK)
 
 #define T_ARRAY		0x01
 
@@ -179,7 +182,7 @@ static void readpost(void)
 		readexpr();
 		ts_pop(NULL);
 		tok_expect(']');
-		o_arrayderef(TYPE_BT(&t1));
+		o_arrayderef(TYPE_DEREF_BT(&t1));
 		t1.ptr--;
 		ts_push(&t1);
 		return;
@@ -228,12 +231,39 @@ static void readpre(void)
 	readpost();
 }
 
-static void ts_binop(void)
+static void shifts(int n)
+{
+	int i = -1;
+	while (i++ < 16)
+		if (n == 1 << i)
+			break;
+	return i;
+}
+
+static void ts_binop(void (*o_sth)(void))
 {
 	struct type t1, t2;
 	ts_pop(&t1);
 	ts_pop(&t2);
-	ts_push(&t1);
+	if (t1.ptr && !t2.ptr) {
+		struct type t = t2;
+		t2 = t1;
+		t1 = t;
+		o_tmpswap();
+	}
+	if (!t1.ptr && t2.ptr)
+		if (TYPE_DEREF_SZ(&t2) > 1) {
+			o_num(shifts(TYPE_DEREF_SZ(&t2)), 1);
+			o_shl();
+		}
+	o_sth();
+	if (t1.ptr && t2.ptr) {
+		o_num(shifts(TYPE_DEREF_SZ(&t1)), 1);
+		o_shr();
+		ts_push_bt(4 | BT_SIGNED);
+	} else {
+		ts_push(&t2);
+	}
 }
 
 static void readadd(void)
@@ -242,14 +272,12 @@ static void readadd(void)
 	while (1) {
 		if (!tok_jmp('+')) {
 			readpre();
-			ts_binop();
-			o_add();
+			ts_binop(o_add);
 			continue;
 		}
 		if (!tok_jmp('-')) {
 			readpre();
-			ts_binop();
-			o_sub();
+			ts_binop(o_sub);
 			continue;
 		}
 		break;

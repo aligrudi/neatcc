@@ -21,10 +21,14 @@ void o_symaddr(char *name, unsigned bt);
 void o_call(int argc, unsigned *bt, unsigned ret_vs);
 void o_add(void);
 void o_sub(void);
+void o_mul(void);
+void o_shl(void);
+void o_shr(void);
 
 long o_mklocal(int size);
 long o_arg(int i, unsigned bt);
 void o_droptmp(int n);
+void o_tmpswap(void);
 long o_mklabel(void);
 void o_jz(long addr);
 void o_jmp(long addr);

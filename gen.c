@@ -133,6 +133,13 @@ void o_droptmp(int n)
 	ntmp = ntmp - n;
 }
 
+void o_tmpswap(void)
+{
+	struct tmp t = tmp[ntmp - 1];
+	tmp[ntmp - 1] = tmp[ntmp - 2];
+	tmp[ntmp - 2] = t;
+}
+
 static long codeaddr(void)
 {
 	return cur - buf;
@@ -163,6 +170,40 @@ void o_deref(unsigned bt)
 {
 	tmp_pop(0);
 	tmp_push(TMP_ADDR, bt);
+}
+
+void o_shl(void)
+{
+	int bt1, bt2;
+	bt1 = tmp_pop(0);
+	regop(MOV_R2X, R_RAX, R_RCX, 1);
+	bt2 = tmp_pop(0);
+	/* shl %eax, %cl */
+	o_op(0xd3, R_RAX, R_RCX, bt2);
+	os("\xe0", 1);
+	tmp_push(TMP_CONST, bt2);
+}
+
+void o_shr(void)
+{
+	int bt1, bt2;
+	bt1 = tmp_pop(0);
+	regop(MOV_R2X, R_RAX, R_RCX, 1);
+	bt2 = tmp_pop(0);
+	/* sar %eax, %cl */
+	o_op(0xd3, R_RAX, R_RCX, bt2);
+	os("\xf8", 1);
+	tmp_push(TMP_CONST, bt2);
+}
+
+void o_mul(void)
+{
+	int bt1, bt2;
+	bt1 = tmp_pop(0);
+	regop(MOV_R2X, R_RAX, R_RBX, 8);
+	bt2 = tmp_pop(0);
+	os("\xf7\xeb", 2);	/* mul %ebx */
+	tmp_push(TMP_CONST, bt2);
 }
 
 void o_arrayderef(unsigned bt)
@@ -196,11 +237,11 @@ void o_ret(unsigned bt)
 
 static int binop(void)
 {
-	int vs1, vs2;
-	vs1 = tmp_pop(0);
-	regop(MOV_R2X, R_RAX, R_RBX, vs1);
-	vs2 = tmp_pop(0);
-	return vs1;
+	int bt1, bt2;
+	bt1 = tmp_pop(0);
+	regop(MOV_R2X, R_RAX, R_RBX, bt1);
+	bt2 = tmp_pop(0);
+	return BT_SZ(bt1) > BT_SZ(bt2) ? bt1 : bt2;
 }
 
 void o_add(void)
