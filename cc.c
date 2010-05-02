@@ -42,8 +42,9 @@ static void ts_push(struct type *type)
 
 static void ts_pop(struct type *type)
 {
+	nts--;
 	if (type)
-		*type = ts[--nts];
+		*type = ts[nts];
 }
 
 static struct local {
@@ -190,7 +191,6 @@ static void readpost(void)
 	if (!tok_jmp('(')) {
 		int argc = 0;
 		unsigned bt[MAXARGS];
-		ts_pop(NULL);
 		if (tok_see() != ')') {
 			readexpr();
 			bt[argc++] = 4 | BT_SIGNED;
@@ -202,8 +202,8 @@ static void readpost(void)
 			ts_pop(NULL);
 		}
 		tok_expect(')');
+		ts_pop(NULL);
 		o_call(argc, bt, 4 | BT_SIGNED);
-		ts_push_bt(4 | BT_SIGNED);
 		ts_push_bt(4 | BT_SIGNED);
 	}
 }
