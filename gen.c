@@ -21,6 +21,7 @@
 #define MOV_R2X		0x89
 #define ADD_R2R		0x01
 #define SUB_R2R		0x29
+#define SHX_REG		0xd3
 
 #define TMP_BT(t)		((t)->type == TMP_ADDR ? 8 : (t)->bt)
 
@@ -178,9 +179,7 @@ void o_shl(void)
 	bt1 = tmp_pop(0);
 	regop(MOV_R2X, R_RAX, R_RCX, 1);
 	bt2 = tmp_pop(0);
-	/* shl %eax, %cl */
-	o_op(0xd3, R_RAX, R_RCX, bt2);
-	os("\xe0", 1);
+	regop(SHX_REG, 4, R_RAX, bt2);
 	tmp_push(TMP_CONST, bt2);
 }
 
@@ -190,9 +189,7 @@ void o_shr(void)
 	bt1 = tmp_pop(0);
 	regop(MOV_R2X, R_RAX, R_RCX, 1);
 	bt2 = tmp_pop(0);
-	/* sar %eax, %cl */
-	o_op(0xd3, R_RAX, R_RCX, bt2);
-	os("\xf8", 1);
+	regop(SHX_REG, bt2 & BT_SIGNED ? 5 : 7, R_RAX, bt2);
 	tmp_push(TMP_CONST, bt2);
 }
 
