@@ -93,6 +93,8 @@ static int basetype(struct type *type)
 	while (!done) {
 		switch (tok_see()) {
 		case TOK_VOID:
+			sign = 0;
+			size = 0;
 			done = 1;
 			break;
 		case TOK_INT:
