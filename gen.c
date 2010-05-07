@@ -22,6 +22,7 @@
 #define ADD_R2R		0x01
 #define SUB_R2R		0x29
 #define SHX_REG		0xd3
+#define CMP_R2R		0x38
 
 #define TMP_BT(t)		((t)->type == TMP_ADDR ? 8 : (t)->bt)
 
@@ -30,6 +31,7 @@ static char *cur;
 static long sp;
 static long spsub_addr;
 static long maxsp;
+
 static struct tmp {
 	long addr;
 	int type;
@@ -78,7 +80,7 @@ static void o_op(int op, int r1, int r2, unsigned bt)
 static void memop(int op, int src, int base, int off, unsigned bt)
 {
 	int dis = off == (char) off ? 1 : 4;
-	int mod = off == 4 ? 2 : 1;
+	int mod = dis == 4 ? 2 : 1;
 	o_op(op, src, base, bt);
 	if (!off)
 		mod = 0;
@@ -110,7 +112,6 @@ static unsigned tmp_pop(int lval)
 {
 	struct tmp *t = &tmp[--ntmp];
 	memop(MOV_M2R, R_RAX, R_RBP, -t->addr, TMP_BT(t));
-	sp = t->addr - 8;
 	if (!lval && t->type == TMP_ADDR)
 		deref(t->bt);
 	return t->bt;
@@ -125,13 +126,23 @@ static void tmp_push(int type, unsigned bt)
 	memop(MOV_R2X, R_RAX, R_RBP, -t->addr, TMP_BT(t));
 }
 
-void o_droptmp(int n)
+void o_tmpdrop(int n)
 {
 	if (n == -1 || n > ntmp)
 		n = ntmp;
-	if (n)
-		sp = tmp[ntmp - n].addr - 8;
-	ntmp = ntmp - n;
+	ntmp -= n;
+}
+
+void o_tmpjoin(void)
+{
+	struct tmp t1 = tmp[ntmp - 1];
+	struct tmp t2 = tmp[ntmp - 2];
+	if (t1.addr == t2.addr) {
+		o_tmpdrop(1);
+		return;
+	}
+	tmp_pop(1);
+	memop(MOV_R2X, R_RAX, R_RBP, -t2.addr, TMP_BT(&t1));
 }
 
 void o_tmpswap(void)
@@ -139,6 +150,14 @@ void o_tmpswap(void)
 	struct tmp t = tmp[ntmp - 1];
 	tmp[ntmp - 1] = tmp[ntmp - 2];
 	tmp[ntmp - 2] = t;
+}
+
+void o_tmpcopy(void)
+{
+	int type = tmp[ntmp - 1].type;
+	unsigned bt = tmp_pop(1);
+	tmp_push(type, bt);
+	tmp_push(type, bt);
 }
 
 static long codeaddr(void)
@@ -171,6 +190,12 @@ void o_deref(unsigned bt)
 {
 	tmp_pop(0);
 	tmp_push(TMP_ADDR, bt);
+}
+
+void o_load(void)
+{
+	unsigned bt = tmp_pop(0);
+	tmp_push(TMP_CONST, bt);
 }
 
 void o_shl(void)
@@ -234,7 +259,7 @@ void o_ret(unsigned bt)
 
 static int binop(void)
 {
-	int bt1, bt2;
+	unsigned bt1, bt2;
 	bt1 = tmp_pop(0);
 	regop(MOV_R2X, R_RAX, R_RBX, bt1);
 	bt2 = tmp_pop(0);
@@ -253,6 +278,22 @@ void o_sub(void)
 	int bt = binop();
 	regop(SUB_R2R, R_RBX, R_RAX, bt);
 	tmp_push(TMP_CONST, bt);
+}
+
+static void o_cmp(int uop, int sop)
+{
+	char set[] = "\x0f\x00\xc0";
+	unsigned bt = binop();
+	regop(CMP_R2R, R_RBX, R_RAX, bt);
+	set[1] = bt & BT_SIGNED ? sop : uop;
+	os(set, 3);			/* setl %al */
+	os("\x0f\xb6\xc0", 3);		/* movzbl %al, %eax */
+	tmp_push(TMP_CONST, 4 | BT_SIGNED);
+}
+
+void o_lt(void)
+{
+	o_cmp(0x92, 0x9c);
 }
 
 void o_func_end(void)
@@ -286,10 +327,12 @@ long o_arg(int i, unsigned bt)
 
 void o_assign(unsigned bt)
 {
-	int vs2 = tmp_pop(0);
-	regop(MOV_R2X, R_RAX, R_RBX, vs2);
+	unsigned bt2 = tmp_pop(0);
+	regop(MOV_R2X, R_RAX, R_RBX, bt2);
 	tmp_pop(1);
 	memop(MOV_R2X, R_RBX, R_RAX, 0, bt);
+	regop(MOV_R2X, R_RBX, R_RAX, bt2);
+	tmp_push(TMP_CONST, bt);
 }
 
 long o_mklabel(void)
@@ -297,29 +340,19 @@ long o_mklabel(void)
 	return codeaddr();
 }
 
-void o_jz(long addr)
+long o_jz(long addr)
 {
 	tmp_pop(0);
 	os("\x48\x85\xc0", 3);		/* test %rax, %rax */
 	os("\x0f\x84", 2);		/* jz $addr */
-	oi(codeaddr() - addr - 4, 4);
-}
-
-void o_jmp(long addr)
-{
-	os("\xe9", 1);			/* jmp $addr */
-	oi(codeaddr() - addr - 4, 4);
-}
-
-long o_jzstub(void)
-{
-	o_jz(0);
+	oi(addr - codeaddr() - 4, 4);
 	return codeaddr() - 4;
 }
 
-long o_jmpstub(void)
+long o_jmp(long addr)
 {
-	o_jmp(0);
+	os("\xe9", 1);			/* jmp $addr */
+	oi(addr - codeaddr() - 4, 4);
 	return codeaddr() - 4;
 }
 

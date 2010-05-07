@@ -207,6 +207,19 @@ static void readpost(void)
 		ts_pop(NULL);
 		o_call(argc, bt, 4 | BT_SIGNED);
 		ts_push_bt(4 | BT_SIGNED);
+		return;
+	}
+	if (!tok_jmp(TOK2("++"))) {
+		struct type *t = &ts[nts - 1];
+		o_tmpcopy();
+		o_load();
+		o_tmpswap();
+		o_tmpcopy();
+		o_num(1, 4);
+		o_add();
+		o_assign(t->bt);
+		o_tmpdrop(1);
+		return;
 	}
 }
 
@@ -230,10 +243,19 @@ static void readpre(void)
 		o_deref(TYPE_BT(&type));
 		return;
 	}
+	if (!tok_jmp(TOK2("++"))) {
+		struct type *t = &ts[nts - 1];
+		readpost();
+		o_tmpcopy();
+		o_num(1, 4);
+		o_add();
+		o_assign(t->bt);
+		return;
+	}
 	readpost();
 }
 
-static void shifts(int n)
+static int shifts(int n)
 {
 	int i = -1;
 	while (i++ < 16)
@@ -286,19 +308,33 @@ static void readadd(void)
 	}
 }
 
-static void readcexpr(void)
+static void readcmp(void)
 {
 	readadd();
-	if (!tok_jmp('?')) {
-		long l2;
-		long l1 = o_jzstub();
+	if (!tok_jmp('<')) {
 		readadd();
-		l2 = o_jmpstub();
+		ts_pop(NULL);
+		ts_pop(NULL);
+		o_lt();
+		ts_push_bt(4 | BT_SIGNED);
+	}
+}
+
+static void readcexpr(void)
+{
+	readcmp();
+	if (!tok_jmp('?')) {
+		long l1, l2;
+		l1 = o_jz(0);
+		ts_pop(NULL);
+		readcmp();
+		l2 = o_jmp(0);
+		ts_pop(NULL);
 		tok_expect(':');
 		o_filljmp(l1);
+		readcmp();
 		/* this is needed to fix tmp stack position */
-		o_droptmp(1);
-		readadd();
+		o_tmpjoin();
 		o_filljmp(l2);
 	}
 }
@@ -308,14 +344,23 @@ static void readexpr(void)
 	readcexpr();
 	if (!tok_jmp('=')) {
 		readexpr();
-		o_assign(4 | BT_SIGNED);
+		o_assign(TYPE_BT(&ts[nts - 1]));
 	}
+}
+
+static void readestmt(void)
+{
+	do {
+		o_tmpdrop(-1);
+		nts = 0;
+		readexpr();
+	} while (!tok_jmp(','));
 }
 
 static void readstmt(void)
 {
 	struct type base = {0};
-	o_droptmp(-1);
+	o_tmpdrop(-1);
 	nts = 0;
 	if (!tok_jmp('{')) {
 		while (tok_jmp('}'))
@@ -345,8 +390,8 @@ static void readstmt(void)
 			ts_pop(NULL);
 			ts_push_bt(TYPE_BT(t));
 			o_assign(TYPE_BT(t));
-			tok_expect(';');
 		}
+		tok_expect(';');
 		return;
 	}
 	if (!tok_jmp(TOK_IF)) {
@@ -354,10 +399,10 @@ static void readstmt(void)
 		tok_expect('(');
 		readexpr();
 		tok_expect(')');
-		l1 = o_jzstub();
+		l1 = o_jz(0);
 		readstmt();
 		if (!tok_jmp(TOK_ELSE)) {
-			l2 = o_jmpstub();
+			l2 = o_jmp(0);
 			o_filljmp(l1);
 			readstmt();
 			o_filljmp(l2);
@@ -372,10 +417,33 @@ static void readstmt(void)
 		tok_expect('(');
 		readexpr();
 		tok_expect(')');
-		l2 = o_jzstub();
+		l2 = o_jz(0);
 		readstmt();
 		o_jz(l1);
 		o_filljmp(l2);
+		return;
+	}
+	if (!tok_jmp(TOK_FOR)) {
+		long check, jump, end, body;
+		tok_expect('(');
+		if (tok_see() != ';')
+			readestmt();
+		tok_expect(';');
+		check = o_mklabel();
+		if (tok_see() != ';')
+			readestmt();
+		tok_expect(';');
+		end = o_jz(0);
+		body = o_jmp(0);
+		jump = o_mklabel();
+		if (tok_see() != ')')
+			readestmt();
+		tok_expect(')');
+		o_jmp(check);
+		o_filljmp(body);
+		readstmt();
+		o_jmp(jump);
+		o_filljmp(end);
 		return;
 	}
 	if (!tok_jmp(TOK_RETURN)) {
@@ -386,7 +454,7 @@ static void readstmt(void)
 		o_ret(4 | BT_SIGNED);
 		return;
 	}
-	readexpr();
+	readestmt();
 	tok_expect(';');
 }
 
