@@ -34,6 +34,20 @@ static struct {
 	{"sizeof", TOK_SIZEOF},
 };
 
+static char *tok3[] = {
+	"<<", ">>", "++", "<<=", ">>=", "...", "+=", "-=", "*=", "/=",
+	"%=", "|=", "&=", "^=", "&&", "||", "==", "!=", "<=", ">="
+};
+
+static int get_tok3(int num)
+{
+	int i;
+	for (i = 0; i < ARRAY_SIZE(tok3); i++)
+		if (num == TOK3(tok3[i]))
+			return num;
+	return 0;
+}
+
 static int id_char(int c)
 {
 	return isalnum(c) || c == '_';
@@ -41,6 +55,7 @@ static int id_char(int c)
 
 int tok_get(void)
 {
+	int num;
 	if (next != -1) {
 		int tok = next;
 		next = -1;
@@ -68,7 +83,15 @@ int tok_get(void)
 				return kwds[i].id;
 		return TOK_NAME;
 	}
-	if (strchr(";,{}()[]*&=+-/?:", buf[cur]))
+	if ((num = get_tok3(TOK3(buf + cur)))) {
+		cur += 3;
+		return num;
+	}
+	if ((num = get_tok3(TOK2(buf + cur)))) {
+		cur += 2;
+		return num;
+	}
+	if (strchr(";,{}()[]<>*&!=+-/?:", buf[cur]))
 		return buf[cur++];
 	return -1;
 }

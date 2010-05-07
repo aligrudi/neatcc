@@ -2,6 +2,9 @@
 #define NAMELEN		(1 << 7)
 #define ARRAY_SIZE(a)	(sizeof(a) / sizeof((a)[0]))
 
+#define TOK2(a)		((a)[0] << 16 | (a)[1] << 8)
+#define TOK3(a)		((a)[0] << 16 | (a)[1] << 8 | (a)[2])
+
 enum tok {
 	TOK_EOF,
 	TOK_NAME = 256,
