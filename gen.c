@@ -23,6 +23,7 @@
 #define SUB_R2R		0x29
 #define SHX_REG		0xd3
 #define CMP_R2R		0x38
+#define LEA_M2R		0x8d
 
 #define TMP_BT(t)		((t)->type == TMP_ADDR ? 8 : (t)->bt)
 
@@ -305,9 +306,7 @@ void o_func_end(void)
 
 void o_local(long addr, unsigned bt)
 {
-	os("\x48\x89\xe8", 3);		/* mov %rbp, %rax */
-	os("\x48\x05", 2);		/* add $addr, %rax */
-	oi(-addr, 4);
+	memop(LEA_M2R, R_RAX, R_RBP, -addr, 8);
 	tmp_push(TMP_ADDR, bt);
 }
 
