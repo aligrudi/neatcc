@@ -77,11 +77,12 @@ void out_func_end(char *buf, int len)
 	sec->sym->st_size = len;
 }
 
-void out_rela(char *name, int off)
+void out_rela(char *name, int off, int rel)
 {
 	Elf64_Rela *rela = &sec->rela[sec->nrela++];
 	rela->r_offset = off;
-	rela->r_info = ELF64_R_INFO(sym_find(name), R_X86_64_32);
+	rela->r_info = ELF64_R_INFO(sym_find(name),
+				rel ? R_X86_64_PC32 : R_X86_64_32);
 }
 
 void out_write(int fd)

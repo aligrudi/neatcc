@@ -176,6 +176,16 @@ static void readprimary(void)
 	}
 }
 
+void arrayderef(unsigned bt)
+{
+	if (BT_SZ(bt) > 1) {
+		o_num(BT_SZ(bt), 4);
+		o_mul();
+	}
+	o_add();
+	o_deref(bt);
+}
+
 static void readpost(void)
 {
 	readprimary();
@@ -185,7 +195,7 @@ static void readpost(void)
 		readexpr();
 		ts_pop(NULL);
 		tok_expect(']');
-		o_arrayderef(TYPE_DEREF_BT(&t1));
+		arrayderef(TYPE_DEREF_BT(&t1));
 		t1.ptr--;
 		ts_push(&t1);
 		return;
@@ -328,12 +338,12 @@ static void readcexpr(void)
 		l1 = o_jz(0);
 		ts_pop(NULL);
 		readcmp();
+		o_tmpfork();
 		l2 = o_jmp(0);
 		ts_pop(NULL);
 		tok_expect(':');
 		o_filljmp(l1);
 		readcmp();
-		/* this is needed to fix tmp stack position */
 		o_tmpjoin();
 		o_filljmp(l2);
 	}
