@@ -361,32 +361,72 @@ static void readadd(void)
 	}
 }
 
+static void cmp(void (*op)(void))
+{
+	readadd();
+	ts_pop(NULL);
+	ts_pop(NULL);
+	op();
+	ts_push_bt(4 | BT_SIGNED);
+}
+
 static void readcmp(void)
 {
 	readadd();
 	if (!tok_jmp('<')) {
-		readadd();
-		ts_pop(NULL);
-		ts_pop(NULL);
-		o_lt();
-		ts_push_bt(4 | BT_SIGNED);
+		cmp(o_lt);
+		return;
+	}
+	if (!tok_jmp('>')) {
+		cmp(o_gt);
+		return;
+	}
+	if (!tok_jmp(TOK2("<="))) {
+		cmp(o_le);
+		return;
+	}
+	if (!tok_jmp(TOK2(">="))) {
+		cmp(o_ge);
+		return;
+	}
+}
+
+static void eq(void (*op)(void))
+{
+	readcmp();
+	ts_pop(NULL);
+	ts_pop(NULL);
+	op();
+	ts_push_bt(4 | BT_SIGNED);
+}
+
+static void readeq(void)
+{
+	readcmp();
+	if (!tok_jmp(TOK2("=="))) {
+		eq(o_eq);
+		return;
+	}
+	if (!tok_jmp(TOK2("!="))) {
+		eq(o_neq);
+		return;
 	}
 }
 
 static void readcexpr(void)
 {
-	readcmp();
+	readeq();
 	if (!tok_jmp('?')) {
 		long l1, l2;
 		l1 = o_jz(0);
 		ts_pop(NULL);
-		readcmp();
+		readeq();
 		o_tmpfork();
 		l2 = o_jmp(0);
 		ts_pop(NULL);
 		tok_expect(':');
 		o_filljmp(l1);
-		readcmp();
+		readeq();
 		o_tmpjoin();
 		o_filljmp(l2);
 	}

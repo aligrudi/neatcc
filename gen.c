@@ -509,6 +509,31 @@ void o_lt(void)
 	o_cmp(0x92, 0x9c);
 }
 
+void o_gt(void)
+{
+	o_cmp(0x97, 0x9f);
+}
+
+void o_le(void)
+{
+	o_cmp(0x96, 0x9e);
+}
+
+void o_ge(void)
+{
+	o_cmp(0x93, 0x9d);
+}
+
+void o_eq(void)
+{
+	o_cmp(0x94, 0x94);
+}
+
+void o_neq(void)
+{
+	o_cmp(0x95, 0x95);
+}
+
 void o_func_end(void)
 {
 	int i;

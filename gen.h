@@ -26,7 +26,13 @@ void o_div(void);
 void o_mod(void);
 void o_shl(void);
 void o_shr(void);
+
 void o_lt(void);
+void o_gt(void);
+void o_le(void);
+void o_ge(void);
+void o_eq(void);
+void o_neq(void);
 
 long o_mklocal(int size);
 long o_arg(int i, unsigned bt);
