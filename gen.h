@@ -26,6 +26,8 @@ void o_div(void);
 void o_mod(void);
 void o_shl(void);
 void o_shr(void);
+void o_neg(void);
+void o_not(void);
 
 void o_lt(void);
 void o_gt(void);

@@ -282,6 +282,16 @@ static void readpre(void)
 		ts_push_bt(4 | BT_SIGNED);
 		return;
 	}
+	if (!tok_jmp('-')) {
+		readpost();
+		o_neg();
+		return;
+	}
+	if (!tok_jmp('~')) {
+		readpost();
+		o_not();
+		return;
+	}
 	if (!tok_jmp(TOK2("++"))) {
 		inc_pre(o_add);
 		return;

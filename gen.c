@@ -37,6 +37,10 @@
 #define SHX_REG		0xd3
 #define CMP_R2R		0x39
 #define LEA_M2R		0x8d
+#define NEG_REG		0xf7
+#define NOT_REG		0xf7
+#define CALL_REG	0xff
+#define MUL_A2X		0xf7
 
 #define TMP_BT(t)		((t)->flags & TMP_ADDR ? 8 : (t)->bt)
 
@@ -401,8 +405,6 @@ void o_shr(void)
 	shx(7, 5);
 }
 
-#define MUL_A2X		0xf7
-
 static unsigned bt_op(unsigned bt1, unsigned bt2)
 {
 	unsigned s1 = BT_SZ(bt1);
@@ -533,6 +535,24 @@ void o_neq(void)
 	o_cmp(0x95, 0x95);
 }
 
+void o_neg(void)
+{
+	struct tmp *t = &tmp[ntmp - 1];
+	int reg = t->flags & LOC_REG ? t->addr : reg_get();
+	tmp_pop(1, reg);
+	regop(NEG_REG, 3, reg, t->bt);
+	tmp_push_reg(t->bt, reg);
+}
+
+void o_not(void)
+{
+	struct tmp *t = &tmp[ntmp - 1];
+	int reg = t->flags & LOC_REG ? t->addr : reg_get();
+	tmp_pop(1, reg);
+	regop(NOT_REG, 2, reg, t->bt);
+	tmp_push_reg(t->bt, reg);
+}
+
 void o_func_end(void)
 {
 	int i;
@@ -603,8 +623,6 @@ void o_filljmp(long addr)
 {
 	putint(buf + addr, codeaddr() - addr - 4, 4);
 }
-
-#define CALL_REG	0xff
 
 void o_call(int argc, unsigned *bt, unsigned ret_bt)
 {
