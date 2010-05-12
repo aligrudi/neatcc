@@ -22,6 +22,8 @@ void o_call(int argc, unsigned *bt, unsigned ret_vs);
 void o_add(void);
 void o_sub(void);
 void o_mul(void);
+void o_div(void);
+void o_mod(void);
 void o_shl(void);
 void o_shr(void);
 void o_lt(void);

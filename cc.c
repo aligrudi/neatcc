@@ -320,17 +320,40 @@ static void ts_binop(void (*o_sth)(void))
 	}
 }
 
-static void readadd(void)
+static void readmul(void)
 {
 	readpre();
 	while (1) {
-		if (!tok_jmp('+')) {
+		if (!tok_jmp('*')) {
 			readpre();
+			ts_binop(o_mul);
+			continue;
+		}
+		if (!tok_jmp('/')) {
+			readpre();
+			ts_binop(o_div);
+			continue;
+		}
+		if (!tok_jmp('%')) {
+			readpre();
+			ts_binop(o_mod);
+			continue;
+		}
+		break;
+	}
+}
+
+static void readadd(void)
+{
+	readmul();
+	while (1) {
+		if (!tok_jmp('+')) {
+			readmul();
 			ts_binop(o_add);
 			continue;
 		}
 		if (!tok_jmp('-')) {
-			readpre();
+			readmul();
 			ts_binop(o_sub);
 			continue;
 		}

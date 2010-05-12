@@ -404,19 +404,48 @@ void o_shr(void)
 
 #define MUL_A2X		0xf7
 
-void o_mul(void)
+static unsigned bt_op(unsigned bt1, unsigned bt2)
+{
+	unsigned s1 = BT_SZ(bt1);
+	unsigned s2 = BT_SZ(bt2);
+	return (bt1 | bt2) & BT_SIGNED | (s1 > s2 ? s1 : s2);
+}
+
+void mulop(int uop, int sop, int reg)
 {
 	struct tmp *t1 = &tmp[ntmp - 1];
-	int bt1, bt2;
-	int reg;
-	if (t1->flags & LOC_REG && t1->addr != R_RAX)
+	struct tmp *t2 = &tmp[ntmp - 2];
+	int bt1 = TMP_BT(t1);
+	int bt2 = TMP_BT(t2);
+	if (t1->flags & LOC_REG && t1->addr != R_RAX && t1->addr != R_RDX)
 		reg = t1->addr;
-	else
-		reg = reg_other(R_RAX);
-	bt1 = tmp_pop(1, reg);
-	bt2 = tmp_pop(1, R_RAX);
-	regop(MUL_A2X, bt2 & BT_SIGNED ? 5 : 4, reg, bt2);
-	tmp_push_reg(bt2, R_RAX);
+	reg_for(reg, t1);
+	tmp_reg(t1, reg, 1);
+	reg_for(R_RAX, t2);
+	tmp_reg(t2, R_RAX, 1);
+	if (reg != R_RDX)
+		reg_free(R_RDX);
+	o_tmpdrop(2);
+	regop(MUL_A2X, bt2 & BT_SIGNED ? sop : uop, reg, bt2);
+	return bt_op(bt1, bt2);
+}
+
+void o_mul(void)
+{
+	int bt = mulop(4, 5, R_RDX);
+	tmp_push_reg(bt, R_RAX);
+}
+
+void o_div(void)
+{
+	int bt = mulop(6, 7, R_RCX);
+	tmp_push_reg(bt, R_RAX);
+}
+
+void o_mod(void)
+{
+	int bt = mulop(6, 7, R_RCX);
+	tmp_push_reg(bt, R_RDX);
 }
 
 void o_addr(void)
@@ -443,7 +472,7 @@ static int binop(int *r1, int *r2)
 	*r2 = t2->flags & LOC_REG ? t2->addr : reg_other(*r1);
 	bt1 = tmp_pop(1, *r1);
 	bt2 = tmp_pop(1, *r2);
-	return BT_SZ(bt1) > BT_SZ(bt2) ? bt1 : bt2;
+	return bt_op(bt1, bt2);
 }
 
 void o_add(void)
