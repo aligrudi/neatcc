@@ -186,6 +186,20 @@ void arrayderef(unsigned bt)
 	o_deref(bt);
 }
 
+static void inc_post(void (*op)(void))
+{
+	struct type *t = &ts[nts - 1];
+	o_tmpcopy();
+	o_load();
+	o_tmpswap();
+	o_tmpcopy();
+	o_num(1, 4);
+	op();
+	o_assign(t->bt);
+	o_tmpdrop(1);
+	return;
+}
+
 static void readpost(void)
 {
 	readprimary();
@@ -220,17 +234,24 @@ static void readpost(void)
 		return;
 	}
 	if (!tok_jmp(TOK2("++"))) {
-		struct type *t = &ts[nts - 1];
-		o_tmpcopy();
-		o_load();
-		o_tmpswap();
-		o_tmpcopy();
-		o_num(1, 4);
-		o_add();
-		o_assign(t->bt);
-		o_tmpdrop(1);
+		inc_post(o_add);
 		return;
 	}
+	if (!tok_jmp(TOK2("--"))) {
+		inc_post(o_sub);
+		return;
+	}
+}
+
+static void inc_pre(void (*op)(void))
+{
+	struct type *t = &ts[nts - 1];
+	readpost();
+	o_tmpcopy();
+	o_num(1, 4);
+	op();
+	o_assign(t->bt);
+	return;
 }
 
 static void readpre(void)
@@ -254,12 +275,11 @@ static void readpre(void)
 		return;
 	}
 	if (!tok_jmp(TOK2("++"))) {
-		struct type *t = &ts[nts - 1];
-		readpost();
-		o_tmpcopy();
-		o_num(1, 4);
-		o_add();
-		o_assign(t->bt);
+		inc_pre(o_add);
+		return;
+	}
+	if (!tok_jmp(TOK2("--"))) {
+		inc_pre(o_sub);
 		return;
 	}
 	readpost();
