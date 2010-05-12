@@ -32,15 +32,18 @@
 #define MOV_M2R		0x8b
 #define MOV_R2X		0x89
 #define MOV_I2R		0xc7
-#define ADD_R2R		0x01
-#define SUB_R2R		0x29
+#define ADD_R2X		0x03
+#define SUB_R2X		0x2b
 #define SHX_REG		0xd3
-#define CMP_R2R		0x39
+#define CMP_R2X		0x3b
 #define LEA_M2R		0x8d
 #define NEG_REG		0xf7
 #define NOT_REG		0xf7
 #define CALL_REG	0xff
 #define MUL_A2X		0xf7
+#define XOR_R2X		0x33
+#define AND_R2X		0x23
+#define OR_R2X		0x0b
 
 #define TMP_BT(t)		((t)->flags & TMP_ADDR ? 8 : (t)->bt)
 
@@ -464,40 +467,61 @@ void o_ret(unsigned bt)
 	ret[nret++] = o_jmp(0);
 }
 
-static int binop(int *r1, int *r2)
+static int binop(int op, int *reg)
 {
 	struct tmp *t1 = &tmp[ntmp - 1];
 	struct tmp *t2 = &tmp[ntmp - 2];
-	unsigned bt1, bt2;
-	*r1 = t1->flags & LOC_REG ? t1->addr : reg_get();
-	*r2 = t2->flags & LOC_REG ? t2->addr : reg_other(*r1);
-	bt1 = tmp_pop(1, *r1);
-	bt2 = tmp_pop(1, *r2);
-	return bt_op(bt1, bt2);
+	int r1;
+	unsigned bt1, bt2, bt;
+	r1 = t1->flags & LOC_REG ? t1->addr : reg_get();
+	*reg = t2->flags & LOC_REG ? t2->addr : reg_other(r1);
+	bt1 = tmp_pop(1, r1);
+	bt2 = tmp_pop(1, *reg);
+	bt = bt_op(bt1, bt2);
+	regop(op, *reg, r1, bt);
+	return bt;
 }
 
 void o_add(void)
 {
-	int r1, r2;
-	int bt = binop(&r1, &r2);
-	regop(ADD_R2R, r1, r2, bt);
-	tmp_push_reg(bt, r2);
+	int reg;
+	int bt = binop(ADD_R2X, &reg);
+	tmp_push_reg(bt, reg);
+}
+
+void o_xor(void)
+{
+	int reg;
+	int bt = binop(XOR_R2X, &reg);
+	tmp_push_reg(bt, reg);
+}
+
+void o_and(void)
+{
+	int reg;
+	int bt = binop(AND_R2X, &reg);
+	tmp_push_reg(bt, reg);
+}
+
+void o_or(void)
+{
+	int reg;
+	int bt = binop(OR_R2X, &reg);
+	tmp_push_reg(bt, reg);
 }
 
 void o_sub(void)
 {
-	int r1, r2;
-	int bt = binop(&r1, &r2);
-	regop(SUB_R2R, r1, r2, bt);
-	tmp_push_reg(bt, r2);
+	int reg;
+	int bt = binop(SUB_R2X, &reg);
+	tmp_push_reg(bt, reg);
 }
 
 static void o_cmp(int uop, int sop)
 {
 	char set[] = "\x0f\x00\xc0";
-	int r1, r2;
-	int bt = binop(&r1, &r2);
-	regop(CMP_R2R, r1, r2, bt);
+	int reg;
+	int bt = binop(CMP_R2X, &reg);
 	set[1] = bt & BT_SIGNED ? sop : uop;
 	reg_free(R_RAX);
 	os(set, 3);			/* setl %al */

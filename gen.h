@@ -28,6 +28,9 @@ void o_shl(void);
 void o_shr(void);
 void o_neg(void);
 void o_not(void);
+void o_or(void);
+void o_xor(void);
+void o_and(void);
 
 void o_lt(void);
 void o_gt(void);

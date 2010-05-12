@@ -312,11 +312,32 @@ static int shifts(int n)
 	return i;
 }
 
+static unsigned bt_op(unsigned bt1, unsigned bt2)
+{
+	unsigned s1 = BT_SZ(bt1);
+	unsigned s2 = BT_SZ(bt2);
+	return (bt1 | bt2) & BT_SIGNED | (s1 > s2 ? s1 : s2);
+}
+
 static void ts_binop(void (*o_sth)(void))
 {
 	struct type t1, t2;
 	ts_pop(&t1);
 	ts_pop(&t2);
+	o_sth();
+	ts_push_bt(bt_op(TYPE_BT(&t1), TYPE_BT(&t2)));
+}
+
+static void ts_binop_add(void (*o_sth)(void))
+{
+	struct type t1, t2;
+	ts_pop(&t1);
+	ts_pop(&t2);
+	if (!t1.ptr && !t2.ptr) {
+		o_sth();
+		ts_push_bt(bt_op(TYPE_BT(&t1), TYPE_BT(&t2)));
+		return;
+	}
 	if (t1.ptr && !t2.ptr) {
 		struct type t = t2;
 		t2 = t1;
@@ -367,12 +388,12 @@ static void readadd(void)
 	while (1) {
 		if (!tok_jmp('+')) {
 			readmul();
-			ts_binop(o_add);
+			ts_binop_add(o_add);
 			continue;
 		}
 		if (!tok_jmp('-')) {
 			readmul();
-			ts_binop(o_sub);
+			ts_binop_add(o_sub);
 			continue;
 		}
 		break;
@@ -454,20 +475,47 @@ static void readeq(void)
 	}
 }
 
-static void readcexpr(void)
+static void readbitand(void)
 {
 	readeq();
+	while (!tok_jmp('&')) {
+		readeq();
+		ts_binop(o_and);
+	}
+}
+
+static void readxor(void)
+{
+	readbitand();
+	while (!tok_jmp('^')) {
+		readbitand();
+		ts_binop(o_xor);
+	}
+}
+
+static void readbitor(void)
+{
+	readxor();
+	while (!tok_jmp('|')) {
+		readxor();
+		ts_binop(o_or);
+	}
+}
+
+static void readcexpr(void)
+{
+	readbitor();
 	if (!tok_jmp('?')) {
 		long l1, l2;
 		l1 = o_jz(0);
 		ts_pop(NULL);
-		readeq();
+		readbitor();
 		o_tmpfork();
 		l2 = o_jmp(0);
 		ts_pop(NULL);
 		tok_expect(':');
 		o_filljmp(l1);
-		readeq();
+		readbitor();
 		o_tmpjoin();
 		o_filljmp(l2);
 	}
