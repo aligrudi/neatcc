@@ -156,7 +156,7 @@ static void readprimary(void)
 	}
 	if (!tok_jmp(TOK_NAME)) {
 		for (i = 0; i < nlocals; i++) {
-			struct type *t = &locals[nlocals - 1].type;
+			struct type *t = &locals[i].type;
 			if (!strcmp(locals[i].name, tok_id())) {
 				ts_push(t);
 				o_local(locals[i].addr, TYPE_BT(t));
