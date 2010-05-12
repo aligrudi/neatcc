@@ -91,7 +91,7 @@ int tok_get(void)
 		cur += 2;
 		return num;
 	}
-	if (strchr(";,{}()[]<>*&!=+-/%?:|^", buf[cur]))
+	if (strchr(";,{}()[]<>*&!=+-/%?:|^~", buf[cur]))
 		return buf[cur++];
 	return -1;
 }
