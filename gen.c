@@ -378,28 +378,27 @@ void o_load(void)
 	tmp_reg(t, reg, 1);
 }
 
-void o_shl(void)
+static void shx(int uop, int sop)
 {
 	struct tmp *t = &tmp[ntmp - 2];
-	unsigned reg;
 	unsigned bt;
+	unsigned reg = t->addr;
+	if (!(t->flags & LOC_REG) || t->addr == R_RCX)
+		reg = reg_other(R_RCX);
 	tmp_pop(1, R_RCX);
-	reg = (t->flags & LOC_REG) ? t->addr : reg_get();
 	bt = tmp_pop(1, reg);
-	regop(SHX_REG, 4, reg, bt);
+	regop(SHX_REG, bt & BT_SIGNED ? sop : uop, reg, bt);
 	tmp_push_reg(bt, reg);
+}
+
+void o_shl(void)
+{
+	shx(4, 4);
 }
 
 void o_shr(void)
 {
-	struct tmp *t = &tmp[ntmp - 2];
-	unsigned reg;
-	unsigned bt;
-	tmp_pop(1, R_RCX);
-	reg = (t->flags & LOC_REG) ? t->addr : reg_get();
-	bt = tmp_pop(1, reg);
-	regop(SHX_REG, bt & BT_SIGNED ? 5 : 7, reg, bt);
-	tmp_push_reg(bt, reg);
+	shx(7, 5);
 }
 
 #define MUL_A2X		0xf7
