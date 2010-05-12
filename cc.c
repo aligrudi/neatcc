@@ -274,6 +274,15 @@ static void readpre(void)
 		o_deref(TYPE_BT(&type));
 		return;
 	}
+	if (!tok_jmp('!')) {
+		struct type type;
+		readpost();
+		ts_pop(&type);
+		o_num(0, TYPE_BT(&type));
+		o_eq();
+		ts_push_bt(4 | BT_SIGNED);
+		return;
+	}
 	if (!tok_jmp(TOK2("++"))) {
 		inc_pre(o_add);
 		return;
