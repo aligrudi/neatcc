@@ -370,9 +370,32 @@ static void readadd(void)
 	}
 }
 
-static void cmp(void (*op)(void))
+static void shift(void (*op)(void))
+{
+	struct type t;
+	readadd();
+	ts_pop(NULL);
+	ts_pop(&t);
+	op();
+	ts_push_bt(TYPE_BT(&t));
+}
+
+static void readshift(void)
 {
 	readadd();
+	if (!tok_jmp(TOK2("<<"))) {
+		shift(o_shl);
+		return;
+	}
+	if (!tok_jmp(TOK2(">>"))) {
+		shift(o_shr);
+		return;
+	}
+}
+
+static void cmp(void (*op)(void))
+{
+	readshift();
 	ts_pop(NULL);
 	ts_pop(NULL);
 	op();
@@ -381,7 +404,7 @@ static void cmp(void (*op)(void))
 
 static void readcmp(void)
 {
-	readadd();
+	readshift();
 	if (!tok_jmp('<')) {
 		cmp(o_lt);
 		return;
