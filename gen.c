@@ -60,6 +60,11 @@ static int tmpsp;
 static struct tmp *regs[NREGS];
 static int tmpregs[] = {R_RAX, R_RDI, R_RSI, R_RDX, R_RCX, R_R8, R_R9};
 
+#define MAXRET			(1 << 8)
+
+static long ret[MAXRET];
+static int nret;
+
 static void putint(char *s, long n, int l)
 {
 	while (l--) {
@@ -349,6 +354,7 @@ void o_func_beg(char *name)
 	ntmp = 0;
 	nnames = 0;
 	tmpsp = -1;
+	nret = 0;
 	memset(regs, 0, sizeof(regs));
 	os("\x48\x81\xec", 3);		/* sub $xxx, %rsp */
 	spsub_addr = codeaddr();
@@ -425,7 +431,7 @@ void o_ret(unsigned bt)
 		tmp_pop(1, R_RAX);
 	else
 		os("\x31\xc0", 2);	/* xor %eax, %eax */
-	os("\xc9\xc3", 2);		/* leave; ret; */
+	ret[nret++] = o_jmp(0);
 }
 
 static int binop(int *r1, int *r2)
@@ -476,6 +482,9 @@ void o_lt(void)
 
 void o_func_end(void)
 {
+	int i;
+	for (i = 0; i < nret; i++)
+		o_filljmp(ret[i]);
 	os("\xc9\xc3", 2);		/* leave; ret; */
 	putint(buf + spsub_addr, (maxsp + 7) & ~0x07, 4);
 	out_func_end(buf, cur - buf);
