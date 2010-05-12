@@ -251,7 +251,6 @@ static void inc_pre(void (*op)(void))
 	o_num(1, 4);
 	op();
 	o_assign(t->bt);
-	return;
 }
 
 static void readpre(void)
@@ -464,12 +463,50 @@ static void readcexpr(void)
 	}
 }
 
+static void opassign(void (*op)(void))
+{
+	unsigned bt = TYPE_BT(&ts[nts - 1]);
+	o_tmpcopy();
+	readexpr();
+	op();
+	o_assign(bt);
+}
+
 static void readexpr(void)
 {
 	readcexpr();
 	if (!tok_jmp('=')) {
 		readexpr();
 		o_assign(TYPE_BT(&ts[nts - 1]));
+		return;
+	}
+	if (!tok_jmp(TOK2("+="))) {
+		opassign(o_add);
+		return;
+	}
+	if (!tok_jmp(TOK2("-="))) {
+		opassign(o_sub);
+		return;
+	}
+	if (!tok_jmp(TOK2("*="))) {
+		opassign(o_mul);
+		return;
+	}
+	if (!tok_jmp(TOK2("/="))) {
+		opassign(o_div);
+		return;
+	}
+	if (!tok_jmp(TOK2("%="))) {
+		opassign(o_mod);
+		return;
+	}
+	if (!tok_jmp(TOK3("<<="))) {
+		opassign(o_shl);
+		return;
+	}
+	if (!tok_jmp(TOK3(">>="))) {
+		opassign(o_shr);
+		return;
 	}
 }
 
