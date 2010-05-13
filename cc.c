@@ -523,11 +523,11 @@ static void readcexpr(void)
 
 static void opassign(void (*op)(void))
 {
-	unsigned bt = TYPE_BT(&ts[nts - 1]);
 	o_tmpcopy();
 	readexpr();
 	op();
-	o_assign(bt);
+	ts_pop(NULL);
+	o_assign(TYPE_BT(&ts[nts - 1]));
 }
 
 static void readexpr(void)
@@ -535,6 +535,7 @@ static void readexpr(void)
 	readcexpr();
 	if (!tok_jmp('=')) {
 		readexpr();
+		ts_pop(NULL);
 		o_assign(TYPE_BT(&ts[nts - 1]));
 		return;
 	}
@@ -564,6 +565,18 @@ static void readexpr(void)
 	}
 	if (!tok_jmp(TOK3(">>="))) {
 		opassign(o_shr);
+		return;
+	}
+	if (!tok_jmp(TOK3("&="))) {
+		opassign(o_and);
+		return;
+	}
+	if (!tok_jmp(TOK3("|="))) {
+		opassign(o_or);
+		return;
+	}
+	if (!tok_jmp(TOK3("^="))) {
+		opassign(o_xor);
 		return;
 	}
 }
