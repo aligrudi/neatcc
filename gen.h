@@ -48,6 +48,7 @@ void o_tmpfork(void);
 void o_tmpjoin(void);
 long o_mklabel(void);
 long o_jz(long addr);
+long o_jnz(long addr);
 long o_jmp(long addr);
 void o_filljmp(long addr);
 

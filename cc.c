@@ -502,20 +502,76 @@ static void readbitor(void)
 	}
 }
 
+#define MAXCOND			(1 << 5)
+
+static void readand(void)
+{
+	long conds[MAXCOND];
+	int nconds = 0;
+	long passed;
+	int i;
+	readbitor();
+	if (tok_see() != TOK2("&&"))
+		return;
+	conds[nconds++] = o_jz(0);
+	ts_pop(NULL);
+	while (!tok_jmp(TOK2("&&"))) {
+		readbitor();
+		conds[nconds++] = o_jz(0);
+		ts_pop(NULL);
+	}
+	o_num(1, 4 | BT_SIGNED);
+	o_tmpfork();
+	passed = o_jmp(0);
+	for (i = 0; i < nconds; i++)
+		o_filljmp(conds[i]);
+	o_num(0, 4 | BT_SIGNED);
+	o_tmpjoin();
+	o_filljmp(passed);
+	ts_push_bt(4 | BT_SIGNED);
+}
+
+static void reador(void)
+{
+	long conds[MAXCOND];
+	int nconds = 0;
+	long failed;
+	int i;
+	readand();
+	if (tok_see() != TOK2("||"))
+		return;
+	conds[nconds++] = o_jnz(0);
+	ts_pop(NULL);
+	while (!tok_jmp(TOK2("||"))) {
+		readand();
+		conds[nconds++] = o_jnz(0);
+		ts_pop(NULL);
+	}
+	o_num(0, 4 | BT_SIGNED);
+	o_tmpfork();
+	failed = o_jmp(0);
+	for (i = 0; i < nconds; i++)
+		o_filljmp(conds[i]);
+	o_num(1, 4 | BT_SIGNED);
+	o_tmpjoin();
+	o_filljmp(failed);
+	ts_push_bt(4 | BT_SIGNED);
+}
+
 static void readcexpr(void)
 {
-	readbitor();
+	reador();
 	if (!tok_jmp('?')) {
 		long l1, l2;
 		l1 = o_jz(0);
 		ts_pop(NULL);
-		readbitor();
+		reador();
 		o_tmpfork();
 		l2 = o_jmp(0);
 		ts_pop(NULL);
 		tok_expect(':');
 		o_filljmp(l1);
-		readbitor();
+		reador();
 		o_tmpjoin();
 		o_filljmp(l2);
 	}

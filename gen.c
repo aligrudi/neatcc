@@ -44,6 +44,7 @@
 #define XOR_R2X		0x33
 #define AND_R2X		0x23
 #define OR_R2X		0x0b
+#define TEST_R2R	0x85
 
 #define R_BYTEMASK		(1 << R_RAX | 1 << R_RDX | 1 << R_RCX)
 #define TMP_BT(t)		((t)->flags & TMP_ADDR ? 8 : (t)->bt)
@@ -647,13 +648,25 @@ long o_mklabel(void)
 	return codeaddr();
 }
 
-long o_jz(long addr)
+static long jx(int x, long addr)
 {
-	tmp_pop(1, R_RAX);
-	os("\x48\x85\xc0", 3);		/* test %rax, %rax */
-	os("\x0f\x84", 2);		/* jz $addr */
+	char op[2] = {0x0f};
+	int bt = tmp_pop(1, R_RAX);
+	regop(TEST_R2R, R_RAX, R_RAX, BT_TMPBT(bt));
+	op[1] = x;
+	os(op, 2);		/* jx $addr */
 	oi(addr - codeaddr() - 4, 4);
 	return codeaddr() - 4;
+}
+
+long o_jz(long addr)
+{
+	return jx(0x84, addr);
+}
+
+long o_jnz(long addr)
+{
+	return jx(0x85, addr);
 }
 
 long o_jmp(long addr)
