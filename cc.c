@@ -277,8 +277,7 @@ static void readpre(void)
 		struct type type;
 		readpost();
 		ts_pop(&type);
-		o_num(0, TYPE_BT(&type));
-		o_eq();
+		o_lnot();
 		ts_push_bt(4 | BT_SIGNED);
 		return;
 	}

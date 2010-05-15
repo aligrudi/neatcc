@@ -38,6 +38,7 @@ void o_le(void);
 void o_ge(void);
 void o_eq(void);
 void o_neq(void);
+void o_lnot(void);
 
 long o_mklocal(int size);
 long o_arg(int i, unsigned bt);

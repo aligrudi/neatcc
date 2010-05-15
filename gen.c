@@ -81,6 +81,9 @@ static int tmpregs[] = {R_RAX, R_RDI, R_RSI, R_RDX, R_RCX, R_R8, R_R9};
 static long ret[MAXRET];
 static int nret;
 
+static long cmp_last;
+static long cmp_setl;
+
 static void putint(char *s, long n, int l)
 {
 	while (l--) {
@@ -387,6 +390,7 @@ void o_func_beg(char *name)
 	nnames = 0;
 	tmpsp = -1;
 	nret = 0;
+	cmp_last = -1;
 	memset(regs, 0, sizeof(regs));
 	os("\x48\x81\xec", 3);		/* sub $xxx, %rsp */
 	spsub_addr = codeaddr();
@@ -545,9 +549,11 @@ static void o_cmp(int uop, int sop)
 	int bt = binop(CMP_R2X, &reg);
 	set[1] = bt & BT_SIGNED ? sop : uop;
 	reg_free(R_RAX);
+	cmp_setl = codeaddr();
 	os(set, 3);			/* setl %al */
 	os("\x0f\xb6\xc0", 3);		/* movzbl %al, %eax */
 	tmp_push_reg(4 | BT_SIGNED, R_RAX);
+	cmp_last = codeaddr();
 }
 
 void o_lt(void)
@@ -578,6 +584,16 @@ void o_eq(void)
 void o_neq(void)
 {
 	o_cmp(0x95, 0x95);
+}
+
+void o_lnot(void)
+{
+	if (cmp_last == codeaddr()) {
+		buf[cmp_setl + 1] ^= 0x10;
+	} else {
+		o_num(0, 4 | BT_SIGNED);
+		o_eq();
+	}
 }
 
 void o_neg(void)
@@ -651,22 +667,40 @@ long o_mklabel(void)
 static long jx(int x, long addr)
 {
 	char op[2] = {0x0f};
-	int bt = tmp_pop(1, R_RAX);
-	regop(TEST_R2R, R_RAX, R_RAX, BT_TMPBT(bt));
 	op[1] = x;
 	os(op, 2);		/* jx $addr */
 	oi(addr - codeaddr() - 4, 4);
 	return codeaddr() - 4;
 }
 
+static long jxtest(int x, long addr)
+{
+	int bt = tmp_pop(1, R_RAX);
+	regop(TEST_R2R, R_RAX, R_RAX, BT_TMPBT(bt));
+	return jx(x, addr);
+}
+
+static long jxcmp(long addr, int inv)
+{
+	int x;
+	if (codeaddr() != cmp_last)
+		return -1;
+	o_tmpdrop(1);
+	cur = buf + cmp_setl;
+	x = (unsigned char) buf[cmp_setl + 1];
+	return jx((inv ? x : x ^ 0x01) & ~0x10, addr);
+}
+
 long o_jz(long addr)
 {
-	return jx(0x84, addr);
+	long ret = jxcmp(addr, 0);
+	return ret != -1 ? ret : jxtest(0x84, addr);
 }
 
 long o_jnz(long addr)
 {
-	return jx(0x85, addr);
+	long ret = jxcmp(addr, 1);
+	return ret != -1 ? ret : jxtest(0x85, addr);
 }
 
 long o_jmp(long addr)
