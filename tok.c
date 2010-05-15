@@ -1,5 +1,6 @@
 #include <ctype.h>
 #include <unistd.h>
+#include <stdlib.h>
 #include <string.h>
 #include "tok.h"
 
@@ -67,8 +68,19 @@ int tok_get(void)
 		return TOK_EOF;
 	if (isdigit(buf[cur])) {
 		char *s = name;
-		while (cur < len && isdigit(buf[cur]))
+		while (cur < len && isalnum(buf[cur]))
 			*s++ = buf[cur++];
+		*s = '\0';
+		return TOK_NUM;
+	}
+	if (buf[cur] == '\'') {
+		char *s = name;
+		*s++ = buf[cur++];
+		if (buf[cur] == '\\')
+			*s++ = buf[cur++];
+		while (cur < len && buf[cur] != '\'')
+			*s++ = buf[cur++];
+		*s++ = buf[cur++];
 		*s = '\0';
 		return TOK_NUM;
 	}
@@ -93,6 +105,39 @@ int tok_get(void)
 	}
 	if (strchr(";,{}()[]<>*&!=+-/%?:|^~", buf[cur]))
 		return buf[cur++];
+	return -1;
+}
+
+static char *esc_code = "abefnrtv";
+static char *esc = "\a\b\e\f\n\r\t\v";
+
+long tok_num(void)
+{
+	if (name[0] == '0' && name[1] == '1') {
+		char *s = name + 2;
+		long result = 0;
+		while (*s) {
+			result <<= 4;
+			if (*s >= '0' && *s <= '9')
+				result |= *s - '0';
+			else
+				result |= 10 + tolower(*s) - 'a';
+			s++;
+		}
+	}
+	if (isdigit(name[0]))
+		return atoi(name);
+	if (name[0] == '\'') {
+		if (name[1] != '\\')
+			return name[1];
+		if (strchr(esc_code, name[2]))
+			return esc[strchr(esc_code, name[2]) - esc_code];
+		if (name[2] == 'x')
+			;
+		if (isdigit(name[2]))
+			;
+		return name[2];
+	}
 	return -1;
 }
 

@@ -151,7 +151,7 @@ static void readprimary(void)
 	int i;
 	if (!tok_jmp(TOK_NUM)) {
 		ts_push_bt(4 | BT_SIGNED);
-		o_num(atoi(tok_id()), 4 | BT_SIGNED);
+		o_num(tok_num(), 4 | BT_SIGNED);
 		return;
 	}
 	if (!tok_jmp(TOK_NAME)) {
@@ -664,7 +664,7 @@ static void readstmt(void)
 		strcpy(name, tok_id());
 		if (!tok_jmp('[')) {
 			tok_expect(TOK_NUM);
-			n = atoi(tok_id());
+			n = tok_num();
 			type.ptr++;
 			type.flags = T_ARRAY;
 			tok_expect(']');
