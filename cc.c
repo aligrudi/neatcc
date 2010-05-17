@@ -842,14 +842,18 @@ static void parse(void)
 int main(int argc, char *argv[])
 {
 	char obj[128];
-	char *src = argv[1];
 	int ifd, ofd;
-	ifd = open(src, O_RDONLY);
+	int i = 1;
+	while (i < argc && argv[i][0] == '-')
+		i++;
+	if (i == argc)
+		die("no file given\n");
+	ifd = open(argv[i], O_RDONLY);
 	tok_init(ifd);
 	close(ifd);
 	parse();
 
-	strcpy(obj, src);
+	strcpy(obj, argv[i]);
 	obj[strlen(obj) - 1] = 'o';
 	ofd = open(obj, O_WRONLY | O_TRUNC | O_CREAT, 0600);
 	out_write(ofd);
