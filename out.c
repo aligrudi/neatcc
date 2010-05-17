@@ -3,9 +3,11 @@
 #include <unistd.h>
 #include "gen.h"
 
-#define MAXSECS		(1 << 7)
-#define MAXSYMS		(1 << 10)
-#define MAXRELA		(1 << 10)
+#define ALIGN(x, a)		(((x) + (a) - 1) & ~(a))
+
+#define MAXSECS			(1 << 7)
+#define MAXSYMS			(1 << 10)
+#define MAXRELA			(1 << 10)
 #define SEC_SYMS		1
 #define SEC_SYMSTR		2
 #define SEC_BSS			3
@@ -168,6 +170,7 @@ long o_mkvar(char *name, int size)
 	sym->st_value = bsslen;
 	sym->st_size = size;
 	sym->st_info = ELF64_ST_INFO(STB_GLOBAL, STT_OBJECT);
+	bsslen = ALIGN(bsslen, 8);
 	bsslen += size;
 	return sym - syms;
 }
