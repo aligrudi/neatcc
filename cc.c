@@ -8,6 +8,7 @@
 #include "tok.h"
 
 #define MAXLOCALS	(1 << 10)
+#define MAXGLOBALS	(1 << 10)
 #define MAXARGS		(1 << 5)
 #define print(s)	write(2, (s), strlen(s));
 
@@ -22,6 +23,7 @@ struct type {
 	unsigned bt;
 	unsigned flags;
 	int ptr;
+	int n;
 };
 
 /* type stack */
@@ -47,19 +49,32 @@ static void ts_pop(struct type *type)
 		*type = ts[nts];
 }
 
-static struct local {
-	char name[NAMELEN];
-	long addr;
-	struct type type;
-} locals[MAXLOCALS];
-static int nlocals;
-
-static void local_add(char *name, long addr, struct type type)
+static int type_totsz(struct type *t)
 {
-	strcpy(locals[nlocals].name, name);
-	locals[nlocals].addr = addr;
-	locals[nlocals].type = type;
-	nlocals++;
+	if (!t->ptr || t->flags & T_ARRAY && (t)->ptr == 1)
+		return BT_SZ(t->bt) * t->n;
+	return 8;
+}
+
+struct name {
+	char name[NAMELEN];
+	struct type type;
+	long addr;
+};
+
+static struct name locals[MAXLOCALS];
+static int nlocals;
+static struct name globals[MAXGLOBALS];
+static int nglobals;
+
+static void local_add(struct name *name)
+{
+	memcpy(&locals[nlocals++], name, sizeof(*name));
+}
+
+static void global_add(struct name *name)
+{
+	memcpy(&globals[nglobals++], name, sizeof(*name));
 }
 
 static void die(char *s)
@@ -129,6 +144,7 @@ static int basetype(struct type *type)
 	}
 	type->bt = size | (sign ? BT_SIGNED : 0);
 	type->ptr = 0;
+	type->n = 1;
 	return 0;
 }
 
@@ -148,6 +164,7 @@ static int readtype(struct type *type)
 
 static void readprimary(void)
 {
+	struct name name;
 	int i;
 	if (!tok_jmp(TOK_NUM)) {
 		ts_push_bt(4 | BT_SIGNED);
@@ -165,8 +182,21 @@ static void readprimary(void)
 				return;
 			}
 		}
+		for (i = 0; i < nglobals; i++) {
+			struct type *t = &globals[i].type;
+			if (!strcmp(globals[i].name, tok_id())) {
+				ts_push(t);
+				o_symaddr(globals[i].addr, TYPE_BT(t));
+				if (t->flags & T_ARRAY)
+					o_addr();
+				return;
+			}
+		}
+		strcpy(name.name, tok_id());
+		name.addr = o_mkundef(name.name);
+		global_add(&name);
 		ts_push_bt(8);
-		o_symaddr(tok_id(), 8);
+		o_symaddr(name.addr, 8);
 		return;
 	}
 	if (!tok_jmp('(')) {
@@ -645,9 +675,71 @@ static void readestmt(void)
 	} while (!tok_jmp(','));
 }
 
+static void localdef(struct name *name, int init)
+{
+	name->addr = o_mklocal(type_totsz(&name->type));
+	local_add(name);
+	if (init) {
+		struct type *t = &name->type;
+		o_local(locals[nlocals - 1].addr, TYPE_BT(t));
+		readexpr();
+		o_assign(TYPE_BT(t));
+	}
+}
+
+static void funcdef(struct name *name, struct name *args, int nargs)
+{
+	int i;
+	name->addr = o_func_beg(name->name);
+	global_add(name);
+	for (i = 0; i < nargs; i++) {
+		args[i].addr = o_arg(i, type_totsz(&args[i].type));
+		local_add(&args[i]);
+	}
+}
+
+static int readdefs(void (*def)(struct name *name, int init))
+{
+	struct type base;
+	if (basetype(&base))
+		return 1;
+	while (tok_see() != ';' && tok_see() != '{') {
+		struct name name;
+		struct type *type = &name.type;
+		memcpy(type, &base, sizeof(base));
+		readptrs(type);
+		tok_expect(TOK_NAME);
+		strcpy(name.name, tok_id());
+		if (!tok_jmp('[')) {
+			tok_expect(TOK_NUM);
+			type->n = tok_num();
+			type->ptr++;
+			type->flags = T_ARRAY;
+			tok_expect(']');
+		}
+		if (!tok_jmp('(')) {
+			struct name args[MAXARGS];
+			int nargs = 0;
+			while (tok_see() != ')') {
+				readtype(&args[nargs].type);
+				if (!tok_jmp(TOK_NAME))
+					strcpy(args[nargs++].name, tok_id());
+				if (tok_jmp(','))
+					break;
+			}
+			tok_expect(')');
+			if (tok_see() != '{')
+				continue;
+			funcdef(&name, args, nargs);
+			return 0;
+		}
+		def(&name, !tok_jmp('='));
+	}
+	return 0;
+}
+
 static void readstmt(void)
 {
-	struct type base = {0};
 	o_tmpdrop(-1);
 	nts = 0;
 	if (!tok_jmp('{')) {
@@ -655,30 +747,7 @@ static void readstmt(void)
 			readstmt();
 		return;
 	}
-	if (!basetype(&base)) {
-		struct type type = base;
-		char name[NAMELEN];
-		int n = 1;
-		readptrs(&type);
-		tok_expect(TOK_NAME);
-		strcpy(name, tok_id());
-		if (!tok_jmp('[')) {
-			tok_expect(TOK_NUM);
-			n = tok_num();
-			type.ptr++;
-			type.flags = T_ARRAY;
-			tok_expect(']');
-		}
-		local_add(name, o_mklocal(TYPE_SZ(&type) * n), type);
-		/* initializer */
-		if (!tok_jmp('=')) {
-			struct type *t = &locals[nlocals - 1].type;
-			o_local(locals[nlocals - 1].addr, TYPE_BT(t));
-			readexpr();
-			ts_pop(NULL);
-			ts_push_bt(TYPE_BT(t));
-			o_assign(TYPE_BT(t));
-		}
+	if (!readdefs(localdef)) {
 		tok_expect(';');
 		return;
 	}
@@ -746,40 +815,22 @@ static void readstmt(void)
 	tok_expect(';');
 }
 
+static void globaldef(struct name *name, int init)
+{
+	name->addr = o_mkvar(name->name, type_totsz(&name->type));
+	global_add(name);
+}
+
 static void readdecl(void)
 {
-	char name[NAMELEN];
-	struct type type;
-	readtype(&type);
-	tok_expect(TOK_NAME);
-	strcpy(name, tok_id());
-	if (!tok_jmp(';'))
-		return;
-	if (!tok_jmp('(')) {
-		/* read args */
-		char args[MAXARGS][NAMELEN];
-		struct type types[MAXARGS];
-		int nargs = 0;
-		int i;
-		while (tok_see() != ')') {
-			readtype(&types[nargs]);
-			if (!tok_jmp(TOK_NAME))
-				strcpy(args[nargs++], tok_id());
-			if (tok_jmp(','))
-				break;
-		}
-		tok_expect(')');
-		if (!tok_jmp(';'))
-			return;
-		o_func_beg(name);
-		for (i = 0; i < nargs; i++)
-			local_add(args[i], o_arg(i, TYPE_BT(&types[i])),
-							types[i]);
+	readdefs(globaldef);
+	if (tok_see() == '{') {
 		readstmt();
 		o_func_end();
+		nlocals = 0;
 		return;
 	}
-	die("syntax error\n");
+	tok_expect(';');
 }
 
 static void parse(void)

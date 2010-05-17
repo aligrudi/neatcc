@@ -69,8 +69,6 @@ static struct tmp {
 } tmp[MAXTMP];
 static int ntmp;
 
-static char names[MAXTMP][NAMELEN];
-static int nnames;
 static int tmpsp;
 
 static struct tmp *regs[NREGS];
@@ -204,7 +202,7 @@ static void tmp_reg(struct tmp *tmp, unsigned dst, int deref)
 	}
 	if (tmp->flags & LOC_SYM) {
 		regop(MOV_I2R, 0, dst, TMP_BT(tmp));
-		out_rela(names[tmp->addr], codeaddr(), 0);
+		out_rela(tmp->addr, codeaddr(), 0);
 		oi(0, 4);
 		tmp->addr = dst;
 		regs[dst] = tmp;
@@ -292,14 +290,12 @@ void o_num(long num, unsigned bt)
 	t->flags = LOC_NUM;
 }
 
-void o_symaddr(char *name, unsigned bt)
+void o_symaddr(long addr, unsigned bt)
 {
-	int id = nnames++;
 	struct tmp *t = &tmp[ntmp++];
 	t->bt = bt;
-	t->addr = id;
+	t->addr = addr;
 	t->flags = LOC_SYM | TMP_ADDR;
-	strcpy(names[id], name);
 }
 
 void o_tmpdrop(int n)
@@ -312,7 +308,6 @@ void o_tmpdrop(int n)
 		if (tmp[i].flags & LOC_REG)
 			regs[tmp[i].addr] = NULL;
 	if (!ntmp) {
-		nnames = 0;
 		if (tmpsp != -1)
 			sp = tmpsp;
 		tmpsp = -1;
@@ -378,16 +373,15 @@ void o_tmpcopy(void)
 	t2->flags = t1->flags;
 }
 
-void o_func_beg(char *name)
+long o_func_beg(char *name)
 {
-	out_func_beg(name);
+	long addr = out_func_beg(name);
 	cur = buf;
 	os("\x55", 1);			/* push %rbp */
 	os("\x48\x89\xe5", 3);		/* mov %rsp, %rbp */
 	sp = 0;
 	maxsp = 0;
 	ntmp = 0;
-	nnames = 0;
 	tmpsp = -1;
 	nret = 0;
 	cmp_last = -1;
@@ -395,6 +389,7 @@ void o_func_beg(char *name)
 	os("\x48\x81\xec", 3);		/* sub $xxx, %rsp */
 	spsub_addr = codeaddr();
 	oi(0, 4);
+	return addr;
 }
 
 void o_deref(unsigned bt)
@@ -724,7 +719,7 @@ void o_call(int argc, unsigned *bt, unsigned ret_bt)
 	t = &tmp[ntmp - 1];
 	if (t->flags & LOC_SYM) {
 		os("\xe8", 1);		/* call $x */
-		out_rela(names[tmp->addr], codeaddr(), 1);
+		out_rela(t->addr, codeaddr(), 1);
 		oi(-4, 4);
 		o_tmpdrop(1);
 	} else {

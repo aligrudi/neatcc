@@ -8,7 +8,8 @@
 #define MAXRELA		(1 << 10)
 #define SEC_SYMS		1
 #define SEC_SYMSTR		2
-#define SEC_BEG			3
+#define SEC_BSS			3
+#define SEC_BEG			4
 
 static Elf64_Ehdr ehdr;
 static Elf64_Shdr shdr[MAXSECS];
@@ -17,6 +18,7 @@ static Elf64_Sym syms[MAXSYMS];
 static int nsyms;
 static char symstr[MAXSYMS * 8];
 static int nsymstr = 1;
+static int bsslen;
 
 static struct sec {
 	char buf[SECSIZE];
@@ -38,28 +40,29 @@ static char *putstr(char *s, char *r)
 	return s;
 }
 
+static int sym_find(char *name)
+{
+	Elf64_Sym *sym;
+	int i;
+	for (i = 0; i < nsyms; i++)
+		if (!strcmp(name, symstr + syms[i].st_name))
+			return i;
+	return -1;
+}
+
 static Elf64_Sym *put_sym(char *name)
 {
-	Elf64_Sym *sym = &syms[nsyms++];
-	sym->st_name = nsymstr;
-	nsymstr = putstr(symstr + nsymstr, name) - symstr;
+	int found = sym_find(name);
+	Elf64_Sym *sym = found != -1 ? &syms[found] : &syms[nsyms++];
+	if (found == -1) {
+		sym->st_name = nsymstr;
+		nsymstr = putstr(symstr + nsymstr, name) - symstr;
+	}
 	sym->st_info = ELF64_ST_INFO(STB_GLOBAL, STT_FUNC);
 	return sym;
 }
 
-static int sym_find(char *name)
-{
-	int i;
-	Elf64_Sym *sym;
-	for (i = 0; i < nsyms; i++)
-		if (!strcmp(name, symstr + syms[i].st_name))
-			return i;
-	sym = put_sym(name);
-	sym->st_shndx = SHN_UNDEF;
-	return sym - syms;
-}
-
-void out_func_beg(char *name)
+long out_func_beg(char *name)
 {
 	sec = &secs[nsecs++];
 	sec->sym = put_sym(name);
@@ -68,6 +71,7 @@ void out_func_beg(char *name)
 	sec->rel_shdr = &shdr[nshdr++];
 	sec->rel_shdr->sh_link = SEC_SYMS;
 	sec->rel_shdr->sh_info = sec->sec_shdr - shdr;
+	return sec->sym - syms;
 }
 
 void out_func_end(char *buf, int len)
@@ -77,18 +81,18 @@ void out_func_end(char *buf, int len)
 	sec->sym->st_size = len;
 }
 
-void out_rela(char *name, int off, int rel)
+void out_rela(long addr, int off, int rel)
 {
 	Elf64_Rela *rela = &sec->rela[sec->nrela++];
 	rela->r_offset = off;
-	rela->r_info = ELF64_R_INFO(sym_find(name),
-				rel ? R_X86_64_PC32 : R_X86_64_32);
+	rela->r_info = ELF64_R_INFO(addr, rel ? R_X86_64_PC32 : R_X86_64_32);
 }
 
 void out_write(int fd)
 {
 	Elf64_Shdr *symstr_shdr = &shdr[SEC_SYMSTR];
 	Elf64_Shdr *syms_shdr = &shdr[SEC_SYMS];
+	Elf64_Shdr *bss_shdr = &shdr[SEC_BSS];
 	unsigned long offset = sizeof(ehdr);
 	int i;
 
@@ -115,6 +119,13 @@ void out_write(int fd)
 	syms_shdr->sh_entsize = sizeof(syms[0]);
 	syms_shdr->sh_link = SEC_SYMSTR;
 	offset += syms_shdr->sh_size;
+
+	bss_shdr->sh_type = SHT_NOBITS;
+	bss_shdr->sh_flags = SHF_ALLOC | SHF_WRITE;
+	bss_shdr->sh_offset = offset;
+	bss_shdr->sh_size = bsslen;
+	bss_shdr->sh_entsize = 1;
+	bss_shdr->sh_addralign = 8;
 
 	symstr_shdr->sh_type = SHT_STRTAB;
 	symstr_shdr->sh_offset = offset;
@@ -148,4 +159,22 @@ void out_write(int fd)
 		write(fd, sec->buf, sec->len);
 		write(fd, sec->rela, sec->nrela * sizeof(sec->rela[0]));
 	}
+}
+
+long o_mkvar(char *name, int size)
+{
+	Elf64_Sym *sym = put_sym(name);
+	sym->st_shndx = SEC_BSS;
+	sym->st_value = bsslen;
+	sym->st_size = size;
+	sym->st_info = ELF64_ST_INFO(STB_GLOBAL, STT_OBJECT);
+	bsslen += size;
+	return sym - syms;
+}
+
+long o_mkundef(char *name)
+{
+	Elf64_Sym *sym = put_sym(name);
+	sym->st_shndx = SHN_UNDEF;
+	return sym - syms;
 }
