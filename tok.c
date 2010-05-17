@@ -37,7 +37,7 @@ static struct {
 
 static char *tok3[] = {
 	"<<", ">>", "++", "--", "<<=", ">>=", "...", "+=", "-=", "*=", "/=",
-	"%=", "|=", "&=", "^=", "&&", "||", "==", "!=", "<=", ">="
+	"%=", "|=", "&=", "^=", "&&", "||", "==", "!=", "<=", ">=", "/*"
 };
 
 static int get_tok3(int num)
@@ -123,6 +123,25 @@ static int id_char(int c)
 	return isalnum(c) || c == '_';
 }
 
+static int skipws(void)
+{
+	while (1) {
+		while (cur < len && isspace(buf[cur]))
+			cur++;
+		if (cur == len)
+			return 1;
+		if (TOK2(buf + cur) != TOK2("/*"))
+			return 0;
+		while (++cur < len) {
+			if (buf[cur] == '*' && buf[cur + 1] == '/') {
+				cur += 2;
+				break;
+			}
+		}
+	}
+	return 0;
+}
+
 int tok_get(void)
 {
 	int num;
@@ -131,9 +150,7 @@ int tok_get(void)
 		next = -1;
 		return tok;
 	}
-	while (cur < len && isspace(buf[cur]))
-		cur++;
-	if (cur == len)
+	if (skipws())
 		return TOK_EOF;
 	if (buf[cur] == '"')
 		return TOK_STR;
