@@ -1,11 +1,11 @@
-CC = dietcc
+CC = cc
 CFLAGS = -Wall -O2 -g
 LDFLAGS = -g
 
-all: cc
+all: ncc
 .c.o:
 	$(CC) -c $(CFLAGS) $<
-cc: cc.o tok.o gen.o out.o
+ncc: ncc.o tok.o gen.o out.o
 	$(CC) $(LDFLAGS) -o $@ $^
 
 clean:
