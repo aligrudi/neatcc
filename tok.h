@@ -28,6 +28,7 @@ enum tok {
 	TOK_SWITCH,
 	TOK_CASE,
 	TOK_SIZEOF,
+	TOK_STR,
 };
 
 void tok_init(int fd);
@@ -35,3 +36,4 @@ int tok_see(void);
 int tok_get(void);
 char *tok_id(void);
 long tok_num(void);
+int tok_str(char *out);

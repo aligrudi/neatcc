@@ -145,6 +145,7 @@ static int basetype(struct type *type)
 	type->bt = size | (sign ? BT_SIGNED : 0);
 	type->ptr = 0;
 	type->n = 1;
+	type->flags = 0;
 	return 0;
 }
 
@@ -169,6 +170,20 @@ static void readprimary(void)
 	if (!tok_jmp(TOK_NUM)) {
 		ts_push_bt(4 | BT_SIGNED);
 		o_num(tok_num(), 4 | BT_SIGNED);
+		return;
+	}
+	if (!tok_jmp(TOK_STR)) {
+		struct type t;
+		char buf[BUFSIZE];
+		int len;
+		t.bt = 1 | BT_SIGNED;
+		t.ptr = 1;
+		t.flags = 0;
+		t.n = 1;
+		ts_push(&t);
+		len = tok_str(buf);
+		o_symaddr(o_mkdat(NULL, buf, len), TYPE_BT(&t));
+		o_addr();
 		return;
 	}
 	if (!tok_jmp(TOK_NAME)) {

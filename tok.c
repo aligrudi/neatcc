@@ -49,6 +49,75 @@ static int get_tok3(int num)
 	return 0;
 }
 
+static char *esc_code = "abefnrtv";
+static char *esc = "\a\b\e\f\n\r\t\v";
+
+static int esc_char(int *c, char *s)
+{
+	if (*s != '\\') {
+		*c = *s;
+		return 1;
+	}
+	if (strchr(esc_code, s[1])) {
+		*c = esc[strchr(esc_code, s[1]) - esc_code];
+		return 2;
+	}
+	*c = s[1];
+	return 2;
+}
+
+long tok_num(void)
+{
+	if (buf[cur] == '0' && buf[cur + 1] == 'x') {
+		long result = 0;
+		cur += 2;
+		while (isalnum(buf[cur])) {
+			int c = buf[cur];
+			result <<= 4;
+			if (c >= '0' && c <= '9')
+				result |= c - '0';
+			else
+				result |= 10 + tolower(c) - 'a';
+			cur++;
+		}
+		return result;
+	}
+	if (isdigit(buf[cur])) {
+		long result = 0;
+		while (isdigit(buf[cur])) {
+			result *= 10;
+			result += buf[cur++] - '0';
+		}
+		return result;
+	}
+	if (buf[cur] == '\'') {
+		int ret;
+		cur += 2 + esc_char(&ret, buf + cur + 1);
+		return ret;
+	}
+	return -1;
+}
+
+int tok_str(char *out)
+{
+	char *s = out;
+	char *r = buf + cur;
+	char *e = buf + len;
+	r++;
+	while (r < e && *r != '"') {
+		if (*r == '\\') {
+			int c;
+			r += esc_char(&c, r);
+			*s++ = c;
+		} else {
+			*s++ = *r++;
+		}
+	}
+	*s++ = '\0';
+	cur = r - buf + 1;
+	return s - out;
+}
+
 static int id_char(int c)
 {
 	return isalnum(c) || c == '_';
@@ -66,24 +135,10 @@ int tok_get(void)
 		cur++;
 	if (cur == len)
 		return TOK_EOF;
-	if (isdigit(buf[cur])) {
-		char *s = name;
-		while (cur < len && isalnum(buf[cur]))
-			*s++ = buf[cur++];
-		*s = '\0';
+	if (buf[cur] == '"')
+		return TOK_STR;
+	if (isdigit(buf[cur]) || buf[cur] == '\'')
 		return TOK_NUM;
-	}
-	if (buf[cur] == '\'') {
-		char *s = name;
-		*s++ = buf[cur++];
-		if (buf[cur] == '\\')
-			*s++ = buf[cur++];
-		while (cur < len && buf[cur] != '\'')
-			*s++ = buf[cur++];
-		*s++ = buf[cur++];
-		*s = '\0';
-		return TOK_NUM;
-	}
 	if (id_char(buf[cur])) {
 		char *s = name;
 		int i;
@@ -105,39 +160,6 @@ int tok_get(void)
 	}
 	if (strchr(";,{}()[]<>*&!=+-/%?:|^~", buf[cur]))
 		return buf[cur++];
-	return -1;
-}
-
-static char *esc_code = "abefnrtv";
-static char *esc = "\a\b\e\f\n\r\t\v";
-
-long tok_num(void)
-{
-	if (name[0] == '0' && name[1] == '1') {
-		char *s = name + 2;
-		long result = 0;
-		while (*s) {
-			result <<= 4;
-			if (*s >= '0' && *s <= '9')
-				result |= *s - '0';
-			else
-				result |= 10 + tolower(*s) - 'a';
-			s++;
-		}
-	}
-	if (isdigit(name[0]))
-		return atoi(name);
-	if (name[0] == '\'') {
-		if (name[1] != '\\')
-			return name[1];
-		if (strchr(esc_code, name[2]))
-			return esc[strchr(esc_code, name[2]) - esc_code];
-		if (name[2] == 'x')
-			;
-		if (isdigit(name[2]))
-			;
-		return name[2];
-	}
 	return -1;
 }
 

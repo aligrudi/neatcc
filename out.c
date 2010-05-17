@@ -3,15 +3,16 @@
 #include <unistd.h>
 #include "gen.h"
 
-#define ALIGN(x, a)		(((x) + (a) - 1) & ~(a))
+#define ALIGN(x, a)		(((x) + (a) - 1) & ~((a) - 1))
 
 #define MAXSECS			(1 << 7)
 #define MAXSYMS			(1 << 10)
 #define MAXRELA			(1 << 10)
 #define SEC_SYMS		1
 #define SEC_SYMSTR		2
-#define SEC_BSS			3
-#define SEC_BEG			4
+#define SEC_DAT			3
+#define SEC_BSS			4
+#define SEC_BEG			5
 
 static Elf64_Ehdr ehdr;
 static Elf64_Shdr shdr[MAXSECS];
@@ -21,6 +22,8 @@ static int nsyms;
 static char symstr[MAXSYMS * 8];
 static int nsymstr = 1;
 static int bsslen;
+static char dat[SECSIZE];
+static int datlen;
 
 static struct sec {
 	char buf[SECSIZE];
@@ -54,9 +57,10 @@ static int sym_find(char *name)
 
 static Elf64_Sym *put_sym(char *name)
 {
-	int found = sym_find(name);
-	Elf64_Sym *sym = found != -1 ? &syms[found] : &syms[nsyms++];
-	if (found == -1) {
+	int found = name ? sym_find(name) : -1;
+	Elf64_Sym *sym = name && found != -1 ? &syms[found] : &syms[nsyms++];
+	sym->st_name = 0;
+	if (found == -1 && name) {
 		sym->st_name = nsymstr;
 		nsymstr = putstr(symstr + nsymstr, name) - symstr;
 	}
@@ -94,6 +98,7 @@ void out_write(int fd)
 {
 	Elf64_Shdr *symstr_shdr = &shdr[SEC_SYMSTR];
 	Elf64_Shdr *syms_shdr = &shdr[SEC_SYMS];
+	Elf64_Shdr *dat_shdr = &shdr[SEC_DAT];
 	Elf64_Shdr *bss_shdr = &shdr[SEC_BSS];
 	unsigned long offset = sizeof(ehdr);
 	int i;
@@ -121,6 +126,14 @@ void out_write(int fd)
 	syms_shdr->sh_entsize = sizeof(syms[0]);
 	syms_shdr->sh_link = SEC_SYMSTR;
 	offset += syms_shdr->sh_size;
+
+	dat_shdr->sh_type = SHT_PROGBITS;
+	dat_shdr->sh_flags = SHF_WRITE;
+	dat_shdr->sh_offset = offset;
+	dat_shdr->sh_size = datlen;
+	dat_shdr->sh_entsize = 1;
+	dat_shdr->sh_addralign = 8;
+	offset += dat_shdr->sh_size;
 
 	bss_shdr->sh_type = SHT_NOBITS;
 	bss_shdr->sh_flags = SHF_ALLOC | SHF_WRITE;
@@ -155,6 +168,7 @@ void out_write(int fd)
 	write(fd, &ehdr, sizeof(ehdr));
 	write(fd, shdr, sizeof(shdr[0]) * nshdr);
 	write(fd, syms, sizeof(syms[0]) * nsyms);
+	write(fd, dat, datlen);
 	write(fd, symstr, nsymstr);
 	for (i = 0; i < nsecs; i++) {
 		struct sec *sec = &secs[i];
@@ -170,8 +184,7 @@ long o_mkvar(char *name, int size)
 	sym->st_value = bsslen;
 	sym->st_size = size;
 	sym->st_info = ELF64_ST_INFO(STB_GLOBAL, STT_OBJECT);
-	bsslen = ALIGN(bsslen, 8);
-	bsslen += size;
+	bsslen = ALIGN(bsslen + size, 8);
 	return sym - syms;
 }
 
@@ -179,5 +192,17 @@ long o_mkundef(char *name)
 {
 	Elf64_Sym *sym = put_sym(name);
 	sym->st_shndx = SHN_UNDEF;
+	return sym - syms;
+}
+
+long o_mkdat(char *name, char *buf, int len)
+{
+	Elf64_Sym *sym = put_sym(name);
+	sym->st_shndx = SEC_DAT;
+	sym->st_value = datlen;
+	sym->st_size = len;
+	sym->st_info = ELF64_ST_INFO(name ? STB_GLOBAL : STB_LOCAL, STT_OBJECT);
+	memcpy(dat + datlen, buf, len);
+	datlen = ALIGN(datlen + len, 8);
 	return sym - syms;
 }

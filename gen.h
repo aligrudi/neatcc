@@ -54,6 +54,7 @@ void o_func_end(void);
 void o_ret(unsigned bt);
 long o_mkvar(char *name, int size);
 long o_mkundef(char *name);
+long o_mkdat(char *name, char *buf, int len);
 
 void out_init(void);
 void out_write(int fd);
