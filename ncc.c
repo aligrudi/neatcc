@@ -315,50 +315,55 @@ static void inc_post(void (*op)(void))
 static void readpost(void)
 {
 	readprimary();
-	if (!tok_jmp('[')) {
-		struct type t1;
-		ts_pop(&t1);
-		readexpr();
-		ts_pop(NULL);
-		tok_expect(']');
-		arrayderef(TYPE_DEREF_BT(&t1));
-		t1.ptr--;
-		ts_push(&t1);
-		return;
-	}
-	if (!tok_jmp('(')) {
-		int argc = 0;
-		unsigned bt[MAXARGS];
-		if (tok_see() != ')') {
+	while (1) {
+		if (!tok_jmp('[')) {
+			struct type t1;
+			ts_pop(&t1);
 			readexpr();
-			bt[argc++] = 4 | BT_SIGNED;
 			ts_pop(NULL);
+			tok_expect(']');
+			arrayderef(TYPE_DEREF_BT(&t1));
+			t1.ptr--;
+			ts_push(&t1);
+			continue;
 		}
-		while (!tok_jmp(',')) {
-			readexpr();
-			bt[argc++] = 4 | BT_SIGNED;
+		if (!tok_jmp('(')) {
+			int argc = 0;
+			unsigned bt[MAXARGS];
+			if (tok_see() != ')') {
+				readexpr();
+				bt[argc++] = 4 | BT_SIGNED;
+				ts_pop(NULL);
+			}
+			while (!tok_jmp(',')) {
+				readexpr();
+				bt[argc++] = 4 | BT_SIGNED;
+				ts_pop(NULL);
+			}
+			tok_expect(')');
 			ts_pop(NULL);
+			o_call(argc, bt, 4 | BT_SIGNED);
+			ts_push_bt(4 | BT_SIGNED);
+			continue;
 		}
-		tok_expect(')');
-		ts_pop(NULL);
-		o_call(argc, bt, 4 | BT_SIGNED);
-		ts_push_bt(4 | BT_SIGNED);
-		return;
-	}
-	if (!tok_jmp(TOK2("++"))) {
-		inc_post(o_add);
-		return;
-	}
-	if (!tok_jmp(TOK2("--"))) {
-		inc_post(o_sub);
-		return;
+		if (!tok_jmp(TOK2("++"))) {
+			inc_post(o_add);
+			continue;
+		}
+		if (!tok_jmp(TOK2("--"))) {
+			inc_post(o_sub);
+			continue;
+		}
+		break;
 	}
 }
+
+static void readpre(void);
 
 static void inc_pre(void (*op)(void))
 {
 	unsigned bt = TYPE_BT(&ts[nts - 1]);
-	readpost();
+	readpre();
 	o_tmpcopy();
 	o_num(1, 4);
 	ts_push_bt(bt);
@@ -372,7 +377,7 @@ static void readpre(void)
 {
 	if (!tok_jmp('&')) {
 		struct type type;
-		readpost();
+		readpre();
 		ts_pop(&type);
 		type.ptr++;
 		ts_push(&type);
@@ -381,7 +386,7 @@ static void readpre(void)
 	}
 	if (!tok_jmp('*')) {
 		struct type type;
-		readpost();
+		readpre();
 		ts_pop(&type);
 		type.ptr--;
 		ts_push(&type);
@@ -390,19 +395,19 @@ static void readpre(void)
 	}
 	if (!tok_jmp('!')) {
 		struct type type;
-		readpost();
+		readpre();
 		ts_pop(&type);
 		o_lnot();
 		ts_push_bt(4 | BT_SIGNED);
 		return;
 	}
 	if (!tok_jmp('-')) {
-		readpost();
+		readpre();
 		o_neg();
 		return;
 	}
 	if (!tok_jmp('~')) {
-		readpost();
+		readpre();
 		o_not();
 		return;
 	}
@@ -471,13 +476,16 @@ static void shift(void (*op)(void))
 static void readshift(void)
 {
 	readadd();
-	if (!tok_jmp(TOK2("<<"))) {
-		shift(o_shl);
-		return;
-	}
-	if (!tok_jmp(TOK2(">>"))) {
-		shift(o_shr);
-		return;
+	while (1) {
+		if (!tok_jmp(TOK2("<<"))) {
+			shift(o_shl);
+			continue;
+		}
+		if (!tok_jmp(TOK2(">>"))) {
+			shift(o_shr);
+			continue;
+		}
+		break;
 	}
 }
 
@@ -493,21 +501,24 @@ static void cmp(void (*op)(void))
 static void readcmp(void)
 {
 	readshift();
-	if (!tok_jmp('<')) {
-		cmp(o_lt);
-		return;
-	}
-	if (!tok_jmp('>')) {
-		cmp(o_gt);
-		return;
-	}
-	if (!tok_jmp(TOK2("<="))) {
-		cmp(o_le);
-		return;
-	}
-	if (!tok_jmp(TOK2(">="))) {
-		cmp(o_ge);
-		return;
+	while (1) {
+		if (!tok_jmp('<')) {
+			cmp(o_lt);
+			continue;
+		}
+		if (!tok_jmp('>')) {
+			cmp(o_gt);
+			continue;
+		}
+		if (!tok_jmp(TOK2("<="))) {
+			cmp(o_le);
+			continue;
+		}
+		if (!tok_jmp(TOK2(">="))) {
+			cmp(o_ge);
+			continue;
+		}
+		break;
 	}
 }
 
@@ -523,13 +534,16 @@ static void eq(void (*op)(void))
 static void readeq(void)
 {
 	readcmp();
-	if (!tok_jmp(TOK2("=="))) {
-		eq(o_eq);
-		return;
-	}
-	if (!tok_jmp(TOK2("!="))) {
-		eq(o_neq);
-		return;
+	while (1) {
+		if (!tok_jmp(TOK2("=="))) {
+			eq(o_eq);
+			continue;
+		}
+		if (!tok_jmp(TOK2("!="))) {
+			eq(o_neq);
+			continue;
+		}
+		break;
 	}
 }
 
