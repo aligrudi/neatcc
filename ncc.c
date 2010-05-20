@@ -94,15 +94,17 @@ static struct structinfo {
 	char name[NAMELEN];
 	struct name fields[MAXFIELDS];
 	int nfields;
+	int isunion;
 	int size;
 } structs[MAXTYPES];
 static int nstructs;
 
-static int struct_find(char *name)
+static int struct_find(char *name, int isunion)
 {
 	int i;
 	for (i = 0; i < nstructs; i++)
-		if (!strcmp(name, structs[i].name))
+		if (!strcmp(name, structs[i].name) &&
+				structs[i].isunion == isunion)
 			return i;
 	die("struct not found\n");
 }
@@ -198,18 +200,25 @@ static void ts_binop_add(void (*o_sth)(void))
 static void structdef(void *data, struct name *name, int init)
 {
 	struct structinfo *si = data;
-	name->addr = si->size;
-	si->size += type_totsz(&name->type);
+	if (si->isunion) {
+		name->addr = 0;
+		if (si->size < type_totsz(&name->type))
+			si->size = type_totsz(&name->type);
+	} else {
+		name->addr = si->size;
+		si->size += type_totsz(&name->type);
+	}
 	memcpy(&si->fields[si->nfields++], name, sizeof(*name));
 }
 
 static int readdefs(void (*def)(void *, struct name *, int init), void *data);
 
-static int struct_create(char *name)
+static int struct_create(char *name, int isunion)
 {
 	int id = nstructs++;
 	struct structinfo *si = &structs[id];
 	strcpy(si->name, name);
+	si->isunion = isunion;
 	tok_expect('{');
 	while (tok_jmp('}')) {
 		readdefs(structdef, si);
@@ -226,6 +235,7 @@ static int basetype(struct type *type)
 	int size = 4;
 	int done = 0;
 	int i = 0;
+	int isunion;
 	char name[NAMELEN];
 	type->flags = 0;
 	type->ptr = 0;
@@ -253,14 +263,15 @@ static int basetype(struct type *type)
 		case TOK_UNSIGNED:
 			sign = 0;
 			break;
+		case TOK_UNION:
 		case TOK_STRUCT:
-			tok_get();
+			isunion = tok_get() == TOK_UNION;
 			tok_expect(TOK_NAME);
 			strcpy(name, tok_id());
 			if (tok_see() == '{')
-				type->id = struct_create(name);
+				type->id = struct_create(name, isunion);
 			else
-				type->id = struct_find(name);
+				type->id = struct_find(name, isunion);
 			type->flags = T_STRUCT;
 			type->bt = 8;
 			return 0;

@@ -24,6 +24,7 @@ static struct {
 	{"int", TOK_INT},
 	{"char", TOK_CHAR},
 	{"struct", TOK_STRUCT},
+	{"union", TOK_UNION},
 	{"enum", TOK_ENUM},
 	{"if", TOK_IF},
 	{"else", TOK_ELSE},

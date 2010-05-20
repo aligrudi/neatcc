@@ -19,6 +19,7 @@ enum tok {
 	TOK_INT,
 	TOK_CHAR,
 	TOK_STRUCT,
+	TOK_UNION,
 	TOK_ENUM,
 	TOK_IF,
 	TOK_ELSE,
