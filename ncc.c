@@ -27,10 +27,12 @@
 #define TYPE_DEREF_SZ(t)	((t)->ptr > 1 ? 8 : (t)->bt & BT_SZMASK)
 
 #define T_ARRAY		0x01
+#define T_STRUCT	0x02
 
 struct type {
 	unsigned bt;
 	unsigned flags;
+	int id;		/* for structs */
 	int ptr;
 	int n;
 };
@@ -58,13 +60,6 @@ static void ts_pop(struct type *type)
 		*type = ts[nts];
 }
 
-static int type_totsz(struct type *t)
-{
-	if (!t->ptr || t->flags & T_ARRAY && (t)->ptr == 1)
-		return BT_SZ(t->bt) * t->n;
-	return 8;
-}
-
 struct name {
 	char name[NAMELEN];
 	struct type type;
@@ -90,6 +85,44 @@ static void die(char *s)
 {
 	print(s);
 	exit(1);
+}
+
+#define MAXTYPES		(1 << 7)
+#define MAXFIELDS		(1 << 5)
+
+static struct structinfo {
+	char name[NAMELEN];
+	struct name fields[MAXFIELDS];
+	int nfields;
+	int size;
+} structs[MAXTYPES];
+static int nstructs;
+
+static int struct_find(char *name)
+{
+	int i;
+	for (i = 0; i < nstructs; i++)
+		if (!strcmp(name, structs[i].name))
+			return i;
+	die("struct not found\n");
+}
+
+static struct name *struct_field(int id, char *name)
+{
+	struct structinfo *si = &structs[id];
+	int i;
+	for (i = 0; i < si->nfields; i++)
+		if (!strcmp(name, si->fields[i].name))
+			return &si->fields[i];
+	die("field not found\n");
+}
+
+static int type_totsz(struct type *t)
+{
+	if (!t->ptr || t->flags & T_ARRAY && (t)->ptr == 1)
+		return t->n * (t->flags & T_STRUCT ? structs[t->id].size :
+				BT_SZ(t->bt));
+	return 8;
 }
 
 static int tok_jmp(int tok)
@@ -162,6 +195,29 @@ static void ts_binop_add(void (*o_sth)(void))
 	}
 }
 
+static void structdef(void *data, struct name *name, int init)
+{
+	struct structinfo *si = data;
+	name->addr = si->size;
+	si->size += type_totsz(&name->type);
+	memcpy(&si->fields[si->nfields++], name, sizeof(*name));
+}
+
+static int readdefs(void (*def)(void *, struct name *, int init), void *data);
+
+static int struct_create(char *name)
+{
+	int id = nstructs++;
+	struct structinfo *si = &structs[id];
+	strcpy(si->name, name);
+	tok_expect('{');
+	while (tok_jmp('}')) {
+		readdefs(structdef, si);
+		tok_expect(';');
+	}
+	return id;
+}
+
 static void readexpr(void);
 
 static int basetype(struct type *type)
@@ -170,6 +226,10 @@ static int basetype(struct type *type)
 	int size = 4;
 	int done = 0;
 	int i = 0;
+	char name[NAMELEN];
+	type->flags = 0;
+	type->ptr = 0;
+	type->n = 1;
 	while (!done) {
 		switch (tok_see()) {
 		case TOK_VOID:
@@ -193,11 +253,17 @@ static int basetype(struct type *type)
 		case TOK_UNSIGNED:
 			sign = 0;
 			break;
-		case TOK_ENUM:
 		case TOK_STRUCT:
+			tok_get();
 			tok_expect(TOK_NAME);
-			done = 1;
-			break;
+			strcpy(name, tok_id());
+			if (tok_see() == '{')
+				type->id = struct_create(name);
+			else
+				type->id = struct_find(name);
+			type->flags = T_STRUCT;
+			type->bt = 8;
+			return 0;
 		default:
 			if (!i)
 				return 1;
@@ -208,9 +274,6 @@ static int basetype(struct type *type)
 		tok_get();
 	}
 	type->bt = size | (sign ? BT_SIGNED : 0);
-	type->ptr = 0;
-	type->n = 1;
-	type->flags = 0;
 	return 0;
 }
 
@@ -312,6 +375,22 @@ static void inc_post(void (*op)(void))
 	o_tmpdrop(1);
 }
 
+static void readfield(void)
+{
+	struct name *field;
+	struct type t;
+	tok_expect(TOK_NAME);
+	ts_pop(&t);
+	field = struct_field(t.id, tok_id());
+	if (field->addr) {
+		o_num(field->addr, 4);
+		o_add();
+	}
+	if (!(field->type.flags & T_ARRAY))
+		o_deref(TYPE_BT(&field->type));
+	ts_push(&field->type);
+}
+
 static void readpost(void)
 {
 	readprimary();
@@ -352,6 +431,15 @@ static void readpost(void)
 		}
 		if (!tok_jmp(TOK2("--"))) {
 			inc_post(o_sub);
+			continue;
+		}
+		if (!tok_jmp('.')) {
+			o_addr();
+			readfield();
+			continue;
+		}
+		if (!tok_jmp(TOK2("->"))) {
+			readfield();
 			continue;
 		}
 		break;
@@ -719,7 +807,7 @@ static void readestmt(void)
 	} while (!tok_jmp(','));
 }
 
-static void localdef(struct name *name, int init)
+static void localdef(void *data, struct name *name, int init)
 {
 	name->addr = o_mklocal(type_totsz(&name->type));
 	local_add(name);
@@ -742,7 +830,7 @@ static void funcdef(struct name *name, struct name *args, int nargs)
 	}
 }
 
-static int readdefs(void (*def)(struct name *name, int init))
+static int readdefs(void (*def)(void *data, struct name *name, int init), void *data)
 {
 	struct type base;
 	if (basetype(&base))
@@ -777,7 +865,7 @@ static int readdefs(void (*def)(struct name *name, int init))
 			funcdef(&name, args, nargs);
 			return 0;
 		}
-		def(&name, !tok_jmp('='));
+		def(data, &name, !tok_jmp('='));
 	}
 	return 0;
 }
@@ -791,7 +879,7 @@ static void readstmt(void)
 			readstmt();
 		return;
 	}
-	if (!readdefs(localdef)) {
+	if (!readdefs(localdef, NULL)) {
 		tok_expect(';');
 		return;
 	}
@@ -859,7 +947,7 @@ static void readstmt(void)
 	tok_expect(';');
 }
 
-static void globaldef(struct name *name, int init)
+static void globaldef(void *data, struct name *name, int init)
 {
 	name->addr = o_mkvar(name->name, type_totsz(&name->type));
 	global_add(name);
@@ -867,7 +955,7 @@ static void globaldef(struct name *name, int init)
 
 static void readdecl(void)
 {
-	readdefs(globaldef);
+	readdefs(globaldef, NULL);
 	if (tok_see() == '{') {
 		readstmt();
 		o_func_end();
