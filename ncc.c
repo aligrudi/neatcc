@@ -396,14 +396,16 @@ static void readpost(void)
 	readprimary();
 	while (1) {
 		if (!tok_jmp('[')) {
-			struct type t1;
-			ts_pop(&t1);
+			struct type t;
+			ts_pop(&t);
 			readexpr();
 			ts_pop(NULL);
 			tok_expect(']');
-			arrayderef(TYPE_DEREF_BT(&t1));
-			t1.ptr--;
-			ts_push(&t1);
+			arrayderef(TYPE_DEREF_BT(&t));
+			t.ptr--;
+			t.flags &= ~T_ARRAY;
+			t.n = 1;
+			ts_push(&t);
 			continue;
 		}
 		if (!tok_jmp('(')) {
@@ -473,12 +475,14 @@ static void readpre(void)
 		return;
 	}
 	if (!tok_jmp('*')) {
-		struct type type;
+		struct type t;
 		readpre();
-		ts_pop(&type);
-		type.ptr--;
-		ts_push(&type);
-		o_deref(TYPE_BT(&type));
+		ts_pop(&t);
+		t.ptr--;
+		t.flags &= ~T_ARRAY;
+		t.n = 1;
+		ts_push(&t);
+		o_deref(TYPE_BT(&t));
 		return;
 	}
 	if (!tok_jmp('!')) {
@@ -505,6 +509,22 @@ static void readpre(void)
 	}
 	if (!tok_jmp(TOK2("--"))) {
 		inc_pre(o_sub);
+		return;
+	}
+	if (!tok_jmp(TOK_SIZEOF)) {
+		struct type t;
+		int op = !tok_jmp('(');
+		if (readtype(&t)) {
+			o_nogen();
+			readexpr();
+			o_dogen();
+			ts_pop(&t);
+			o_tmpdrop(1);
+		}
+		ts_push_bt(4);
+		o_num(type_totsz(&t), 4);
+		if (op)
+			tok_expect(')');
 		return;
 	}
 	readpost();
@@ -846,7 +866,7 @@ static int readdefs(void (*def)(void *data, struct name *name, int init), void *
 			tok_expect(TOK_NUM);
 			type->n = tok_num();
 			type->ptr++;
-			type->flags = T_ARRAY;
+			type->flags |= T_ARRAY;
 			tok_expect(']');
 		}
 		if (!tok_jmp('(')) {

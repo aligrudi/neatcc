@@ -58,6 +58,7 @@
 
 static char buf[SECSIZE];
 static char *cur;
+static int nogen;
 static long sp;
 static long spsub_addr;
 static long maxsp;
@@ -84,6 +85,8 @@ static long cmp_setl;
 
 static void putint(char *s, long n, int l)
 {
+	if (nogen)
+		return;
 	while (l--) {
 		*s++ = n;
 		n >>= 8;
@@ -92,6 +95,8 @@ static void putint(char *s, long n, int l)
 
 static void os(char *s, int n)
 {
+	if (nogen)
+		return;
 	while (n--)
 		*cur++ = *s++;
 }
@@ -202,7 +207,8 @@ static void tmp_reg(struct tmp *tmp, unsigned dst, int deref)
 	}
 	if (tmp->flags & LOC_SYM) {
 		regop(MOV_I2R, 0, dst, TMP_BT(tmp));
-		out_rela(tmp->addr, codeaddr(), 0);
+		if (!nogen)
+			out_rela(tmp->addr, codeaddr(), 0);
 		oi(0, 4);
 		tmp->addr = dst;
 		regs[dst] = tmp;
@@ -719,7 +725,8 @@ void o_call(int argc, unsigned *bt, unsigned ret_bt)
 	t = &tmp[ntmp - 1];
 	if (t->flags & LOC_SYM) {
 		os("\xe8", 1);		/* call $x */
-		out_rela(t->addr, codeaddr(), 1);
+		if (!nogen)
+			out_rela(t->addr, codeaddr(), 1);
 		oi(-4, 4);
 		o_tmpdrop(1);
 	} else {
@@ -731,4 +738,14 @@ void o_call(int argc, unsigned *bt, unsigned ret_bt)
 			tmp_mem(regs[i]);
 	if (ret_bt)
 		tmp_push_reg(ret_bt, R_RAX);
+}
+
+void o_nogen(void)
+{
+	nogen = 1;
+}
+
+void o_dogen(void)
+{
+	nogen = 0;
 }
