@@ -721,7 +721,7 @@ void o_call(int argc, unsigned *bt, unsigned ret_bt)
 	int i;
 	struct tmp *t;
 	for (i = 0; i < argc; i++)
-		tmp_pop(1, arg_regs[i]);
+		tmp_pop(1, arg_regs[argc - i - 1]);
 	t = &tmp[ntmp - 1];
 	if (t->flags & LOC_SYM) {
 		os("\xe8", 1);		/* call $x */
