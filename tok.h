@@ -21,6 +21,7 @@ enum tok {
 	TOK_STRUCT,
 	TOK_UNION,
 	TOK_ENUM,
+	TOK_TYPEDEF,
 	TOK_IF,
 	TOK_ELSE,
 	TOK_FOR,

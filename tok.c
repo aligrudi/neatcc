@@ -26,6 +26,7 @@ static struct {
 	{"struct", TOK_STRUCT},
 	{"union", TOK_UNION},
 	{"enum", TOK_ENUM},
+	{"typedef", TOK_TYPEDEF},
 	{"if", TOK_IF},
 	{"else", TOK_ELSE},
 	{"for", TOK_FOR},

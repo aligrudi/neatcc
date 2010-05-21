@@ -113,6 +113,30 @@ static int enum_find(int *val, char *name)
 	return 1;
 }
 
+#define MAXTYPEDEFS		(1 << 5)
+
+static struct typdefinfo {
+	char name[NAMELEN];
+	struct type type;
+} typedefs[MAXTYPEDEFS];
+static int ntypedefs;
+
+static void typedef_add(char *name, struct type *type)
+{
+	struct typdefinfo *ti = &typedefs[ntypedefs++];
+	strcpy(ti->name, name);
+	memcpy(&ti->type, type, sizeof(*type));
+}
+
+static int typedef_find(char *name)
+{
+	int i;
+	for (i = 0; i < ntypedefs; i++)
+		if (!strcmp(name, typedefs[i].name))
+			return i;
+	return -1;
+}
+
 #define MAXTYPES		(1 << 7)
 #define MAXFIELDS		(1 << 5)
 
@@ -329,6 +353,15 @@ static int basetype(struct type *type)
 			type->bt = 4 | BT_SIGNED;
 			return 0;
 		default:
+			if (tok_see() == TOK_NAME) {
+				int id = typedef_find(tok_id());
+				if (id != -1) {
+					tok_get();
+					memcpy(type, &typedefs[id].type,
+						sizeof(*type));
+					return 0;
+				}
+			}
 			if (!i)
 				return 1;
 			done = 1;
@@ -993,6 +1026,11 @@ static int readdefs(void (*def)(void *data, struct name *name, int init), void *
 	return 0;
 }
 
+static void typedefdef(void *data, struct name *name, int init)
+{
+	typedef_add(name->name, &name->type);
+}
+
 static void readstmt(void)
 {
 	o_tmpdrop(-1);
@@ -1003,6 +1041,11 @@ static void readstmt(void)
 		return;
 	}
 	if (!readdefs(localdef, NULL)) {
+		tok_expect(';');
+		return;
+	}
+	if (!tok_jmp(TOK_TYPEDEF)) {
+		readdefs(typedefdef, NULL);
 		tok_expect(';');
 		return;
 	}
@@ -1078,6 +1121,11 @@ static void globaldef(void *data, struct name *name, int init)
 
 static void readdecl(void)
 {
+	if (!tok_jmp(TOK_TYPEDEF)) {
+		readdefs(typedefdef, NULL);
+		tok_expect(';');
+		return;
+	}
 	readdefs(globaldef, NULL);
 	if (tok_see() == '{') {
 		readstmt();
