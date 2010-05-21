@@ -31,6 +31,8 @@ enum tok {
 	TOK_CASE,
 	TOK_SIZEOF,
 	TOK_STR,
+	TOK_BREAK,
+	TOK_CONTINUE,
 };
 
 void tok_init(int fd);

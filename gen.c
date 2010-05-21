@@ -898,9 +898,14 @@ long o_jmp(long addr)
 	return codeaddr() - 4;
 }
 
+void o_filljmp2(long addr, long jmpdst)
+{
+	putint(buf + addr, jmpdst - addr - 4, 4);
+}
+
 void o_filljmp(long addr)
 {
-	putint(buf + addr, codeaddr() - addr - 4, 4);
+	o_filljmp2(addr, codeaddr());
 }
 
 void o_call(int argc, unsigned *bt, unsigned ret_bt)

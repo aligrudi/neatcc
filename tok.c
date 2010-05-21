@@ -35,6 +35,8 @@ static struct {
 	{"switch", TOK_SWITCH},
 	{"case", TOK_CASE},
 	{"sizeof", TOK_SIZEOF},
+	{"break", TOK_BREAK},
+	{"continue", TOK_CONTINUE},
 };
 
 static char *tok3[] = {

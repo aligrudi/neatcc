@@ -49,6 +49,7 @@ long o_jz(long addr);
 long o_jnz(long addr);
 long o_jmp(long addr);
 void o_filljmp(long addr);
+void o_filljmp2(long addr, long jmpdst);
 
 long o_func_beg(char *name);
 void o_func_end(void);

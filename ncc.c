@@ -169,6 +169,28 @@ static struct name *struct_field(int id, char *name)
 	die("field not found\n");
 }
 
+#define MAXBREAK		(1 << 7)
+static long breaks[MAXBREAK];
+static int nbreaks;
+static long continues[MAXBREAK];
+static int ncontinues;
+
+static void break_fill(long addr, int till)
+{
+	int i;
+	for (i = till; i < nbreaks; i++)
+		o_filljmp2(breaks[i], addr);
+	nbreaks = till;
+}
+
+static void continue_fill(long addr, int till)
+{
+	int i;
+	for (i = till; i < ncontinues; i++)
+		o_filljmp2(continues[i], addr);
+	ncontinues = till;
+}
+
 static int type_totsz(struct type *t)
 {
 	if (!t->ptr || t->flags & T_ARRAY && (t)->ptr == 1)
@@ -1068,18 +1090,24 @@ static void readstmt(void)
 	}
 	if (!tok_jmp(TOK_WHILE)) {
 		long l1, l2;
+		int break_beg = nbreaks;
+		int continue_beg = ncontinues;
 		l1 = o_mklabel();
 		tok_expect('(');
 		readexpr();
 		tok_expect(')');
 		l2 = o_jz(0);
 		readstmt();
-		o_jz(l1);
+		o_jmp(l1);
 		o_filljmp(l2);
+		break_fill(o_mklabel(), break_beg);
+		continue_fill(l1, continue_beg);
 		return;
 	}
 	if (!tok_jmp(TOK_FOR)) {
 		long check, jump, end, body;
+		int break_beg = nbreaks;
+		int continue_beg = ncontinues;
 		tok_expect('(');
 		if (tok_see() != ';')
 			readestmt();
@@ -1099,6 +1127,8 @@ static void readstmt(void)
 		readstmt();
 		o_jmp(jump);
 		o_filljmp(end);
+		break_fill(o_mklabel(), break_beg);
+		continue_fill(jump, continue_beg);
 		return;
 	}
 	if (!tok_jmp(TOK_RETURN)) {
@@ -1107,6 +1137,16 @@ static void readstmt(void)
 			readexpr();
 		tok_expect(';');
 		o_ret(4 | BT_SIGNED);
+		return;
+	}
+	if (!tok_jmp(TOK_BREAK)) {
+		tok_expect(';');
+		breaks[nbreaks++] = o_jmp(0);
+		return;
+	}
+	if (!tok_jmp(TOK_CONTINUE)) {
+		tok_expect(';');
+		continues[ncontinues++] = o_jmp(0);
 		return;
 	}
 	readestmt();
