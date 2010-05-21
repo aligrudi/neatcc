@@ -1104,6 +1104,22 @@ static void readstmt(void)
 		continue_fill(l1, continue_beg);
 		return;
 	}
+	if (!tok_jmp(TOK_DO)) {
+		long l1, l2;
+		int break_beg = nbreaks;
+		int continue_beg = ncontinues;
+		l1 = o_mklabel();
+		readstmt();
+		tok_expect(TOK_WHILE);
+		tok_expect('(');
+		l2 = o_mklabel();
+		readexpr();
+		o_jnz(l1);
+		tok_expect(')');
+		break_fill(o_mklabel(), break_beg);
+		continue_fill(l2, continue_beg);
+		return;
+	}
 	if (!tok_jmp(TOK_FOR)) {
 		long check, jump, end, body;
 		int break_beg = nbreaks;
