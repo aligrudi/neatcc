@@ -413,6 +413,44 @@ void o_load(void)
 	tmp_reg(t, TMP_REG(t), 1);
 }
 
+static unsigned bt_op(unsigned bt1, unsigned bt2)
+{
+	unsigned s1 = BT_SZ(bt1);
+	unsigned s2 = BT_SZ(bt2);
+	return (bt1 | bt2) & BT_SIGNED | (s1 > s2 ? s1 : s2);
+}
+
+#define TMP_CONST(t)	((t)->flags & LOC_NUM && !((t)->flags & TMP_ADDR))
+
+static int c_binop(long (*cop)(long a, long b, unsigned bt), unsigned bt)
+{
+	struct tmp *t1 = &tmp[ntmp - 1];
+	struct tmp *t2 = &tmp[ntmp - 2];
+	long ret;
+	if (!TMP_CONST(t1) || !TMP_CONST(t2))
+		return 1;
+	if (!bt)
+		bt = bt_op(t1->bt, t2->bt);
+	ret = cop(t2->addr, t1->addr, bt);
+	o_tmpdrop(2);
+	o_num(ret, bt);
+	return 0;
+}
+
+static int c_op(long (*cop)(long a, unsigned bt), unsigned bt)
+{
+	struct tmp *t1 = &tmp[ntmp - 1];
+	long ret;
+	if (!TMP_CONST(t1))
+		return 1;
+	if (!bt)
+		bt = t1->bt;
+	ret = cop(t1->addr, bt);
+	o_tmpdrop(1);
+	o_num(ret, bt);
+	return 0;
+}
+
 static void shx(int uop, int sop)
 {
 	struct tmp *t = &tmp[ntmp - 2];
@@ -424,21 +462,31 @@ static void shx(int uop, int sop)
 	tmp_push_reg(bt, reg);
 }
 
+static long c_shl(long a, long b, unsigned bt)
+{
+	return a << b;
+}
+
 void o_shl(void)
 {
+	if (!c_binop(c_shl, 0))
+		return;
 	shx(4, 4);
+}
+
+static long c_shr(long a, long b, unsigned bt)
+{
+	if (bt & BT_SIGNED)
+		return a >> b;
+	else
+		return (unsigned long) a >> b;
 }
 
 void o_shr(void)
 {
+	if (!c_binop(c_shr, 0))
+		return;
 	shx(5, 7);
-}
-
-static unsigned bt_op(unsigned bt1, unsigned bt2)
-{
-	unsigned s1 = BT_SZ(bt1);
-	unsigned s2 = BT_SZ(bt2);
-	return (bt1 | bt2) & BT_SIGNED | (s1 > s2 ? s1 : s2);
 }
 
 static int mulop(int uop, int sop, int reg)
@@ -460,21 +508,45 @@ static int mulop(int uop, int sop, int reg)
 	return bt_op(bt1, bt2);
 }
 
+static long c_mul(long a, long b, unsigned bt)
+{
+	return a * b;
+}
+
 void o_mul(void)
 {
-	int bt = mulop(4, 5, R_RDX);
+	int bt;
+	if (!c_binop(c_mul, 0))
+		return;
+	bt = mulop(4, 5, R_RDX);
 	tmp_push_reg(bt, R_RAX);
+}
+
+static long c_div(long a, long b, unsigned bt)
+{
+	return a / b;
 }
 
 void o_div(void)
 {
-	int bt = mulop(6, 7, R_RCX);
+	int bt;
+	if (!c_binop(c_div, 0))
+		return;
+	bt = mulop(6, 7, R_RCX);
 	tmp_push_reg(bt, R_RAX);
+}
+
+static long c_mod(long a, long b, unsigned bt)
+{
+	return a % b;
 }
 
 void o_mod(void)
 {
-	int bt = mulop(6, 7, R_RCX);
+	int bt;
+	if (!c_binop(c_mod, 0))
+		return;
+	bt = mulop(6, 7, R_RCX);
 	tmp_push_reg(bt, R_RDX);
 }
 
@@ -508,38 +580,78 @@ static int binop(int op, int *reg)
 	return bt;
 }
 
+static long c_add(long a, long b, unsigned bt)
+{
+	return a + b;
+}
+
 void o_add(void)
 {
 	int reg;
-	int bt = binop(ADD_R2X, &reg);
+	int bt;
+	if (!c_binop(c_add, 0))
+		return;
+	bt = binop(ADD_R2X, &reg);
 	tmp_push_reg(bt, reg);
+}
+
+static long c_xor(long a, long b, unsigned bt)
+{
+	return a ^ b;
 }
 
 void o_xor(void)
 {
 	int reg;
-	int bt = binop(XOR_R2X, &reg);
+	int bt;
+	if (!c_binop(c_xor, 0))
+		return;
+	bt = binop(XOR_R2X, &reg);
 	tmp_push_reg(bt, reg);
+}
+
+static long c_and(long a, long b, unsigned bt)
+{
+	return a & b;
 }
 
 void o_and(void)
 {
 	int reg;
-	int bt = binop(AND_R2X, &reg);
+	int bt;
+	if (!c_binop(c_and, 0))
+		return;
+	bt = binop(AND_R2X, &reg);
 	tmp_push_reg(bt, reg);
+}
+
+static long c_or(long a, long b, unsigned bt)
+{
+	return a | b;
 }
 
 void o_or(void)
 {
 	int reg;
-	int bt = binop(OR_R2X, &reg);
+	int bt;
+	if (!c_binop(c_or, 0))
+		return;
+	bt = binop(OR_R2X, &reg);
 	tmp_push_reg(bt, reg);
+}
+
+static long c_sub(long a, long b, unsigned bt)
+{
+	return a - b;
 }
 
 void o_sub(void)
 {
 	int reg;
-	int bt = binop(SUB_R2X, &reg);
+	int bt;
+	if (!c_binop(c_sub, 0))
+		return;
+	bt = binop(SUB_R2X, &reg);
 	tmp_push_reg(bt, reg);
 }
 
@@ -557,38 +669,87 @@ static void o_cmp(int uop, int sop)
 	cmp_last = codeaddr();
 }
 
+static long c_lt(long a, long b, unsigned bt)
+{
+	return a < b;
+}
+
 void o_lt(void)
 {
+	if (!c_binop(c_lt, 4))
+		return;
 	o_cmp(0x92, 0x9c);
+}
+
+static long c_gt(long a, long b, unsigned bt)
+{
+	return a > b;
 }
 
 void o_gt(void)
 {
+	if (!c_binop(c_gt, 4))
+		return;
 	o_cmp(0x97, 0x9f);
+}
+
+static long c_le(long a, long b, unsigned bt)
+{
+	return a <= b;
 }
 
 void o_le(void)
 {
+	if (!c_binop(c_le, 4))
+		return;
 	o_cmp(0x96, 0x9e);
+}
+
+static long c_ge(long a, long b, unsigned bt)
+{
+	return a >= b;
 }
 
 void o_ge(void)
 {
+	if (!c_binop(c_ge, 4))
+		return;
 	o_cmp(0x93, 0x9d);
+}
+
+static long c_eq(long a, long b, unsigned bt)
+{
+	return a == b;
 }
 
 void o_eq(void)
 {
+	if (!c_binop(c_eq, 4))
+		return;
 	o_cmp(0x94, 0x94);
+}
+
+static long c_neq(long a, long b, unsigned bt)
+{
+	return a != b;
 }
 
 void o_neq(void)
 {
+	if (!c_binop(c_neq, 4))
+		return;
 	o_cmp(0x95, 0x95);
+}
+
+static long c_lnot(long a, unsigned bt)
+{
+	return !a;
 }
 
 void o_lnot(void)
 {
+	if (!c_op(c_lnot, 4))
+		return;
 	if (cmp_last == codeaddr()) {
 		buf[cmp_setl + 1] ^= 0x10;
 	} else {
@@ -597,19 +758,35 @@ void o_lnot(void)
 	}
 }
 
+static long c_neg(long a, unsigned bt)
+{
+	return -a;
+}
+
 void o_neg(void)
 {
 	struct tmp *t = &tmp[ntmp - 1];
-	int reg = TMP_REG(t);
+	int reg;
+	if (!c_op(c_neg, t->bt | BT_SIGNED))
+		return;
+	reg = TMP_REG(t);
 	tmp_pop(1, reg);
 	regop(NEG_REG, 3, reg, BT_TMPBT(t->bt));
 	tmp_push_reg(t->bt, reg);
 }
 
+static long c_not(long a, unsigned bt)
+{
+	return ~a;
+}
+
 void o_not(void)
 {
 	struct tmp *t = &tmp[ntmp - 1];
-	int reg = TMP_REG(t);
+	int reg;
+	if (!c_op(c_not, 0))
+		return;
+	reg = TMP_REG(t);
 	tmp_pop(1, reg);
 	regop(NOT_REG, 2, reg, BT_TMPBT(t->bt));
 	tmp_push_reg(t->bt, reg);
