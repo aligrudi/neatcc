@@ -817,6 +817,11 @@ long o_mklocal(int size)
 	return sp_push((size + 7) & ~0x07);
 }
 
+void o_rmlocal(long addr, int sz)
+{
+	sp = addr - sz;
+}
+
 static int arg_regs[] = {R_RDI, R_RSI, R_RDX, R_RCX, R_R8, R_R9};
 
 long o_arg(int i, unsigned bt)

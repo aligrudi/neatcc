@@ -33,6 +33,7 @@ enum tok {
 	TOK_STR,
 	TOK_BREAK,
 	TOK_CONTINUE,
+	TOK_DEFAULT,
 };
 
 void tok_init(int fd);

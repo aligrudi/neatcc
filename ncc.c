@@ -1053,6 +1053,63 @@ static void typedefdef(void *data, struct name *name, int init)
 	typedef_add(name->name, &name->type);
 }
 
+#define MAXCASES		(1 << 7)
+
+static void readstmt(void);
+
+static void readswitch(void)
+{
+	int break_beg = nbreaks;
+	long val_addr = o_mklocal(8);
+	long matched[MAXCASES];
+	int nmatched = 0;
+	struct type t;
+	long next;
+	int ref = 1;
+	int i;
+	tok_expect('(');
+	readexpr();
+	ts_pop(&t);
+	o_local(val_addr, TYPE_BT(&t));
+	o_tmpswap();
+	o_assign(TYPE_BT(&t));
+	o_tmpdrop(1);
+	tok_expect(')');
+	tok_expect('{');
+	while (tok_jmp('}')) {
+		int n = 0;
+		while (tok_see() == TOK_CASE || tok_see() == TOK_DEFAULT) {
+			if (n++ > 0)
+				matched[nmatched++] = o_jmp(0);
+			if (!ref++)
+				o_filljmp(next);
+			if (!tok_jmp(TOK_CASE)) {
+				readexpr();
+				o_local(val_addr, TYPE_BT(&t));
+				o_eq();
+				next = o_jz(0);
+				ref = 0;
+				tok_expect(':');
+				o_tmpdrop(1);
+				ts_pop(NULL);
+				continue;
+			}
+			if (!tok_jmp(TOK_DEFAULT)) {
+				tok_expect(':');
+				continue;
+			}
+		}
+		for (i = 0; i < nmatched; i++)
+			o_filljmp(matched[i]);
+		nmatched = 0;
+		readstmt();
+	}
+	o_rmlocal(val_addr, 8);
+	if (!ref++)
+		o_filljmp(next);
+	break_fill(o_mklabel(), break_beg);
+}
+
 static void readstmt(void)
 {
 	o_tmpdrop(-1);
@@ -1145,6 +1202,10 @@ static void readstmt(void)
 		o_filljmp(end);
 		break_fill(o_mklabel(), break_beg);
 		continue_fill(jump, continue_beg);
+		return;
+	}
+	if (!tok_jmp(TOK_SWITCH)) {
+		readswitch();
 		return;
 	}
 	if (!tok_jmp(TOK_RETURN)) {

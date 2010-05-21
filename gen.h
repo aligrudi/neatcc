@@ -38,6 +38,7 @@ void o_lnot(void);
 
 long o_mklocal(int size);
 long o_arg(int i, unsigned bt);
+void o_rmlocal(long addr, int sz);
 void o_tmpdrop(int n);
 void o_tmpswap(void);
 void o_tmpcopy(void);
