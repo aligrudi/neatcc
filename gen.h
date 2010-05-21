@@ -43,6 +43,7 @@ void o_tmpswap(void);
 void o_tmpcopy(void);
 void o_tmpfork(void);
 void o_tmpjoin(void);
+int o_popnum(long *c);
 long o_mklabel(void);
 long o_jz(long addr);
 long o_jnz(long addr);

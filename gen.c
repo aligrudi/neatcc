@@ -422,6 +422,16 @@ static unsigned bt_op(unsigned bt1, unsigned bt2)
 
 #define TMP_CONST(t)	((t)->flags & LOC_NUM && !((t)->flags & TMP_ADDR))
 
+int o_popnum(long *c)
+{
+	struct tmp *t = &tmp[ntmp - 1];
+	if (!TMP_CONST(t))
+		return 1;
+	*c = t->addr;
+	o_tmpdrop(1);
+	return 0;
+}
+
 static int c_binop(long (*cop)(long a, long b, unsigned bt), unsigned bt)
 {
 	struct tmp *t1 = &tmp[ntmp - 1];

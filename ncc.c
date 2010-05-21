@@ -752,18 +752,46 @@ static void reador(void)
 
 static void readcexpr(void)
 {
+	long l1, l2;
+	long c;
+	int cexpr, nogen;
 	reador();
-	if (!tok_jmp('?')) {
-		long l1, l2;
+	if (tok_jmp('?'))
+		return;
+	cexpr = !o_popnum(&c);
+	ts_pop(NULL);
+	if (cexpr) {
+		if (!c)
+			nogen = !o_nogen();
+	} else {
 		l1 = o_jz(0);
-		ts_pop(NULL);
-		reador();
+	}
+	reador();
+	if (!cexpr) {
 		o_tmpfork();
 		l2 = o_jmp(0);
-		ts_pop(NULL);
-		tok_expect(':');
+	}
+	ts_pop(NULL);
+	tok_expect(':');
+	if (cexpr) {
+		if (c) {
+			nogen = !o_nogen();
+		} else {
+			if (nogen)
+				o_dogen();
+			o_tmpdrop(1);
+		}
+	} else {
 		o_filljmp(l1);
-		reador();
+	}
+	reador();
+	if (cexpr) {
+		if (c) {
+			if (nogen)
+				o_dogen();
+			o_tmpdrop(1);
+		}
+	} else {
 		o_tmpjoin();
 		o_filljmp(l2);
 	}
@@ -875,8 +903,12 @@ static int readdefs(void (*def)(void *data, struct name *name, int init), void *
 		tok_expect(TOK_NAME);
 		strcpy(name.name, tok_id());
 		if (!tok_jmp('[')) {
-			tok_expect(TOK_NUM);
-			type->n = tok_num();
+			long n;
+			readexpr();
+			ts_pop(NULL);
+			if (o_popnum(&n))
+				die("const expr expected\n");
+			type->n = n;
 			type->ptr++;
 			type->flags |= T_ARRAY;
 			tok_expect(']');
