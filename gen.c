@@ -741,9 +741,9 @@ void o_call(int argc, unsigned *bt, unsigned ret_bt)
 		tmp_push_reg(ret_bt, R_RAX);
 }
 
-void o_nogen(void)
+int o_nogen(void)
 {
-	nogen = 1;
+	return nogen++;
 }
 
 void o_dogen(void)

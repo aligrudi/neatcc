@@ -526,9 +526,10 @@ static void readpre(void)
 		struct type t;
 		int op = !tok_jmp('(');
 		if (readtype(&t)) {
-			o_nogen();
+			int nogen = !o_nogen();
 			readexpr();
-			o_dogen();
+			if (nogen)
+				o_dogen();
 			ts_pop(&t);
 			o_tmpdrop(1);
 		}

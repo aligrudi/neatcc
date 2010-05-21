@@ -56,7 +56,7 @@ long o_mkvar(char *name, int size);
 long o_mkundef(char *name);
 long o_mkdat(char *name, char *buf, int len);
 
-void o_nogen(void);
+int o_nogen(void);
 void o_dogen(void);
 
 void out_init(void);
