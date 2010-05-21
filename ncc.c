@@ -87,6 +87,32 @@ static void die(char *s)
 	exit(1);
 }
 
+#define MAXENUMS		(1 << 10)
+
+static struct enumval {
+	char name[NAMELEN];
+	int n;
+} enums[MAXENUMS];
+static int nenums;
+
+static void enum_add(char *name, int val)
+{
+	struct enumval *ev = &enums[nenums++];
+	strcpy(ev->name, name);
+	ev->n = val;
+}
+
+static int enum_find(int *val, char *name)
+{
+	int i;
+	for (i = 0; i < nenums; i++)
+		if (!strcmp(name, enums[i].name)) {
+			*val = enums[i].n;
+			return 0;
+		}
+	return 1;
+}
+
 #define MAXTYPES		(1 << 7)
 #define MAXFIELDS		(1 << 5)
 
@@ -229,6 +255,26 @@ static int struct_create(char *name, int isunion)
 
 static void readexpr(void);
 
+static void enum_create(void)
+{
+	long n = 0;
+	tok_expect('{');
+	while (tok_jmp('}')) {
+		char name[NAMELEN];
+		tok_expect(TOK_NAME);
+		strcpy(name, tok_id());
+		if (tok_see() == '=') {
+			tok_get();
+			readexpr();
+			ts_pop(NULL);
+			if (o_popnum(&n))
+				die("const expr expected!\n");
+		}
+		enum_add(name, n++);
+		tok_jmp(',');
+	}
+}
+
 static int basetype(struct type *type)
 {
 	int sign = 1;
@@ -274,6 +320,13 @@ static int basetype(struct type *type)
 				type->id = struct_find(name, isunion);
 			type->flags = T_STRUCT;
 			type->bt = 8;
+			return 0;
+		case TOK_ENUM:
+			tok_get();
+			tok_expect(TOK_NAME);
+			if (tok_see() == '{')
+				enum_create();
+			type->bt = 4 | BT_SIGNED;
 			return 0;
 		default:
 			if (!i)
@@ -326,6 +379,7 @@ static void readprimary(void)
 		return;
 	}
 	if (!tok_jmp(TOK_NAME)) {
+		int n;
 		for (i = 0; i < nlocals; i++) {
 			struct type *t = &locals[i].type;
 			if (!strcmp(locals[i].name, tok_id())) {
@@ -345,6 +399,11 @@ static void readprimary(void)
 					o_addr();
 				return;
 			}
+		}
+		if (!enum_find(&n, tok_id())) {
+			ts_push_bt(4 | BT_SIGNED);
+			o_num(n, 4 | BT_SIGNED);
+			return;
 		}
 		strcpy(name.name, tok_id());
 		name.addr = o_mkundef(name.name);
