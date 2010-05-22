@@ -44,6 +44,7 @@ void o_tmpswap(void);
 void o_tmpcopy(void);
 void o_tmpfork(void);
 void o_tmpjoin(void);
+void o_cast(unsigned bt);
 int o_popnum(long *c);
 long o_mklabel(void);
 long o_jz(long addr);

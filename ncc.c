@@ -410,6 +410,8 @@ static int readtype(struct type *type)
 	return 0;
 }
 
+static void readpre(void);
+
 static void readprimary(void)
 {
 	struct name name;
@@ -468,8 +470,19 @@ static void readprimary(void)
 		return;
 	}
 	if (!tok_jmp('(')) {
-		readexpr();
-		tok_expect(')');
+		struct type t;
+		if (!readtype(&t)) {
+			struct type o;
+			tok_expect(')');
+			readpre();
+			ts_pop(&o);
+			ts_push(&t);
+			if (!t.ptr || !o.ptr)
+				o_cast(TYPE_BT(&t));
+		} else {
+			readexpr();
+			tok_expect(')');
+		}
 		return;
 	}
 }
@@ -535,16 +548,17 @@ static void readpost(void)
 		}
 		if (!tok_jmp('(')) {
 			int argc = 0;
+			struct type t;
 			unsigned bt[MAXARGS];
 			if (tok_see() != ')') {
 				readexpr();
-				bt[argc++] = 4 | BT_SIGNED;
-				ts_pop(NULL);
+				ts_pop(&t);
+				bt[argc++] = TYPE_BT(&t);
 			}
 			while (!tok_jmp(',')) {
 				readexpr();
-				bt[argc++] = 4 | BT_SIGNED;
-				ts_pop(NULL);
+				ts_pop(&t);
+				bt[argc++] = TYPE_BT(&t);
 			}
 			tok_expect(')');
 			ts_pop(NULL);
@@ -572,8 +586,6 @@ static void readpost(void)
 		break;
 	}
 }
-
-static void readpre(void);
 
 static void inc_pre(void (*op)(void))
 {
