@@ -108,7 +108,7 @@ static void enum_add(char *name, int val)
 static int enum_find(int *val, char *name)
 {
 	int i;
-	for (i = 0; i < nenums; i++)
+	for (i = nenums - 1; i >= 0; --i)
 		if (!strcmp(name, enums[i].name)) {
 			*val = enums[i].n;
 			return 0;
@@ -134,7 +134,7 @@ static void typedef_add(char *name, struct type *type)
 static int typedef_find(char *name)
 {
 	int i;
-	for (i = 0; i < ntypedefs; i++)
+	for (i = ntypedefs - 1; i >= 0; --i)
 		if (!strcmp(name, typedefs[i].name))
 			return i;
 	return -1;
@@ -155,7 +155,7 @@ static int nstructs;
 static int struct_find(char *name, int isunion)
 {
 	int i;
-	for (i = 0; i < nstructs; i++)
+	for (i = nstructs - 1; i >= 0; --i)
 		if (!strcmp(name, structs[i].name) &&
 				structs[i].isunion == isunion)
 			return i;
@@ -440,7 +440,7 @@ static void readprimary(void)
 	}
 	if (!tok_jmp(TOK_NAME)) {
 		int n;
-		for (i = 0; i < nlocals; i++) {
+		for (i = nlocals - 1; i >= 0; --i) {
 			struct type *t = &locals[i].type;
 			if (!strcmp(locals[i].name, tok_id())) {
 				o_local(locals[i].addr, TYPE_BT(t));
@@ -1174,8 +1174,18 @@ static void readstmt(void)
 	o_tmpdrop(-1);
 	nts = 0;
 	if (!tok_jmp('{')) {
+		int _nlocals = nlocals;
+		int _nenums = nenums;
+		int _ntypedefs = ntypedefs;
+		int _nstructs = nstructs;
+		int _nfuncs = nfuncs;
 		while (tok_jmp('}'))
 			readstmt();
+		nlocals = _nlocals;
+		nenums = _nenums;
+		ntypedefs = _ntypedefs;
+		nstructs = _nstructs;
+		nfuncs = _nfuncs;
 		return;
 	}
 	if (!readdefs(localdef, NULL)) {
