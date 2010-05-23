@@ -435,8 +435,8 @@ void o_cast(unsigned bt)
 	if (t->bt == bt)
 		return;
 	if (t->flags & LOC_NUM) {
-		if (!(bt & BT_SIGNED))
-			t->addr &= ((1 << BT_SZ(bt) * 8) - 1);
+		if (!(bt & BT_SIGNED) && BT_SZ(bt) != 8)
+			t->addr &= ((1l << (long) (BT_SZ(bt) * 8)) - 1);
 		t->bt = bt;
 		return;
 	}
