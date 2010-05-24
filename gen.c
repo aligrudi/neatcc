@@ -228,9 +228,18 @@ static void mov_m2r(int dst, int base, int off, int bt1, int bt2)
 	}
 }
 
+static void num_cast(struct tmp *t, unsigned bt)
+{
+	if (!(bt & BT_SIGNED) && BT_SZ(bt) != 8)
+		t->addr &= ((1l << (long) (BT_SZ(bt) * 8)) - 1);
+	t->bt = bt;
+}
+
 static void num_reg(int reg, unsigned bt, long num)
 {
 	int op = MOV_I2R + (reg & 7);
+	if (BT_SZ(bt) == 8 && num >= 0 && num == (unsigned) num)
+		bt = 4;
 	o_op(&op, 1, 0, reg, bt);
 	oi(num, BT_SZ(bt));
 }
@@ -242,7 +251,8 @@ static void tmp_reg(struct tmp *tmp, int dst, unsigned bt, int deref)
 	if (deref)
 		tmp->flags &= ~TMP_ADDR;
 	if (tmp->flags & LOC_NUM) {
-		tmp->bt = BT_TMPBT(TMP_BT(tmp));
+		num_cast(tmp, bt);
+		tmp->bt = BT_TMPBT(bt);
 		num_reg(dst, tmp->bt, tmp->addr);
 		tmp->addr = dst;
 		regs[dst] = tmp;
@@ -435,9 +445,7 @@ void o_cast(unsigned bt)
 	if (t->bt == bt)
 		return;
 	if (t->flags & LOC_NUM) {
-		if (!(bt & BT_SIGNED) && BT_SZ(bt) != 8)
-			t->addr &= ((1l << (long) (BT_SZ(bt) * 8)) - 1);
-		t->bt = bt;
+		num_cast(t, bt);
 		return;
 	}
 	reg = BT_SZ(bt) == 1 ? TMP_BYTEREG(t) : TMP_REG(t);
