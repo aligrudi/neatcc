@@ -23,8 +23,6 @@
 
 #define TYPE_BT(t)		((t)->ptr ? 8 : (t)->bt)
 #define TYPE_SZ(t)		((t)->ptr ? 8 : (t)->bt & BT_SZMASK)
-#define TYPE_DEREF_BT(t)	((t)->ptr > 1 ? 8 : (t)->bt)
-#define TYPE_DEREF_SZ(t)	((t)->ptr > 1 ? 8 : (t)->bt & BT_SZMASK)
 
 #define T_ARRAY		0x01
 #define T_STRUCT	0x02
@@ -33,9 +31,8 @@
 struct type {
 	unsigned bt;
 	unsigned flags;
-	int id;		/* for structs */
 	int ptr;
-	int n;
+	int id;		/* for structs, functions and arrays */
 };
 
 /* type stack */
@@ -52,7 +49,7 @@ static void ts_push_bt(unsigned bt)
 static void ts_push(struct type *t)
 {
 	memcpy(&ts[nts++], t, sizeof(*t));
-	if ((t->flags & T_FUNC && !t->ptr) || t->flags & T_ARRAY)
+	if (t->flags & (T_FUNC | T_ARRAY) && !t->ptr)
 		o_addr();
 }
 
@@ -140,6 +137,30 @@ static int typedef_find(char *name)
 	return -1;
 }
 
+#define MAXARRAYS		(1 << 5)
+
+static struct array {
+	struct type type;
+	int n;
+} arrays[MAXARRAYS];
+static int narrays;
+
+static int array_add(struct type *type, int n)
+{
+	struct array *a = &arrays[narrays++];
+	memcpy(&a->type, type, sizeof(*type));
+	a->n = n;
+	return a - arrays;
+}
+
+static void array2ptr(struct type *t)
+{
+	if (!(t->flags & T_ARRAY) || t->ptr)
+		return;
+	memcpy(t, &arrays[t->id].type, sizeof(*t));
+	t->ptr++;
+}
+
 #define MAXTYPES		(1 << 7)
 #define MAXFIELDS		(1 << 5)
 
@@ -196,10 +217,27 @@ static void continue_fill(long addr, int till)
 
 static int type_totsz(struct type *t)
 {
-	if (!t->ptr || t->flags & T_ARRAY && (t)->ptr == 1)
-		return t->n * (t->flags & T_STRUCT ? structs[t->id].size :
-				BT_SZ(t->bt));
-	return 8;
+	if (t->ptr)
+		return 8;
+	if (t->flags & T_ARRAY)
+		return arrays[t->id].n * type_totsz(&arrays[t->id].type);
+	return t->flags & T_STRUCT ? structs[t->id].size : BT_SZ(t->bt);
+}
+
+static unsigned type_btde(struct type *t)
+{
+	if (t->flags & T_ARRAY)
+		return t->ptr > 0 ? 8 : TYPE_BT(&arrays[t->id].type);
+	else
+		return t->ptr > 1 ? 8 : t->bt;
+}
+
+static unsigned type_szde(struct type *t)
+{
+	if (t->flags & T_ARRAY)
+		return t->ptr > 0 ? 8 : TYPE_SZ(&arrays[t->id].type);
+	else
+		return t->ptr > 1 ? 8 : BT_SZ(t->bt);
 }
 
 static int tok_jmp(int tok)
@@ -246,6 +284,8 @@ static void ts_binop_add(void (*o_sth)(void))
 	struct type t1, t2;
 	ts_pop(&t1);
 	ts_pop(&t2);
+	array2ptr(&t1);
+	array2ptr(&t2);
 	if (!t1.ptr && !t2.ptr) {
 		o_sth();
 		ts_push_bt(bt_op(TYPE_BT(&t1), TYPE_BT(&t2)));
@@ -258,13 +298,13 @@ static void ts_binop_add(void (*o_sth)(void))
 		o_tmpswap();
 	}
 	if (!t1.ptr && t2.ptr)
-		if (TYPE_DEREF_SZ(&t2) > 1) {
-			o_num(shifts(TYPE_DEREF_SZ(&t2)), 1);
+		if (type_szde(&t2) > 1) {
+			o_num(shifts(type_szde(&t2)), 1);
 			o_shl();
 		}
 	o_sth();
 	if (t1.ptr && t2.ptr) {
-		o_num(shifts(TYPE_DEREF_SZ(&t1)), 1);
+		o_num(shifts(type_szde(&t1)), 1);
 		o_shr();
 		ts_push_bt(4 | BT_SIGNED);
 	} else {
@@ -334,7 +374,6 @@ static int basetype(struct type *type)
 	char name[NAMELEN];
 	type->flags = 0;
 	type->ptr = 0;
-	type->n = 1;
 	while (!done) {
 		switch (tok_see()) {
 		case TOK_VOID:
@@ -431,7 +470,6 @@ static void readprimary(void)
 		t.bt = 1 | BT_SIGNED;
 		t.ptr = 1;
 		t.flags = 0;
-		t.n = 1;
 		ts_push(&t);
 		len = tok_str(buf);
 		o_symaddr(o_mkdat(NULL, buf, len), TYPE_BT(&t));
@@ -486,14 +524,15 @@ static void readprimary(void)
 	}
 }
 
-void arrayderef(unsigned bt)
+void arrayderef(struct type *t)
 {
-	if (BT_SZ(bt) > 1) {
-		o_num(BT_SZ(bt), 4);
+	int sz = type_totsz(t);
+	if (sz > 1) {
+		o_num(sz, 4);
 		o_mul();
 	}
 	o_add();
-	o_deref(bt);
+	o_deref(TYPE_BT(t));
 }
 
 static void inc_post(void (*op)(void))
@@ -527,6 +566,60 @@ static void readfield(void)
 	ts_push(&field->type);
 }
 
+#define MAXFUNCS		(1 << 10)
+
+static struct funcinfo {
+	struct type args[MAXFIELDS];
+	struct type ret;
+	int nargs;
+} funcs[MAXFUNCS];
+static int nfuncs;
+
+static int func_create(struct type *ret, struct name *args, int nargs)
+{
+	struct funcinfo *fi = &funcs[nfuncs++];
+	int i;
+	memcpy(&fi->ret, ret, sizeof(*ret));
+	for (i = 0; i < nargs; i++)
+		memcpy(&fi->args[i], &args[i].type, sizeof(*ret));
+	fi->nargs = nargs;
+	return fi - funcs;
+}
+
+static void readcall(void)
+{
+	struct type t;
+	unsigned bt[MAXARGS];
+	unsigned ret = 4 | BT_SIGNED;
+	struct funcinfo *fi;
+	int argc = 0;
+	unsigned ret;
+	int i;
+	if (tok_see() != ')') {
+		readexpr();
+		ts_pop(&t);
+		bt[argc++] = TYPE_BT(&t);
+	}
+	while (!tok_jmp(',')) {
+		readexpr();
+		ts_pop(&t);
+		bt[argc++] = TYPE_BT(&t);
+	}
+	tok_expect(')');
+	ts_pop(&t);
+	if (t.flags & T_FUNC && t.ptr > 0)
+		o_deref(8);
+	fi = t.flags & T_FUNC ? &funcs[t.id] : NULL;
+	if (fi)
+		for (i = 0; i < fi->nargs; i++)
+			bt[i] = TYPE_BT(&fi->args[i]);
+	o_call(argc, bt, fi ? TYPE_BT(&fi->ret) : 4 | BT_SIGNED);
+	if (fi)
+		ts_push(&fi->ret);
+	else
+		ts_push_bt(4 | BT_SIGNED);
+}
+
 static void readpost(void)
 {
 	readprimary();
@@ -537,33 +630,14 @@ static void readpost(void)
 			readexpr();
 			ts_pop(NULL);
 			tok_expect(']');
-			arrayderef(TYPE_DEREF_BT(&t));
+			array2ptr(&t);
 			t.ptr--;
-			t.flags &= ~T_ARRAY;
-			t.n = 1;
+			arrayderef(&t);
 			ts_push(&t);
 			continue;
 		}
 		if (!tok_jmp('(')) {
-			int argc = 0;
-			struct type t;
-			unsigned bt[MAXARGS];
-			if (tok_see() != ')') {
-				readexpr();
-				ts_pop(&t);
-				bt[argc++] = TYPE_BT(&t);
-			}
-			while (!tok_jmp(',')) {
-				readexpr();
-				ts_pop(&t);
-				bt[argc++] = TYPE_BT(&t);
-			}
-			tok_expect(')');
-			ts_pop(&t);
-			if (t.flags & T_FUNC && t.ptr > 0)
-				o_deref(8);
-			o_call(argc, bt, 4 | BT_SIGNED);
-			ts_push_bt(4 | BT_SIGNED);
+			readcall();
 			continue;
 		}
 		if (!tok_jmp(TOK2("++"))) {
@@ -616,8 +690,7 @@ static void readpre(void)
 		struct type t;
 		readpre();
 		ts_pop(&t);
-		t.flags &= ~T_ARRAY;
-		t.n = 1;
+		array2ptr(&t);
 		if (!(t.flags & T_FUNC) || t.ptr > 0) {
 			t.ptr--;
 			o_deref(TYPE_BT(&t));
@@ -1034,75 +1107,68 @@ static int readargs(struct name *args)
 	return nargs;
 }
 
-#define MAXFUNCS		(1 << 10)
-
-static struct funcinfo {
-	struct type args[MAXFIELDS];
-	struct type ret;
-	int nargs;
-} funcs[MAXFUNCS];
-static int nfuncs;
-
-static int func_create(struct type *ret, struct name *args, int nargs)
-{
-	struct funcinfo *fi = &funcs[nfuncs++];
-	int i;
-	memcpy(&fi->ret, ret, sizeof(*ret));
-	for (i = 0; i < nargs; i++)
-		memcpy(&fi->args[i], &args[i].type, sizeof(*ret));
-	fi->nargs = nargs;
-	return fi - funcs;
-}
-
 static int readdefs(void (*def)(void *data, struct name *name, int init), void *data)
 {
 	struct type base;
 	if (basetype(&base))
 		return 1;
 	while (tok_see() != ';' && tok_see() != '{') {
+		struct type tpool[3];
 		struct name name;
-		struct type *type = &name.type;
-		struct type ftype;
-		int funcvar = 0;
+		int npool = 0;
+		struct type *type = &tpool[npool++];
+		struct type *func = NULL;
+		struct type *ret = NULL;
+		memset(tpool, 0, sizeof(tpool));
 		memcpy(type, &base, sizeof(base));
-		memset(&ftype, 0, sizeof(ftype));
 		readptrs(type);
 		if (!tok_jmp('(')) {
-			funcvar = 1;
-			type->n = 1;
-			readptrs(&ftype);
+			ret = type;
+			type = &tpool[npool++];
+			func = type;
+			readptrs(type);
 		}
 		tok_expect(TOK_NAME);
 		strcpy(name.name, tok_id());
-		if (!tok_jmp('[')) {
+		while (!tok_jmp('[')) {
 			long n;
 			readexpr();
 			ts_pop(NULL);
 			if (o_popnum(&n))
 				die("const expr expected\n");
-			type->n = n;
-			type->ptr++;
-			type->flags |= T_ARRAY;
+			type->id = array_add(type, n);
+			if (type->flags & T_FUNC)
+				func = &arrays[type->id].type;
+			type->flags = T_ARRAY;
+			type->bt = 8;
+			type->ptr = 0;
 			tok_expect(']');
 		}
-		if (funcvar)
+		if (func)
 			tok_expect(')');
 		if (tok_see() == '(') {
 			struct name args[MAXARGS];
 			int nargs = readargs(args);
-			ftype.flags = T_FUNC;
-			ftype.bt = 8;
-			ftype.id = func_create(type, args, nargs);
-			memcpy(type, &ftype, sizeof(ftype));
-			if (!funcvar) {
-				type->n = 1;
+			int fdef = !func;
+			if (!func) {
+				ret = type;
+				type = &tpool[npool++];
+				func = type;
+			}
+			func->flags = T_FUNC;
+			func->bt = 8;
+			func->id = func_create(ret, args, nargs);
+			if (fdef) {
 				if (tok_see() != '{')
 					continue;
+				memcpy(&name.type, func, sizeof(*func));
 				funcdef(&name, args, nargs);
 				return 0;
 			}
 		}
+		memcpy(&name.type, type, sizeof(*type));
 		def(data, &name, !tok_jmp('='));
+		tok_jmp(',');
 	}
 	return 0;
 }
@@ -1179,6 +1245,7 @@ static void readstmt(void)
 		int _ntypedefs = ntypedefs;
 		int _nstructs = nstructs;
 		int _nfuncs = nfuncs;
+		int _narrays = narrays;
 		while (tok_jmp('}'))
 			readstmt();
 		nlocals = _nlocals;
@@ -1186,6 +1253,7 @@ static void readstmt(void)
 		ntypedefs = _ntypedefs;
 		nstructs = _nstructs;
 		nfuncs = _nfuncs;
+		narrays = _narrays;
 		return;
 	}
 	if (!readdefs(localdef, NULL)) {
