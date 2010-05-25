@@ -224,14 +224,6 @@ static int type_totsz(struct type *t)
 	return t->flags & T_STRUCT ? structs[t->id].size : BT_SZ(t->bt);
 }
 
-static unsigned type_btde(struct type *t)
-{
-	if (t->flags & T_ARRAY)
-		return t->ptr > 0 ? 8 : TYPE_BT(&arrays[t->id].type);
-	else
-		return t->ptr > 1 ? 8 : t->bt;
-}
-
 static unsigned type_szde(struct type *t)
 {
 	if (t->flags & T_ARRAY)
@@ -590,10 +582,8 @@ static void readcall(void)
 {
 	struct type t;
 	unsigned bt[MAXARGS];
-	unsigned ret = 4 | BT_SIGNED;
 	struct funcinfo *fi;
 	int argc = 0;
-	unsigned ret;
 	int i;
 	if (tok_see() != ')') {
 		readexpr();
