@@ -28,6 +28,9 @@
 #define T_STRUCT	0x02
 #define T_FUNC		0x04
 
+#define F_INIT		0x01
+#define F_STATIC	0x02
+
 struct type {
 	unsigned bt;
 	unsigned flags;
@@ -304,7 +307,7 @@ static void ts_binop_add(void (*o_sth)(void))
 	}
 }
 
-static void structdef(void *data, struct name *name, int init)
+static void structdef(void *data, struct name *name, unsigned flags)
 {
 	struct structinfo *si = data;
 	if (si->isunion) {
@@ -318,7 +321,7 @@ static void structdef(void *data, struct name *name, int init)
 	memcpy(&si->fields[si->nfields++], name, sizeof(*name));
 }
 
-static int readdefs(void (*def)(void *, struct name *, int init), void *data);
+static int readdefs(void (*def)(void *, struct name *, unsigned f), void *data);
 
 static int struct_create(char *name, int isunion)
 {
@@ -356,7 +359,7 @@ static void enum_create(void)
 	}
 }
 
-static int basetype(struct type *type)
+static int basetype(struct type *type, unsigned *flags)
 {
 	int sign = 1;
 	int size = 4;
@@ -364,10 +367,14 @@ static int basetype(struct type *type)
 	int i = 0;
 	int isunion;
 	char name[NAMELEN];
+	*flags = 0;
 	type->flags = 0;
 	type->ptr = 0;
 	while (!done) {
 		switch (tok_see()) {
+		case TOK_STATIC:
+			*flags |= F_STATIC;
+			break;
 		case TOK_VOID:
 			sign = 0;
 			size = 0;
@@ -398,7 +405,7 @@ static int basetype(struct type *type)
 				type->id = struct_create(name, isunion);
 			else
 				type->id = struct_find(name, isunion);
-			type->flags = T_STRUCT;
+			type->flags |= T_STRUCT;
 			type->bt = 8;
 			return 0;
 		case TOK_ENUM:
@@ -438,7 +445,8 @@ static void readptrs(struct type *type)
 
 static int readtype(struct type *type)
 {
-	if (basetype(type))
+	unsigned flags;
+	if (basetype(type, &flags))
 		return 1;
 	readptrs(type);
 	return 0;
@@ -1059,11 +1067,22 @@ static void readestmt(void)
 	} while (!tok_jmp(','));
 }
 
-static void localdef(void *data, struct name *name, int init)
+static void globaldef(void *data, struct name *name, unsigned flags)
 {
+	char *varname = flags & F_STATIC ? NULL : name->name;
+	name->addr = o_mkvar(varname, type_totsz(&name->type));
+	global_add(name);
+}
+
+static void localdef(void *data, struct name *name, unsigned flags)
+{
+	if (flags & F_STATIC) {
+		globaldef(data, name, flags);
+		return;
+	}
 	name->addr = o_mklocal(type_totsz(&name->type));
 	local_add(name);
-	if (init) {
+	if (flags & F_INIT) {
 		struct type *t = &name->type;
 		o_local(locals[nlocals - 1].addr, TYPE_BT(t));
 		readexpr();
@@ -1097,10 +1116,12 @@ static int readargs(struct name *args)
 	return nargs;
 }
 
-static int readdefs(void (*def)(void *data, struct name *name, int init), void *data)
+static int readdefs(void (*def)(void *data, struct name *name, unsigned flags),
+			void *data)
 {
 	struct type base;
-	if (basetype(&base))
+	unsigned flags;
+	if (basetype(&base, &flags))
 		return 1;
 	while (tok_see() != ';' && tok_see() != '{') {
 		struct type tpool[3];
@@ -1157,13 +1178,15 @@ static int readdefs(void (*def)(void *data, struct name *name, int init), void *
 			}
 		}
 		memcpy(&name.type, type, sizeof(*type));
-		def(data, &name, !tok_jmp('='));
+		if (!tok_jmp('='))
+			flags |= F_INIT;
+		def(data, &name, flags);
 		tok_jmp(',');
 	}
 	return 0;
 }
 
-static void typedefdef(void *data, struct name *name, int init)
+static void typedefdef(void *data, struct name *name, unsigned flags)
 {
 	typedef_add(name->name, &name->type);
 }
@@ -1231,6 +1254,7 @@ static void readstmt(void)
 	nts = 0;
 	if (!tok_jmp('{')) {
 		int _nlocals = nlocals;
+		int _nglobals = nglobals;
 		int _nenums = nenums;
 		int _ntypedefs = ntypedefs;
 		int _nstructs = nstructs;
@@ -1244,6 +1268,7 @@ static void readstmt(void)
 		nstructs = _nstructs;
 		nfuncs = _nfuncs;
 		narrays = _narrays;
+		nglobals = _nglobals;
 		return;
 	}
 	if (!readdefs(localdef, NULL)) {
@@ -1355,12 +1380,6 @@ static void readstmt(void)
 	}
 	readestmt();
 	tok_expect(';');
-}
-
-static void globaldef(void *data, struct name *name, int init)
-{
-	name->addr = o_mkvar(name->name, type_totsz(&name->type));
-	global_add(name);
 }
 
 static void readdecl(void)
