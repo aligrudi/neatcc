@@ -574,6 +574,7 @@ static struct funcinfo {
 	int nargs;
 } funcs[MAXFUNCS];
 static int nfuncs;
+static unsigned ret_bt;
 
 static int func_create(struct type *ret, struct name *args, int nargs)
 {
@@ -1098,6 +1099,7 @@ static void funcdef(struct name *name, struct name *args,
 	int i;
 	name->addr = o_func_beg(name->name, F_GLOBAL(flags));
 	global_add(name);
+	ret_bt = TYPE_BT(&funcs[name->addr].ret);
 	for (i = 0; i < nargs; i++) {
 		args[i].addr = o_arg(i, type_totsz(&args[i].type));
 		local_add(&args[i]);
@@ -1368,7 +1370,7 @@ static void readstmt(void)
 		if (ret)
 			readexpr();
 		tok_expect(';');
-		o_ret(4 | BT_SIGNED);
+		o_ret(ret_bt);
 		return;
 	}
 	if (!tok_jmp(TOK_BREAK)) {
