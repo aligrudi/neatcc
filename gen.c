@@ -453,9 +453,9 @@ void o_cast(unsigned bt)
 	tmp_push_reg(bt, reg);
 }
 
-long o_func_beg(char *name)
+long o_func_beg(char *name, int global)
 {
-	long addr = out_func_beg(name);
+	long addr = out_func_beg(name, global);
 	cur = buf;
 	os("\x55", 1);			/* push %rbp */
 	os("\x48\x89\xe5", 3);		/* mov %rsp, %rbp */

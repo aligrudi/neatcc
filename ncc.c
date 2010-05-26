@@ -472,7 +472,7 @@ static void readprimary(void)
 		t.flags = 0;
 		ts_push(&t);
 		len = tok_str(buf);
-		o_symaddr(o_mkdat(NULL, buf, len), TYPE_BT(&t));
+		o_symaddr(o_mkdat(NULL, buf, len, 0), TYPE_BT(&t));
 		o_addr();
 		return;
 	}
@@ -1067,10 +1067,12 @@ static void readestmt(void)
 	} while (!tok_jmp(','));
 }
 
+#define F_GLOBAL(flags)		(!((flags) & F_STATIC))
+
 static void globaldef(void *data, struct name *name, unsigned flags)
 {
 	char *varname = flags & F_STATIC ? NULL : name->name;
-	name->addr = o_mkvar(varname, type_totsz(&name->type));
+	name->addr = o_mkvar(varname, type_totsz(&name->type), F_GLOBAL(flags));
 	global_add(name);
 }
 
@@ -1090,10 +1092,11 @@ static void localdef(void *data, struct name *name, unsigned flags)
 	}
 }
 
-static void funcdef(struct name *name, struct name *args, int nargs)
+static void funcdef(struct name *name, struct name *args,
+			int nargs, unsigned flags)
 {
 	int i;
-	name->addr = o_func_beg(name->name);
+	name->addr = o_func_beg(name->name, F_GLOBAL(flags));
 	global_add(name);
 	for (i = 0; i < nargs; i++) {
 		args[i].addr = o_arg(i, type_totsz(&args[i].type));
@@ -1173,7 +1176,7 @@ static int readdefs(void (*def)(void *data, struct name *name, unsigned flags),
 				if (tok_see() != '{')
 					continue;
 				memcpy(&name.type, func, sizeof(*func));
-				funcdef(&name, args, nargs);
+				funcdef(&name, args, nargs, flags);
 				return 0;
 			}
 		}

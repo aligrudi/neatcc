@@ -53,18 +53,18 @@ long o_jmp(long addr);
 void o_filljmp(long addr);
 void o_filljmp2(long addr, long jmpdst);
 
-long o_func_beg(char *name);
+long o_func_beg(char *name, int global);
 void o_func_end(void);
 void o_ret(unsigned bt);
-long o_mkvar(char *name, int size);
+long o_mkvar(char *name, int size, int global);
+long o_mkdat(char *name, char *buf, int len, int global);
 long o_mkundef(char *name);
-long o_mkdat(char *name, char *buf, int len);
 
 int o_nogen(void);
 void o_dogen(void);
 
 void out_init(void);
 void out_write(int fd);
-long out_func_beg(char *name);
+long out_func_beg(char *name, int global);
 void out_func_end(char *buf, int len);
 void out_rela(long addr, int off, int rel);

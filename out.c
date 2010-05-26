@@ -18,7 +18,7 @@ static Elf64_Ehdr ehdr;
 static Elf64_Shdr shdr[MAXSECS];
 static int nshdr = SEC_BEG;
 static Elf64_Sym syms[MAXSYMS];
-static int nsyms;
+static int nsyms = 1;
 static char symstr[MAXSYMS * 8];
 static int nsymstr = 1;
 static int bsslen;
@@ -47,7 +47,6 @@ static char *putstr(char *s, char *r)
 
 static int sym_find(char *name)
 {
-	Elf64_Sym *sym;
 	int i;
 	for (i = 0; i < nsyms; i++)
 		if (!strcmp(name, symstr + syms[i].st_name))
@@ -58,21 +57,23 @@ static int sym_find(char *name)
 static Elf64_Sym *put_sym(char *name)
 {
 	int found = name ? sym_find(name) : -1;
-	Elf64_Sym *sym = name && found != -1 ? &syms[found] : &syms[nsyms++];
+	Elf64_Sym *sym = found != -1 ? &syms[found] : &syms[nsyms++];
 	sym->st_name = 0;
-	if (found == -1 && name) {
+	if (name && found == -1) {
 		sym->st_name = nsymstr;
 		nsymstr = putstr(symstr + nsymstr, name) - symstr;
 	}
-	sym->st_info = ELF64_ST_INFO(STB_GLOBAL, STT_FUNC);
 	return sym;
 }
 
-long out_func_beg(char *name)
+#define S_BIND(global)		((global) ? STB_GLOBAL : STB_LOCAL)
+
+long out_func_beg(char *name, int global)
 {
 	sec = &secs[nsecs++];
 	sec->sym = put_sym(name);
 	sec->sym->st_shndx = nshdr;
+	sec->sym->st_info = ELF64_ST_INFO(S_BIND(global), STT_FUNC);
 	sec->sec_shdr = &shdr[nshdr++];
 	sec->rel_shdr = &shdr[nshdr++];
 	sec->rel_shdr->sh_link = SEC_SYMS;
@@ -92,6 +93,43 @@ void out_rela(long addr, int off, int rel)
 	Elf64_Rela *rela = &sec->rela[sec->nrela++];
 	rela->r_offset = off;
 	rela->r_info = ELF64_R_INFO(addr, rel ? R_X86_64_PC32 : R_X86_64_32);
+}
+
+#define SYMLOCAL(i)		(ELF64_ST_BIND(syms[i].st_info) & STB_LOCAL)
+
+static int syms_sort(void)
+{
+	int mv[MAXSYMS];
+	int i, j;
+	int glob_beg;
+	for (i = 0; i < nsyms; i++)
+		mv[i] = i;
+	i = 1;
+	j = nsyms - 1;
+	while (1) {
+		Elf64_Sym t;
+		while (j > i && !SYMLOCAL(j))
+			j--;
+		while (i < j && SYMLOCAL(i))
+			i++;
+		if (i >= j)
+			break;
+		t = syms[j];
+		syms[i] = syms[j];
+		syms[i] = t;
+		mv[i] = j;
+		mv[j] = i;
+	}
+	glob_beg = i;
+	for (i = 0; i < nsecs; i++) {
+		for (j = 0; j < secs[i].nrela; i++) {
+			Elf64_Rela *rela = &sec[i].rela[j];
+			int sym = ELF64_R_SYM(rela->r_info);
+			int type = ELF64_R_TYPE(rela->r_info);
+			rela->r_info = ELF64_R_INFO(mv[sym], type);
+		}
+	}
+	return glob_beg;
 }
 
 void out_write(int fd)
@@ -125,6 +163,7 @@ void out_write(int fd)
 	syms_shdr->sh_size = nsyms * sizeof(syms[0]);
 	syms_shdr->sh_entsize = sizeof(syms[0]);
 	syms_shdr->sh_link = SEC_SYMSTR;
+	syms_shdr->sh_info = syms_sort();
 	offset += syms_shdr->sh_size;
 
 	dat_shdr->sh_type = SHT_PROGBITS;
@@ -177,13 +216,13 @@ void out_write(int fd)
 	}
 }
 
-long o_mkvar(char *name, int size)
+long o_mkvar(char *name, int size, int global)
 {
 	Elf64_Sym *sym = put_sym(name);
 	sym->st_shndx = SEC_BSS;
 	sym->st_value = bsslen;
 	sym->st_size = size;
-	sym->st_info = ELF64_ST_INFO(STB_GLOBAL, STT_OBJECT);
+	sym->st_info = ELF64_ST_INFO(S_BIND(global), STT_OBJECT);
 	bsslen = ALIGN(bsslen + size, 8);
 	return sym - syms;
 }
@@ -192,16 +231,17 @@ long o_mkundef(char *name)
 {
 	Elf64_Sym *sym = put_sym(name);
 	sym->st_shndx = SHN_UNDEF;
+	sym->st_info = ELF64_ST_INFO(STB_GLOBAL, STT_FUNC);
 	return sym - syms;
 }
 
-long o_mkdat(char *name, char *buf, int len)
+long o_mkdat(char *name, char *buf, int len, int global)
 {
 	Elf64_Sym *sym = put_sym(name);
 	sym->st_shndx = SEC_DAT;
 	sym->st_value = datlen;
 	sym->st_size = len;
-	sym->st_info = ELF64_ST_INFO(name ? STB_GLOBAL : STB_LOCAL, STT_OBJECT);
+	sym->st_info = ELF64_ST_INFO(S_BIND(global), STT_OBJECT);
 	memcpy(dat + datlen, buf, len);
 	datlen = ALIGN(datlen + len, 8);
 	return sym - syms;
