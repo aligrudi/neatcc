@@ -1021,9 +1021,13 @@ static void readexpr(void)
 {
 	readcexpr();
 	if (!tok_jmp('=')) {
+		struct type t;
 		readexpr();
-		ts_pop(NULL);
-		o_assign(TYPE_BT(&ts[nts - 1]));
+		ts_pop(&t);
+		if (t.flags & (T_STRUCT))
+			o_memcpy(type_totsz(&t));
+		else
+			o_assign(TYPE_BT(&ts[nts - 1]));
 		return;
 	}
 	if (!tok_jmp(TOK2("+="))) {

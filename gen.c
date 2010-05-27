@@ -933,6 +933,25 @@ void o_assign(unsigned bt)
 	tmp_push_reg(bt, r1);
 }
 
+static void tmp_to(struct tmp *t, int reg)
+{
+	reg_for(reg, t);
+	tmp_reg(t, reg, t->bt, 0);
+}
+
+void o_memcpy(int sz)
+{
+	struct tmp *t0 = &tmp[ntmp];
+	struct tmp *t1 = &tmp[ntmp - 1];
+	struct tmp *t2 = &tmp[ntmp - 2];
+	o_num(sz, 4);
+	tmp_to(t0, R_RCX);
+	tmp_to(t1, R_RSI);
+	tmp_to(t2, R_RDI);
+	os("\xf3\xa4", 2);		/* rep movs */
+	o_tmpdrop(2);
+}
+
 long o_mklabel(void)
 {
 	return codeaddr();
