@@ -79,9 +79,20 @@ static void local_add(struct name *name)
 	memcpy(&locals[nlocals++], name, sizeof(*name));
 }
 
+static int global_find(char *name)
+{
+	int i;
+	for (i = 0; i < nglobals; i++)
+		if (!strcmp(name, globals[i].name))
+			return i;
+	return -1;
+}
+
 static void global_add(struct name *name)
 {
-	memcpy(&globals[nglobals++], name, sizeof(*name));
+	int found = global_find(name->name);
+	int i = found == -1 ? nglobals++ : found;
+	memcpy(&globals[i], name, sizeof(*name));
 }
 
 static void die(char *s)
@@ -486,13 +497,11 @@ static void readprimary(void)
 				return;
 			}
 		}
-		for (i = 0; i < nglobals; i++) {
-			struct type *t = &globals[i].type;
-			if (!strcmp(globals[i].name, tok_id())) {
-				o_symaddr(globals[i].addr, TYPE_BT(t));
-				ts_push(t);
-				return;
-			}
+		if ((n = global_find(tok_id())) != -1) {
+			struct type *t = &globals[n].type;
+			o_symaddr(globals[n].addr, TYPE_BT(t));
+			ts_push(t);
+			return;
 		}
 		if (!enum_find(&n, tok_id())) {
 			ts_push_bt(4 | BT_SIGNED);
@@ -1099,7 +1108,7 @@ static void funcdef(struct name *name, struct name *args,
 	int i;
 	name->addr = o_func_beg(name->name, F_GLOBAL(flags));
 	global_add(name);
-	ret_bt = TYPE_BT(&funcs[name->addr].ret);
+	ret_bt = TYPE_BT(&funcs[name->type.id].ret);
 	for (i = 0; i < nargs; i++) {
 		args[i].addr = o_arg(i, type_totsz(&args[i].type));
 		local_add(&args[i]);
@@ -1174,9 +1183,7 @@ static int readdefs(void (*def)(void *data, struct name *name, unsigned flags),
 			func->flags = T_FUNC;
 			func->bt = 8;
 			func->id = func_create(ret, args, nargs);
-			if (fdef) {
-				if (tok_see() != '{')
-					continue;
+			if (fdef && tok_see() == '{') {
 				memcpy(&name.type, func, sizeof(*func));
 				funcdef(&name, args, nargs, flags);
 				return 0;
