@@ -232,6 +232,9 @@ static void num_cast(struct tmp *t, unsigned bt)
 {
 	if (!(bt & BT_SIGNED) && BT_SZ(bt) != 8)
 		t->addr &= ((1l << (long) (BT_SZ(bt) * 8)) - 1);
+	if (bt & BT_SIGNED && BT_SZ(bt) != 8 &&
+				t->addr > (1l << (BT_SZ(bt) * 8 - 1)))
+		t->addr = -((1l << (BT_SZ(bt) * 8)) - t->addr);
 	t->bt = bt;
 }
 
