@@ -58,7 +58,8 @@ static Elf64_Sym *put_sym(char *name)
 {
 	int found = name ? sym_find(name) : -1;
 	Elf64_Sym *sym = found != -1 ? &syms[found] : &syms[nsyms++];
-	sym->st_name = 0;
+	if (!name)
+		sym->st_name = 0;
 	if (name && found == -1) {
 		sym->st_name = nsymstr;
 		nsymstr = putstr(symstr + nsymstr, name) - symstr;
