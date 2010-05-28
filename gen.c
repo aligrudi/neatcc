@@ -283,9 +283,9 @@ static void tmp_reg(struct tmp *tmp, int dst, unsigned bt, int deref)
 	}
 	if (tmp->flags & LOC_LOCAL) {
 		if (deref)
-			mov_m2r(dst, R_RBP, -tmp->addr, tmp->bt, bt);
+			mov_m2r(dst, R_RBP, tmp->addr, tmp->bt, bt);
 		else
-			memop1(LEA_M2R, dst, R_RBP, -tmp->addr, 8);
+			memop1(LEA_M2R, dst, R_RBP, tmp->addr, 8);
 	}
 	if (tmp->flags & LOC_MEM) {
 		mov_m2r(dst, R_RBP, -tmp->addr,
@@ -347,7 +347,7 @@ static void tmp_push_reg(unsigned bt, unsigned reg)
 void o_local(long addr, unsigned bt)
 {
 	struct tmp *t = &tmp[ntmp++];
-	t->addr = addr;
+	t->addr = -addr;
 	t->bt = bt;
 	t->flags = LOC_LOCAL | TMP_ADDR;
 }
@@ -510,18 +510,32 @@ int o_popnum(long *c)
 	return 0;
 }
 
+#define LOCAL_PTR(t)	((t)->flags & LOC_LOCAL && !((t)->flags & TMP_ADDR))
+
 static int c_binop(long (*cop)(long a, long b, unsigned bt), unsigned bt)
 {
 	struct tmp *t1 = &tmp[ntmp - 1];
 	struct tmp *t2 = &tmp[ntmp - 2];
+	int locals = LOCAL_PTR(t1) + LOCAL_PTR(t2);
 	long ret;
-	if (!TMP_CONST(t1) || !TMP_CONST(t2))
+	if (!TMP_CONST(t1) && !LOCAL_PTR(t1) || !TMP_CONST(t2) && !LOCAL_PTR(t2))
 		return 1;
-	if (!bt)
-		bt = bt_op(t1->bt, t2->bt);
-	ret = cop(t2->addr, t1->addr, bt);
+	if (!bt) {
+		if (!locals)
+			bt = bt_op(t1->bt, t2->bt);
+		if (locals == 1)
+			bt = 8;
+		if (locals == 2)
+			bt = 4 | BT_SIGNED;
+	}
+	ret = cop(t2->addr, t1->addr, locals ? 4 | BT_SIGNED : bt);
 	o_tmpdrop(2);
-	o_num(ret, bt);
+	if (locals == 1) {
+		o_local(-ret, bt);
+		o_addr();
+	} else {
+		o_num(ret, bt);
+	}
 	return 0;
 }
 
@@ -922,7 +936,7 @@ void o_assign(unsigned bt)
 	tmp_pop_bt(BT_TMPBT(bt), r1);
 	if (t2->flags & LOC_LOCAL) {
 		reg = R_RBP;
-		off = -t2->addr;
+		off = t2->addr;
 		o_tmpdrop(1);
 	} else {
 		reg = TMP_REG2(t2, r1);
