@@ -1342,6 +1342,43 @@ static void readswitch(void)
 	break_fill(o_mklabel(), break_beg);
 }
 
+#define MAXGOTO			(1 << 7)
+
+static struct gotoinfo {
+	char name[NAMELEN];
+	long addr;
+} gotos[MAXGOTO];
+static int ngotos;
+
+static struct labelinfo {
+	char name[NAMELEN];
+	long addr;
+} labels[MAXGOTO];
+static int nlabels;
+
+static void goto_add(char *name)
+{
+	strcpy(gotos[ngotos].name, name);
+	gotos[ngotos++].addr = o_jmp(0);
+}
+
+static void label_add(char *name)
+{
+	strcpy(labels[nlabels].name, name);
+	labels[nlabels++].addr = o_mklabel();
+}
+
+static void goto_fill(void)
+{
+	int i, j;
+	for (i = 0; i < ngotos; i++)
+		for (j = 0; j < nlabels; j++)
+			if (!strcmp(gotos[i].name, labels[j].name)) {
+				o_filljmp2(gotos[i].addr, labels[j].addr);
+				break;
+			}
+}
+
 static void readstmt(void)
 {
 	o_tmpdrop(-1);
@@ -1472,7 +1509,18 @@ static void readstmt(void)
 		continues[ncontinues++] = o_jmp(0);
 		return;
 	}
+	if (!tok_jmp(TOK_GOTO)) {
+		tok_expect(TOK_NAME);
+		goto_add(tok_id());
+		tok_expect(';');
+		return;
+	}
 	readestmt();
+	/* labels */
+	if (!tok_jmp(':')) {
+		label_add(tok_id());
+		return;
+	}
 	tok_expect(';');
 }
 
@@ -1486,8 +1534,11 @@ static void readdecl(void)
 	readdefs(globaldef, NULL);
 	if (tok_see() == '{') {
 		readstmt();
+		goto_fill();
 		o_func_end();
 		nlocals = 0;
+		ngotos = 0;
+		nlabels = 0;
 		return;
 	}
 	tok_expect(';');

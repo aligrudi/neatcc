@@ -34,6 +34,7 @@ enum tok {
 	TOK_BREAK,
 	TOK_CONTINUE,
 	TOK_DEFAULT,
+	TOK_GOTO,
 };
 
 void tok_init(int fd);
