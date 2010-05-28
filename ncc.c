@@ -1106,6 +1106,13 @@ static void o_localoff(long addr, int off, unsigned bt)
 	}
 }
 
+static struct type *innertype(struct type *t)
+{
+	if (t->flags & T_ARRAY && !t->ptr)
+		return innertype(&arrays[t->id].type);
+	return t;
+}
+
 static void initexpr(struct type *t, long addr, int off)
 {
 	if (tok_jmp('{')) {
@@ -1134,14 +1141,13 @@ static void initexpr(struct type *t, long addr, int off)
 	} else {
 		struct type t_de;
 		int i;
-		int sz;
 		memcpy(&t_de, t, sizeof(*t));
 		if (t->flags & T_ARRAY)
 			array2ptr(&t_de);
 		t_de.ptr--;
-		sz = type_totsz(&t_de);
 		for (i = 0; ; i++) {
 			long idx = i;
+			struct type *it = &t_de;
 			if (!tok_jmp('[')) {
 				readexpr();
 				o_popnum(&idx);
@@ -1149,7 +1155,9 @@ static void initexpr(struct type *t, long addr, int off)
 				tok_expect(']');
 				tok_expect('=');
 			}
-			initexpr(&t_de, addr, off + sz * idx);
+			if (tok_see() != '{')
+				it = innertype(&t_de);
+			initexpr(it, addr, off + type_totsz(it) * idx);
 			if (tok_jmp(',') || tok_see() == '}')
 				break;
 		}
