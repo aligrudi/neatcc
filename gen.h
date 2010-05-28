@@ -53,6 +53,7 @@ long o_jmp(long addr);
 void o_filljmp(long addr);
 void o_filljmp2(long addr, long jmpdst);
 void o_memcpy(int sz);
+void o_memset(int x, int sz);
 
 long o_func_beg(char *name, int global);
 void o_func_end(void);

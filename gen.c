@@ -952,6 +952,20 @@ void o_memcpy(int sz)
 	o_tmpdrop(2);
 }
 
+void o_memset(int x, int sz)
+{
+	struct tmp *t0 = &tmp[ntmp + 1];
+	struct tmp *t1 = &tmp[ntmp];
+	struct tmp *t2 = &tmp[ntmp - 1];
+	o_num(sz, 4);
+	o_num(x, 4);
+	tmp_to(t0, R_RAX);
+	tmp_to(t1, R_RCX);
+	tmp_to(t2, R_RDI);
+	os("\xf3\xaa", 2);		/* rep stosb */
+	o_tmpdrop(2);
+}
+
 long o_mklabel(void)
 {
 	return codeaddr();

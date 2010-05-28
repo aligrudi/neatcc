@@ -1017,17 +1017,22 @@ static void opassign(void (*bop)(void (*op)(void)), void (*op)(void))
 	o_assign(bt);
 }
 
+static void doassign(void)
+{
+	struct type t;
+	ts_pop(&t);
+	if (!t.ptr && t.flags & T_STRUCT)
+		o_memcpy(type_totsz(&t));
+	else
+		o_assign(TYPE_BT(&ts[nts - 1]));
+}
+
 static void readexpr(void)
 {
 	readcexpr();
 	if (!tok_jmp('=')) {
-		struct type t;
 		readexpr();
-		ts_pop(&t);
-		if (t.flags & (T_STRUCT))
-			o_memcpy(type_totsz(&t));
-		else
-			o_assign(TYPE_BT(&ts[nts - 1]));
+		doassign();
 		return;
 	}
 	if (!tok_jmp(TOK2("+="))) {
@@ -1090,6 +1095,68 @@ static void globaldef(void *data, struct name *name, unsigned flags)
 	global_add(name);
 }
 
+static void o_localoff(long addr, int off, unsigned bt)
+{
+	o_local(addr, bt);
+	if (off) {
+		o_addr();
+		o_num(off, 4);
+		o_add();
+		o_deref(bt);
+	}
+}
+
+static void initexpr(struct type *t, long addr, int off)
+{
+	if (tok_jmp('{')) {
+		o_localoff(addr, off, TYPE_BT(t));
+		ts_push(t);
+		readexpr();
+		doassign();
+		ts_pop(NULL);
+		o_tmpdrop(1);
+		return;
+	}
+	if (!t->ptr && t->flags & T_STRUCT) {
+		struct structinfo *si = &structs[t->id];
+		int i;
+		for (i = 0; i < si->nfields; i++) {
+			struct name *field = &si->fields[i];
+			if (!tok_jmp('.')) {
+				tok_expect(TOK_NAME);
+				field = struct_field(t->id, tok_id());
+				tok_expect('=');
+			}
+			initexpr(&field->type, addr, off + field->addr);
+			if (tok_jmp(',') || tok_see() == '}')
+				break;
+		}
+	} else {
+		struct type t_de;
+		int i;
+		int sz;
+		memcpy(&t_de, t, sizeof(*t));
+		if (t->flags & T_ARRAY)
+			array2ptr(&t_de);
+		t_de.ptr--;
+		sz = type_totsz(&t_de);
+		for (i = 0; ; i++) {
+			long idx = i;
+			if (!tok_jmp('[')) {
+				readexpr();
+				o_popnum(&idx);
+				ts_pop(NULL);
+				tok_expect(']');
+				tok_expect('=');
+			}
+			initexpr(&t_de, addr, off + sz * idx);
+			if (tok_jmp(',') || tok_see() == '}')
+				break;
+		}
+	}
+	tok_expect('}');
+}
+
 static void localdef(void *data, struct name *name, unsigned flags)
 {
 	if (flags & F_STATIC) {
@@ -1100,9 +1167,12 @@ static void localdef(void *data, struct name *name, unsigned flags)
 	local_add(name);
 	if (flags & F_INIT) {
 		struct type *t = &name->type;
-		o_local(locals[nlocals - 1].addr, TYPE_BT(t));
-		readexpr();
-		o_assign(TYPE_BT(t));
+		if (tok_see() == '{') {
+			o_local(name->addr, TYPE_BT(t));
+			o_memset(0, type_totsz(t));
+			o_tmpdrop(1);
+		}
+		initexpr(t, name->addr, 0);
 	}
 }
 
