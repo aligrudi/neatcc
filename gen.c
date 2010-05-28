@@ -47,6 +47,8 @@
 #define OR_R2X		0x0b
 #define TEST_R2R	0x85
 
+#define MIN(a, b)		((a) < (b) ? (a) : (b))
+
 #define R_BYTEMASK		(1 << R_RAX | 1 << R_RDX | 1 << R_RCX)
 #define TMP_BT(t)		((t)->flags & TMP_ADDR ? 8 : (t)->bt)
 #define TMP_REG(t)		((t)->flags & LOC_REG ? (t)->addr : reg_get(~0))
@@ -180,8 +182,8 @@ static void tmp_mem(struct tmp *tmp)
 		return;
 	if (tmpsp == -1)
 		tmpsp = sp;
-	tmp->addr = sp_push(8);
-	memop1(MOV_R2X, src, R_RBP, -tmp->addr, BT_TMPBT(TMP_BT(tmp)));
+	tmp->addr = -sp_push(8);
+	memop1(MOV_R2X, src, R_RBP, tmp->addr, BT_TMPBT(TMP_BT(tmp)));
 	regs[src] = NULL;
 	tmp->flags = LOC_NEW(tmp->flags, LOC_MEM);
 }
@@ -288,7 +290,7 @@ static void tmp_reg(struct tmp *tmp, int dst, unsigned bt, int deref)
 			memop1(LEA_M2R, dst, R_RBP, tmp->addr, 8);
 	}
 	if (tmp->flags & LOC_MEM) {
-		mov_m2r(dst, R_RBP, -tmp->addr,
+		mov_m2r(dst, R_RBP, tmp->addr,
 			deref ? 8 : TMP_BT(tmp), deref ? 8 : bt);
 		if (deref)
 			mov_m2r(dst, dst, 0, tmp->bt, bt);
@@ -919,10 +921,17 @@ void o_rmlocal(long addr, int sz)
 
 static int arg_regs[] = {R_RDI, R_RSI, R_RDX, R_RCX, R_R8, R_R9};
 
+#define R_NARGS			ARRAY_SIZE(arg_regs)
+
 long o_arg(int i, unsigned bt)
 {
-	long addr = o_mklocal(BT_SZ(bt));
-	memop1(MOV_R2X, arg_regs[i], R_RBP, -addr, bt);
+	long addr;
+	if (i < R_NARGS) {
+		addr = o_mklocal(BT_SZ(bt));
+		memop1(MOV_R2X, arg_regs[i], R_RBP, -addr, bt);
+	} else {
+		addr = -8 * (i - R_NARGS + 2);
+	}
 	return addr;
 }
 
@@ -1045,8 +1054,20 @@ void o_call(int argc, unsigned *bt, unsigned ret_bt)
 {
 	int i;
 	struct tmp *t;
-	for (i = 0; i < argc; i++)
-		tmp_pop_bt(bt[argc - i - 1], arg_regs[argc - i - 1]);
+	for (i = 0; i < ARRAY_SIZE(tmpregs); i++)
+		if (regs[i] && (tmp - regs[i]) < ntmp - argc)
+			tmp_mem(regs[i]);
+	if (argc > R_NARGS) {
+		long addr = sp_push(8 * (argc - R_NARGS));
+		for (i = argc - 1; i >= R_NARGS; --i) {
+			int reg = TMP_REG(&tmp[ntmp - 1]);
+			tmp_pop_bt(bt[i], reg);
+			memop1(MOV_R2X, reg, R_RBP,
+				-(addr - (i - R_NARGS) * 8), BT_TMPBT(bt[i]));
+		}
+	}
+	for (i = MIN(argc, R_NARGS) - 1; i >= 0; i--)
+		tmp_pop_bt(bt[i], arg_regs[i]);
 	t = &tmp[ntmp - 1];
 	if (t->flags & LOC_SYM) {
 		os("\x31\xc0", 2);	/* xor %eax, %eax */
@@ -1059,9 +1080,6 @@ void o_call(int argc, unsigned *bt, unsigned ret_bt)
 		tmp_pop(0, R_RAX);
 		regop1(CALL_REG, 2, R_RAX, 4);
 	}
-	for (i = 0; i < ARRAY_SIZE(tmpregs); i++)
-		if (regs[i])
-			tmp_mem(regs[i]);
 	if (ret_bt)
 		tmp_push_reg(ret_bt, R_RAX);
 }
