@@ -194,7 +194,11 @@ static int struct_find(char *name, int isunion)
 		if (!strcmp(name, structs[i].name) &&
 				structs[i].isunion == isunion)
 			return i;
-	die("struct not found\n");
+	i = nstructs++;
+	memset(&structs[i], 0, sizeof(structs[i]));
+	strcpy(structs[i].name, name);
+	structs[i].isunion = isunion;
+	return i;
 }
 
 static struct name *struct_field(int id, char *name)
@@ -336,10 +340,8 @@ static int readdefs(void (*def)(void *, struct name *, unsigned f), void *data);
 
 static int struct_create(char *name, int isunion)
 {
-	int id = nstructs++;
+	int id = struct_find(name, isunion);
 	struct structinfo *si = &structs[id];
-	strcpy(si->name, name);
-	si->isunion = isunion;
 	tok_expect('{');
 	while (tok_jmp('}')) {
 		readdefs(structdef, si);
