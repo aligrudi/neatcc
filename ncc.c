@@ -191,7 +191,7 @@ static int struct_find(char *name, int isunion)
 {
 	int i;
 	for (i = nstructs - 1; i >= 0; --i)
-		if (!strcmp(name, structs[i].name) &&
+		if (*structs[i].name && !strcmp(name, structs[i].name) &&
 				structs[i].isunion == isunion)
 			return i;
 	i = nstructs++;
@@ -379,7 +379,7 @@ static int basetype(struct type *type, unsigned *flags)
 	int done = 0;
 	int i = 0;
 	int isunion;
-	char name[NAMELEN];
+	char name[NAMELEN] = "";
 	*flags = 0;
 	type->flags = 0;
 	type->ptr = 0;
@@ -412,8 +412,8 @@ static int basetype(struct type *type, unsigned *flags)
 		case TOK_UNION:
 		case TOK_STRUCT:
 			isunion = tok_get() == TOK_UNION;
-			tok_expect(TOK_NAME);
-			strcpy(name, tok_id());
+			if (!tok_jmp(TOK_NAME))
+				strcpy(name, tok_id());
 			if (tok_see() == '{')
 				type->id = struct_create(name, isunion);
 			else
@@ -423,7 +423,7 @@ static int basetype(struct type *type, unsigned *flags)
 			return 0;
 		case TOK_ENUM:
 			tok_get();
-			tok_expect(TOK_NAME);
+			tok_jmp(TOK_NAME);
 			if (tok_see() == '{')
 				enum_create();
 			type->bt = 4 | BT_SIGNED;
