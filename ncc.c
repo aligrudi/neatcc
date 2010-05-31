@@ -407,6 +407,8 @@ static int basetype(struct type *type, unsigned *flags)
 		case TOK_LONG:
 			size = 8;
 			break;
+		case TOK_SIGNED:
+			break;
 		case TOK_UNSIGNED:
 			sign = 0;
 			break;
