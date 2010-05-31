@@ -127,7 +127,7 @@ static int enum_find(int *val, char *name)
 	return 1;
 }
 
-#define MAXTYPEDEFS		(1 << 5)
+#define MAXTYPEDEFS		(1 << 10)
 
 static struct typdefinfo {
 	char name[NAMELEN];
@@ -151,7 +151,7 @@ static int typedef_find(char *name)
 	return -1;
 }
 
-#define MAXARRAYS		(1 << 5)
+#define MAXARRAYS		(1 << 10)
 
 static struct array {
 	struct type type;
@@ -175,8 +175,8 @@ static void array2ptr(struct type *t)
 	t->ptr++;
 }
 
-#define MAXTYPES		(1 << 7)
-#define MAXFIELDS		(1 << 5)
+#define MAXTYPES		(1 << 10)
+#define MAXFIELDS		(1 << 7)
 
 static struct structinfo {
 	char name[NAMELEN];
@@ -212,6 +212,7 @@ static struct name *struct_field(int id, char *name)
 }
 
 #define MAXBREAK		(1 << 7)
+
 static long breaks[MAXBREAK];
 static int nbreaks;
 static long continues[MAXBREAK];
@@ -452,8 +453,11 @@ static int basetype(struct type *type, unsigned *flags)
 
 static void readptrs(struct type *type)
 {
-	while (!tok_jmp('*'))
+	while (!tok_jmp('*')) {
 		type->ptr++;
+		if (!type->bt)
+			type->bt = 1;
+	}
 }
 
 static int readtype(struct type *type)
@@ -906,7 +910,7 @@ static void readbitor(void)
 	}
 }
 
-#define MAXCOND			(1 << 5)
+#define MAXCOND			(1 << 7)
 
 static void readand(void)
 {
@@ -1300,9 +1304,9 @@ static void typedefdef(void *data, struct name *name, unsigned flags)
 	typedef_add(name->name, &name->type);
 }
 
-#define MAXCASES		(1 << 7)
-
 static void readstmt(void);
+
+#define MAXCASES		(1 << 7)
 
 static void readswitch(void)
 {
@@ -1357,7 +1361,7 @@ static void readswitch(void)
 	break_fill(o_mklabel(), break_beg);
 }
 
-#define MAXGOTO			(1 << 7)
+#define MAXGOTO			(1 << 10)
 
 static struct gotoinfo {
 	char name[NAMELEN];
