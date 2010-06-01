@@ -1243,6 +1243,8 @@ static int readargs(struct name *args)
 	int nargs = 0;
 	tok_expect('(');
 	while (tok_see() != ')') {
+		if (!tok_jmp(TOK3("...")))
+			break;
 		readname(&args[nargs].type, args[nargs].name, NULL, 0);
 		array2ptr(&args[nargs].type);
 		nargs++;
