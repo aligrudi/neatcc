@@ -1244,6 +1244,7 @@ static int readargs(struct name *args)
 	tok_expect('(');
 	while (tok_see() != ')') {
 		readname(&args[nargs].type, args[nargs].name, NULL, 0);
+		array2ptr(&args[nargs].type);
 		nargs++;
 		if (tok_jmp(','))
 			break;
@@ -1282,17 +1283,19 @@ static int readname(struct type *main, char *name,
 		strcpy(name, tok_id());
 	while (!tok_jmp('[')) {
 		long n;
-		readexpr();
-		ts_pop(NULL);
-		if (o_popnum(&n))
-			die("const expr expected\n");
+		if (tok_jmp(']')) {
+			readexpr();
+			ts_pop(NULL);
+			if (o_popnum(&n))
+				die("const expr expected\n");
+			tok_expect(']');
+		}
 		type->id = array_add(type, n);
 		if (type->flags & T_FUNC)
 			func = &arrays[type->id].type;
 		type->flags = T_ARRAY;
 		type->bt = 8;
 		type->ptr = 0;
-		tok_expect(']');
 	}
 	if (func)
 		tok_expect(')');
