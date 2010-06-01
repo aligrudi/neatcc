@@ -453,6 +453,14 @@ static int basetype(struct type *type, unsigned *flags)
 	return 0;
 }
 
+static int readname(struct type *main, char *name,
+			struct type *base, unsigned flags);
+
+static int readtype(struct type *type)
+{
+	return readname(type, NULL, NULL, 0);
+}
+
 static void readptrs(struct type *type)
 {
 	while (!tok_jmp('*')) {
@@ -460,15 +468,6 @@ static void readptrs(struct type *type)
 		if (!type->bt)
 			type->bt = 1;
 	}
-}
-
-static int readtype(struct type *type)
-{
-	unsigned flags;
-	if (basetype(type, &flags))
-		return 1;
-	readptrs(type);
-	return 0;
 }
 
 static void readpre(void);
@@ -1205,13 +1204,16 @@ static void localdef(void *data, struct name *name, unsigned flags)
 	}
 }
 
-static void funcdef(struct name *name, struct name *args,
+static void funcdef(char *name, struct type *type, struct name *args,
 			int nargs, unsigned flags)
 {
 	int i;
-	name->addr = o_func_beg(name->name, F_GLOBAL(flags));
-	global_add(name);
-	ret_bt = TYPE_BT(&funcs[name->type.id].ret);
+	struct name global;
+	strcpy(global.name, name);
+	memcpy(&global.type, type, sizeof(*type));
+	global.addr = o_func_beg(name, F_GLOBAL(flags));
+	global_add(&global);
+	ret_bt = TYPE_BT(&funcs[type->id].ret);
 	for (i = 0; i < nargs; i++) {
 		args[i].addr = o_arg(i, type_totsz(&args[i].type));
 		local_add(&args[i]);
@@ -1223,14 +1225,78 @@ static int readargs(struct name *args)
 	int nargs = 0;
 	tok_expect('(');
 	while (tok_see() != ')') {
-		readtype(&args[nargs].type);
-		if (!tok_jmp(TOK_NAME))
-			strcpy(args[nargs++].name, tok_id());
+		readname(&args[nargs].type, args[nargs].name, NULL, 0);
+		nargs++;
 		if (tok_jmp(','))
 			break;
 	}
 	tok_expect(')');
+	if (nargs == 1 && !TYPE_BT(&args[0].type))
+		return 0;
 	return nargs;
+}
+
+static int readname(struct type *main, char *name,
+			struct type *base, unsigned flags)
+{
+	struct type tpool[3];
+	int npool = 0;
+	struct type *type = &tpool[npool++];
+	struct type *func = NULL;
+	struct type *ret = NULL;
+	memset(tpool, 0, sizeof(tpool));
+	if (name)
+		*name = '\0';
+	if (!base) {
+		if (basetype(type, &flags))
+			return 1;
+	} else {
+		memcpy(type, base, sizeof(*base));
+	}
+	readptrs(type);
+	if (!tok_jmp('(')) {
+		ret = type;
+		type = &tpool[npool++];
+		func = type;
+		readptrs(type);
+	}
+	if (!tok_jmp(TOK_NAME) && name)
+		strcpy(name, tok_id());
+	while (!tok_jmp('[')) {
+		long n;
+		readexpr();
+		ts_pop(NULL);
+		if (o_popnum(&n))
+			die("const expr expected\n");
+		type->id = array_add(type, n);
+		if (type->flags & T_FUNC)
+			func = &arrays[type->id].type;
+		type->flags = T_ARRAY;
+		type->bt = 8;
+		type->ptr = 0;
+		tok_expect(']');
+	}
+	if (func)
+		tok_expect(')');
+	if (tok_see() == '(') {
+		struct name args[MAXARGS];
+		int nargs = readargs(args);
+		int fdef = !func;
+		if (!func) {
+			ret = type;
+			type = &tpool[npool++];
+			func = type;
+		}
+		func->flags = T_FUNC;
+		func->bt = 8;
+		func->id = func_create(ret, args, nargs);
+		if (fdef && tok_see() == '{') {
+			funcdef(name, func, args, nargs, flags);
+			return 1;
+		}
+	}
+	memcpy(main, type, sizeof(*type));
+	return 0;
 }
 
 static int readdefs(void (*def)(void *data, struct name *name, unsigned flags),
@@ -1241,58 +1307,9 @@ static int readdefs(void (*def)(void *data, struct name *name, unsigned flags),
 	if (basetype(&base, &flags))
 		return 1;
 	while (tok_see() != ';' && tok_see() != '{') {
-		struct type tpool[3];
 		struct name name;
-		int npool = 0;
-		struct type *type = &tpool[npool++];
-		struct type *func = NULL;
-		struct type *ret = NULL;
-		memset(tpool, 0, sizeof(tpool));
-		memcpy(type, &base, sizeof(base));
-		readptrs(type);
-		if (!tok_jmp('(')) {
-			ret = type;
-			type = &tpool[npool++];
-			func = type;
-			readptrs(type);
-		}
-		tok_expect(TOK_NAME);
-		strcpy(name.name, tok_id());
-		while (!tok_jmp('[')) {
-			long n;
-			readexpr();
-			ts_pop(NULL);
-			if (o_popnum(&n))
-				die("const expr expected\n");
-			type->id = array_add(type, n);
-			if (type->flags & T_FUNC)
-				func = &arrays[type->id].type;
-			type->flags = T_ARRAY;
-			type->bt = 8;
-			type->ptr = 0;
-			tok_expect(']');
-		}
-		if (func)
-			tok_expect(')');
-		if (tok_see() == '(') {
-			struct name args[MAXARGS];
-			int nargs = readargs(args);
-			int fdef = !func;
-			if (!func) {
-				ret = type;
-				type = &tpool[npool++];
-				func = type;
-			}
-			func->flags = T_FUNC;
-			func->bt = 8;
-			func->id = func_create(ret, args, nargs);
-			if (fdef && tok_see() == '{') {
-				memcpy(&name.type, func, sizeof(*func));
-				funcdef(&name, args, nargs, flags);
-				return 0;
-			}
-		}
-		memcpy(&name.type, type, sizeof(*type));
+		if (readname(&name.type, name.name, &base, flags))
+			break;
 		if (!tok_jmp('='))
 			flags |= F_INIT;
 		def(data, &name, flags);
