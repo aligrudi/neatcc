@@ -60,7 +60,7 @@ void o_func_end(void);
 void o_ret(unsigned bt);
 long o_mkvar(char *name, int size, int global);
 long o_mkdat(char *name, char *buf, int len, int global);
-long o_mkundef(char *name);
+long o_mkundef(char *name, int sz);
 
 int o_nogen(void);
 void o_dogen(void);

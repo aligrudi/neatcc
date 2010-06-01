@@ -228,11 +228,12 @@ long o_mkvar(char *name, int size, int global)
 	return sym - syms;
 }
 
-long o_mkundef(char *name)
+long o_mkundef(char *name, int sz)
 {
 	Elf64_Sym *sym = put_sym(name);
 	sym->st_shndx = SHN_UNDEF;
-	sym->st_info = ELF64_ST_INFO(STB_GLOBAL, STT_FUNC);
+	sym->st_info = ELF64_ST_INFO(STB_GLOBAL, sz ? STT_OBJECT : STT_FUNC);
+	sym->st_size = sz;
 	return sym - syms;
 }
 

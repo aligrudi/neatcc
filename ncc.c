@@ -30,6 +30,7 @@
 
 #define F_INIT		0x01
 #define F_STATIC	0x02
+#define F_EXTERN	0x04
 
 struct type {
 	unsigned bt;
@@ -389,6 +390,9 @@ static int basetype(struct type *type, unsigned *flags)
 		case TOK_STATIC:
 			*flags |= F_STATIC;
 			break;
+		case TOK_EXTERN:
+			*flags |= F_EXTERN;
+			break;
 		case TOK_VOID:
 			sign = 0;
 			size = 0;
@@ -470,11 +474,12 @@ static void readptrs(struct type *type)
 	}
 }
 
+static int ncexpr;
+
 static void readpre(void);
 
 static void readprimary(void)
 {
-	struct name name;
 	int i;
 	if (!tok_jmp(TOK_NUM)) {
 		ts_push_bt(4 | BT_SIGNED);
@@ -495,31 +500,38 @@ static void readprimary(void)
 		return;
 	}
 	if (!tok_jmp(TOK_NAME)) {
+		struct name unkn;
+		char *name = unkn.name;
 		int n;
+		strcpy(name, tok_id());
+		/* don't search for labels here */
+		if (!ncexpr && tok_see() == ':')
+			return;
 		for (i = nlocals - 1; i >= 0; --i) {
 			struct type *t = &locals[i].type;
-			if (!strcmp(locals[i].name, tok_id())) {
+			if (!strcmp(locals[i].name, name)) {
 				o_local(locals[i].addr, TYPE_BT(t));
 				ts_push(t);
 				return;
 			}
 		}
-		if ((n = global_find(tok_id())) != -1) {
+		if ((n = global_find(name)) != -1) {
 			struct type *t = &globals[n].type;
 			o_symaddr(globals[n].addr, TYPE_BT(t));
 			ts_push(t);
 			return;
 		}
-		if (!enum_find(&n, tok_id())) {
+		if (!enum_find(&n, name)) {
 			ts_push_bt(4 | BT_SIGNED);
 			o_num(n, 4 | BT_SIGNED);
 			return;
 		}
-		strcpy(name.name, tok_id());
-		name.addr = o_mkundef(name.name);
-		global_add(&name);
+		if (tok_see() != '(')
+			die("unknown symbol\n");
+		unkn.addr = o_mkundef(unkn.name, 0);
+		global_add(&unkn);
 		ts_push_bt(8);
-		o_symaddr(name.addr, 8);
+		o_symaddr(unkn.addr, 8);
 		return;
 	}
 	if (!tok_jmp('(')) {
@@ -975,6 +987,7 @@ static void readcexpr(void)
 	reador();
 	if (tok_jmp('?'))
 		return;
+	ncexpr++;
 	cexpr = !o_popnum(&c);
 	ts_pop(NULL);
 	if (cexpr) {
@@ -1012,6 +1025,7 @@ static void readcexpr(void)
 		o_tmpjoin();
 		o_filljmp(l2);
 	}
+	ncexpr--;
 }
 
 static void opassign(void (*bop)(void (*op)(void)), void (*op)(void))
@@ -1098,7 +1112,11 @@ static void readestmt(void)
 static void globaldef(void *data, struct name *name, unsigned flags)
 {
 	char *varname = flags & F_STATIC ? NULL : name->name;
-	name->addr = o_mkvar(varname, type_totsz(&name->type), F_GLOBAL(flags));
+	int sz = type_totsz(&name->type);
+	if (flags & F_EXTERN)
+		name->addr = o_mkundef(varname, sz);
+	else
+		name->addr = o_mkvar(varname, sz, F_GLOBAL(flags));
 	global_add(name);
 }
 
@@ -1187,7 +1205,7 @@ static void initexpr(struct type *t, long addr, int off)
 
 static void localdef(void *data, struct name *name, unsigned flags)
 {
-	if (flags & F_STATIC) {
+	if (flags & (F_STATIC | F_EXTERN)) {
 		globaldef(data, name, flags);
 		return;
 	}

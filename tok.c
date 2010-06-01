@@ -16,6 +16,7 @@ static struct {
 } kwds[] = {
 	{"void", TOK_VOID},
 	{"static", TOK_STATIC},
+	{"extern", TOK_EXTERN},
 	{"return", TOK_RETURN},
 	{"unsigned", TOK_UNSIGNED},
 	{"signed", TOK_SIGNED},
