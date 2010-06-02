@@ -1151,9 +1151,6 @@ static void initexpr(struct type *t, long addr, int off)
 			o_symaddr(o_mkdat(NULL, buf, len, 0), TYPE_BT(t));
 			o_memcpy(len);
 			o_tmpdrop(1);
-			o_localoff(addr, off + len, TYPE_BT(t));
-			o_memset(0, arrays[t->id].n - len);
-			o_tmpdrop(1);
 			return;
 		}
 	}
@@ -1203,17 +1200,60 @@ static void initexpr(struct type *t, long addr, int off)
 	tok_expect('}');
 }
 
+static void jumpbrace(void)
+{
+	int depth = 0;
+	while (tok_see() != '}' || depth--)
+		if (tok_get() == '{')
+			depth++;
+	tok_expect('}');
+}
+
+static int initsize(void)
+{
+	long addr = tok_addr();
+	int n = 0;
+	if (!tok_jmp(TOK_STR)) {
+		n = tok_str(NULL);
+		tok_jump(addr);
+		return n;
+	}
+	o_nogen();
+	tok_expect('{');
+	while (tok_jmp('}')) {
+		long idx = n;
+		if (!tok_jmp('[')) {
+			readexpr();
+			o_popnum(&idx);
+			ts_pop(NULL);
+			tok_expect(']');
+			tok_expect('=');
+		}
+		if (n < idx + 1)
+			n = idx + 1;
+		while (tok_see() != '}' && tok_see() != ',')
+			if (tok_get() == '{')
+				jumpbrace();
+		tok_jmp(',');
+	}
+	o_dogen();
+	tok_jump(addr);
+	return n;
+}
+
 static void localdef(void *data, struct name *name, unsigned flags)
 {
+	struct type *t = &name->type;
 	if (flags & (F_STATIC | F_EXTERN)) {
 		globaldef(data, name, flags);
 		return;
 	}
+	if (t->flags & T_ARRAY && !t->ptr && !arrays[t->id].n)
+		arrays[t->id].n = initsize();
 	name->addr = o_mklocal(type_totsz(&name->type));
 	local_add(name);
 	if (flags & F_INIT) {
-		struct type *t = &name->type;
-		if (tok_see() == '{') {
+		if (t->flags & (T_ARRAY | T_STRUCT) && !t->ptr) {
 			o_local(name->addr, TYPE_BT(t));
 			o_memset(0, type_totsz(t));
 			o_tmpdrop(1);
@@ -1284,7 +1324,7 @@ static int readname(struct type *main, char *name,
 	if (!tok_jmp(TOK_NAME) && name)
 		strcpy(name, tok_id());
 	while (!tok_jmp('[')) {
-		long n;
+		long n = 0;
 		if (tok_jmp(']')) {
 			readexpr();
 			ts_pop(NULL);

@@ -9,6 +9,7 @@ static int len;
 static int cur;
 static char name[NAMELEN];
 static int next;
+static int pre;
 
 static struct {
 	char *name;
@@ -105,8 +106,11 @@ long tok_num(void)
 	return -1;
 }
 
-int tok_str(char *out)
+static char snull[BUFSIZE];
+
+int tok_str(char *obuf)
 {
+	char *out = obuf ? obuf : snull;
 	char *s = out;
 	char *r = buf + cur;
 	char *e = buf + len;
@@ -152,17 +156,27 @@ static int skipws(void)
 int tok_get(void)
 {
 	int num;
+	int _pre = pre;
 	if (next != -1) {
 		int tok = next;
 		next = -1;
 		return tok;
 	}
+	pre = cur;
 	if (skipws())
 		return TOK_EOF;
-	if (buf[cur] == '"')
-		return TOK_STR;
-	if (isdigit(buf[cur]) || buf[cur] == '\'')
-		return TOK_NUM;
+	if (buf[cur] == '"') {
+		if (cur > _pre)
+			return TOK_STR;
+		else
+			tok_str(NULL);
+	}
+	if (isdigit(buf[cur]) || buf[cur] == '\'') {
+		if (cur > _pre)
+			return TOK_NUM;
+		else
+			tok_num();
+	}
 	if (id_char(buf[cur])) {
 		char *s = name;
 		int i;
@@ -205,4 +219,16 @@ void tok_init(int fd)
 char *tok_id(void)
 {
 	return name;
+}
+
+long tok_addr(void)
+{
+	return next == -1 ? cur : pre;
+}
+
+void tok_jump(long addr)
+{
+	cur = addr;
+	pre = cur - 1;
+	next = -1;
 }

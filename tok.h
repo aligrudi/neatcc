@@ -1,4 +1,4 @@
-#define BUFSIZE		(1 << 12)
+#define BUFSIZE		(1 << 18)
 #define NAMELEN		(1 << 7)
 #define ARRAY_SIZE(a)	(sizeof(a) / sizeof((a)[0]))
 
@@ -44,3 +44,5 @@ int tok_get(void);
 char *tok_id(void);
 long tok_num(void);
 int tok_str(char *out);
+long tok_addr(void);
+void tok_jump(long addr);
