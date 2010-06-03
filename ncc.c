@@ -585,6 +585,7 @@ static void readfield(void)
 	struct type t;
 	tok_expect(TOK_NAME);
 	ts_pop(&t);
+	array2ptr(&t);
 	field = struct_field(t.id, tok_id());
 	if (field->addr) {
 		o_num(field->addr, 4);
