@@ -495,7 +495,7 @@ static void readprimary(void)
 		t.flags = 0;
 		ts_push(&t);
 		len = tok_str(buf);
-		o_symaddr(o_mkdat(NULL, buf, len, 0), TYPE_BT(&t));
+		o_symaddr(out_mkdat(NULL, buf, len, 0), TYPE_BT(&t));
 		o_addr();
 		return;
 	}
@@ -528,7 +528,7 @@ static void readprimary(void)
 		}
 		if (tok_see() != '(')
 			die("unknown symbol\n");
-		unkn.addr = o_mkundef(unkn.name, 0);
+		unkn.addr = out_mkundef(unkn.name, 0);
 		global_add(&unkn);
 		ts_push_bt(8);
 		o_symaddr(unkn.addr, 8);
@@ -1107,19 +1107,6 @@ static void readestmt(void)
 	} while (!tok_jmp(','));
 }
 
-#define F_GLOBAL(flags)		(!((flags) & F_STATIC))
-
-static void globaldef(void *data, struct name *name, unsigned flags)
-{
-	char *varname = flags & F_STATIC ? NULL : name->name;
-	int sz = type_totsz(&name->type);
-	if (flags & F_EXTERN)
-		name->addr = o_mkundef(varname, sz);
-	else
-		name->addr = o_mkvar(varname, sz, F_GLOBAL(flags));
-	global_add(name);
-}
-
 static void o_localoff(long addr, int off, unsigned bt)
 {
 	o_local(addr, bt);
@@ -1138,29 +1125,11 @@ static struct type *innertype(struct type *t)
 	return t;
 }
 
-static void initexpr(struct type *t, long addr, int off)
+static void initexpr(struct type *t, int off, void *obj,
+		void (*set)(void *obj, int off, struct type *t))
 {
-	if (t->flags & T_ARRAY && tok_see() == TOK_STR) {
-		struct type *t_de = &arrays[t->id].type;
-		if (!t_de->ptr && !t_de->flags && TYPE_SZ(t_de) == 1) {
-			char buf[BUFSIZE];
-			int len;
-			tok_expect(TOK_STR);
-			len = tok_str(buf);
-			o_localoff(addr, off, TYPE_BT(t));
-			o_symaddr(o_mkdat(NULL, buf, len, 0), TYPE_BT(t));
-			o_memcpy(len);
-			o_tmpdrop(1);
-			return;
-		}
-	}
 	if (tok_jmp('{')) {
-		o_localoff(addr, off, TYPE_BT(t));
-		ts_push(t);
-		readexpr();
-		doassign();
-		ts_pop(NULL);
-		o_tmpdrop(1);
+		set(obj, off, t);
 		return;
 	}
 	if (!t->ptr && t->flags & T_STRUCT) {
@@ -1173,7 +1142,7 @@ static void initexpr(struct type *t, long addr, int off)
 				field = struct_field(t->id, tok_id());
 				tok_expect('=');
 			}
-			initexpr(&field->type, addr, off + field->addr);
+			initexpr(&field->type, off + field->addr, obj, set);
 			if (tok_jmp(',') || tok_see() == '}')
 				break;
 		}
@@ -1192,7 +1161,7 @@ static void initexpr(struct type *t, long addr, int off)
 			}
 			if (tok_see() != '{')
 				it = innertype(t_de);
-			initexpr(it, addr, off + type_totsz(it) * idx);
+			initexpr(it, off + type_totsz(it) * idx, obj, set);
 			if (tok_jmp(',') || tok_see() == '}')
 				break;
 		}
@@ -1241,6 +1210,71 @@ static int initsize(void)
 	return n;
 }
 
+#define F_GLOBAL(flags)		(!((flags) & F_STATIC))
+
+static void globalinit(void *obj, int off, struct type *t)
+{
+	long addr = *(long *) obj;
+	if (t->flags & T_ARRAY && tok_see() == TOK_STR) {
+		struct type *t_de = &arrays[t->id].type;
+		if (!t_de->ptr && !t_de->flags && TYPE_SZ(t_de) == 1) {
+			char buf[BUFSIZE];
+			int len;
+			tok_expect(TOK_STR);
+			len = tok_str(buf);
+			out_datcpy(addr, off, buf, len);
+			return;
+		}
+	}
+	readexpr();
+	o_datset(addr, off, TYPE_BT(t));
+	ts_pop(NULL);
+}
+
+static void globaldef(void *data, struct name *name, unsigned flags)
+{
+	struct type *t = &name->type;
+	char *varname = flags & F_STATIC ? NULL : name->name;
+	int sz;
+	if (t->flags & T_ARRAY && !t->ptr && !arrays[t->id].n)
+		arrays[t->id].n = initsize();
+	sz = type_totsz(t);
+	if (flags & F_EXTERN)
+		name->addr = out_mkundef(varname, sz);
+	else if (flags & F_INIT)
+		name->addr = out_mkdat(varname, NULL, sz, F_GLOBAL(flags));
+	else
+		name->addr = out_mkvar(varname, sz, F_GLOBAL(flags));
+	global_add(name);
+	if (flags & F_INIT)
+		initexpr(t, 0, &name->addr, globalinit);
+}
+
+static void localinit(void *obj, int off, struct type *t)
+{
+	long addr = *(long *) obj;
+	if (t->flags & T_ARRAY && tok_see() == TOK_STR) {
+		struct type *t_de = &arrays[t->id].type;
+		if (!t_de->ptr && !t_de->flags && TYPE_SZ(t_de) == 1) {
+			char buf[BUFSIZE];
+			int len;
+			tok_expect(TOK_STR);
+			len = tok_str(buf);
+			o_localoff(addr, off, TYPE_BT(t));
+			o_symaddr(out_mkdat(NULL, buf, len, 0), TYPE_BT(t));
+			o_memcpy(len);
+			o_tmpdrop(1);
+			return;
+		}
+	}
+	o_localoff(addr, off, TYPE_BT(t));
+	ts_push(t);
+	readexpr();
+	doassign();
+	ts_pop(NULL);
+	o_tmpdrop(1);
+}
+
 static void localdef(void *data, struct name *name, unsigned flags)
 {
 	struct type *t = &name->type;
@@ -1258,7 +1292,7 @@ static void localdef(void *data, struct name *name, unsigned flags)
 			o_memset(0, type_totsz(t));
 			o_tmpdrop(1);
 		}
-		initexpr(t, name->addr, 0);
+		initexpr(t, 0, &name->addr, localinit);
 	}
 }
 

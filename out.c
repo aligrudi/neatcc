@@ -5,14 +5,15 @@
 
 #define ALIGN(x, a)		(((x) + (a) - 1) & ~((a) - 1))
 
-#define MAXSECS			(1 << 7)
-#define MAXSYMS			(1 << 10)
-#define MAXRELA			(1 << 10)
+#define MAXSECS			(1 << 10)
+#define MAXSYMS			(1 << 12)
+#define MAXRELA			(1 << 12)
 #define SEC_SYMS		1
 #define SEC_SYMSTR		2
 #define SEC_DAT			3
-#define SEC_BSS			4
-#define SEC_BEG			5
+#define SEC_DATRELA		4
+#define SEC_BSS			5
+#define SEC_BEG			6
 
 static Elf64_Ehdr ehdr;
 static Elf64_Shdr shdr[MAXSECS];
@@ -24,6 +25,8 @@ static int nsymstr = 1;
 static int bsslen;
 static char dat[SECSIZE];
 static int datlen;
+static Elf64_Rela datrela[MAXRELA];
+static int ndatrela;
 
 static struct sec {
 	char buf[SECSIZE];
@@ -96,7 +99,24 @@ void out_rela(long addr, int off, int rel)
 	rela->r_info = ELF64_R_INFO(addr, rel ? R_X86_64_PC32 : R_X86_64_32);
 }
 
+void out_datrela(long addr, long dataddr, int off)
+{
+	Elf64_Rela *rela = &datrela[ndatrela++];
+	rela->r_offset = syms[dataddr].st_value + off;
+	rela->r_info = ELF64_R_INFO(addr, R_X86_64_32);
+}
+
 #define SYMLOCAL(i)		(ELF64_ST_BIND(syms[i].st_info) & STB_LOCAL)
+
+static void mvrela(int *mv, Elf64_Rela *rela, int nrela)
+{
+	int i;
+	for (i = 0; i < nrela; i++) {
+		int sym = ELF64_R_SYM(rela[i].r_info);
+		int type = ELF64_R_TYPE(rela[i].r_info);
+		rela[i].r_info = ELF64_R_INFO(mv[sym], type);
+	}
+}
 
 static int syms_sort(void)
 {
@@ -122,14 +142,9 @@ static int syms_sort(void)
 		mv[j] = i;
 	}
 	glob_beg = i;
-	for (i = 0; i < nsecs; i++) {
-		for (j = 0; j < secs[i].nrela; i++) {
-			Elf64_Rela *rela = &sec[i].rela[j];
-			int sym = ELF64_R_SYM(rela->r_info);
-			int type = ELF64_R_TYPE(rela->r_info);
-			rela->r_info = ELF64_R_INFO(mv[sym], type);
-		}
-	}
+	for (i = 0; i < nsecs; i++)
+		mvrela(mv, sec[i].rela, sec[i].nrela);
+	mvrela(mv, datrela, ndatrela);
 	return glob_beg;
 }
 
@@ -138,6 +153,7 @@ void out_write(int fd)
 	Elf64_Shdr *symstr_shdr = &shdr[SEC_SYMSTR];
 	Elf64_Shdr *syms_shdr = &shdr[SEC_SYMS];
 	Elf64_Shdr *dat_shdr = &shdr[SEC_DAT];
+	Elf64_Shdr *datrela_shdr = &shdr[SEC_DATRELA];
 	Elf64_Shdr *bss_shdr = &shdr[SEC_BSS];
 	unsigned long offset = sizeof(ehdr);
 	int i;
@@ -175,6 +191,14 @@ void out_write(int fd)
 	dat_shdr->sh_addralign = 8;
 	offset += dat_shdr->sh_size;
 
+	datrela_shdr->sh_type = SHT_RELA;
+	datrela_shdr->sh_offset = offset;
+	datrela_shdr->sh_size = ndatrela * sizeof(datrela[0]);
+	datrela_shdr->sh_entsize = sizeof(datrela[0]);
+	datrela_shdr->sh_link = SEC_SYMS;
+	datrela_shdr->sh_info = SEC_DAT;
+	offset += datrela_shdr->sh_size;
+
 	bss_shdr->sh_type = SHT_NOBITS;
 	bss_shdr->sh_flags = SHF_ALLOC | SHF_WRITE;
 	bss_shdr->sh_offset = offset;
@@ -209,6 +233,7 @@ void out_write(int fd)
 	write(fd, shdr, sizeof(shdr[0]) * nshdr);
 	write(fd, syms, sizeof(syms[0]) * nsyms);
 	write(fd, dat, datlen);
+	write(fd, datrela, ndatrela * sizeof(datrela[0]));
 	write(fd, symstr, nsymstr);
 	for (i = 0; i < nsecs; i++) {
 		struct sec *sec = &secs[i];
@@ -217,7 +242,7 @@ void out_write(int fd)
 	}
 }
 
-long o_mkvar(char *name, int size, int global)
+long out_mkvar(char *name, int size, int global)
 {
 	Elf64_Sym *sym = put_sym(name);
 	sym->st_shndx = SEC_BSS;
@@ -228,7 +253,7 @@ long o_mkvar(char *name, int size, int global)
 	return sym - syms;
 }
 
-long o_mkundef(char *name, int sz)
+long out_mkundef(char *name, int sz)
 {
 	Elf64_Sym *sym = put_sym(name);
 	sym->st_shndx = SHN_UNDEF;
@@ -237,14 +262,22 @@ long o_mkundef(char *name, int sz)
 	return sym - syms;
 }
 
-long o_mkdat(char *name, char *buf, int len, int global)
+long out_mkdat(char *name, char *buf, int len, int global)
 {
 	Elf64_Sym *sym = put_sym(name);
 	sym->st_shndx = SEC_DAT;
 	sym->st_value = datlen;
 	sym->st_size = len;
 	sym->st_info = ELF64_ST_INFO(S_BIND(global), STT_OBJECT);
-	memcpy(dat + datlen, buf, len);
+	if (buf)
+		memcpy(dat + datlen, buf, len);
+	else
+		memset(dat + datlen, 0, len);
 	datlen = ALIGN(datlen + len, 8);
 	return sym - syms;
+}
+
+void out_datcpy(long addr, int off, char *buf, int len)
+{
+	memcpy(dat + syms[addr].st_value + off, buf, len);
 }

@@ -68,6 +68,7 @@ static long maxsp;
 
 static struct tmp {
 	long addr;
+	long off;	/* used for LOC_SYM; offset from a symbol address */
 	unsigned flags;
 	unsigned bt;
 } tmp[MAXTMP];
@@ -267,7 +268,7 @@ static void tmp_reg(struct tmp *tmp, int dst, unsigned bt, int deref)
 		regop1(MOV_I2X, 0, dst, TMP_BT(tmp));
 		if (!nogen)
 			out_rela(tmp->addr, codeaddr(), 0);
-		oi(0, 4);
+		oi(tmp->off, 4);
 		tmp->addr = dst;
 		regs[dst] = tmp;
 		tmp->flags = LOC_NEW(tmp->flags, LOC_REG);
@@ -368,6 +369,7 @@ void o_symaddr(long addr, unsigned bt)
 	t->bt = bt;
 	t->addr = addr;
 	t->flags = LOC_SYM | TMP_ADDR;
+	t->off = 0;
 }
 
 void o_tmpdrop(int n)
@@ -501,6 +503,8 @@ static unsigned bt_op(unsigned bt1, unsigned bt2)
 }
 
 #define TMP_CONST(t)	((t)->flags & LOC_NUM && !((t)->flags & TMP_ADDR))
+#define LOCAL_PTR(t)	((t)->flags & LOC_LOCAL && !((t)->flags & TMP_ADDR))
+#define SYM_PTR(t)	((t)->flags & LOC_LOCAL && !((t)->flags & TMP_ADDR))
 
 int o_popnum(long *c)
 {
@@ -512,31 +516,40 @@ int o_popnum(long *c)
 	return 0;
 }
 
-#define LOCAL_PTR(t)	((t)->flags & LOC_LOCAL && !((t)->flags & TMP_ADDR))
-
 static int c_binop(long (*cop)(long a, long b, unsigned bt), unsigned bt)
 {
 	struct tmp *t1 = &tmp[ntmp - 1];
 	struct tmp *t2 = &tmp[ntmp - 2];
 	int locals = LOCAL_PTR(t1) + LOCAL_PTR(t2);
-	long ret;
-	if (!TMP_CONST(t1) && !LOCAL_PTR(t1) || !TMP_CONST(t2) && !LOCAL_PTR(t2))
+	int syms = SYM_PTR(t1) + SYM_PTR(t2);
+	int nums = TMP_CONST(t1) + TMP_CONST(t2);
+	if (syms == 2 || syms && locals || syms + nums + locals != 2)
 		return 1;
 	if (!bt) {
 		if (!locals)
-			bt = bt_op(t1->bt, t2->bt);
+			bt = syms ? 8 : bt_op(t1->bt, t2->bt);
 		if (locals == 1)
 			bt = 8;
 		if (locals == 2)
 			bt = 4 | BT_SIGNED;
 	}
-	ret = cop(t2->addr, t1->addr, locals ? 4 | BT_SIGNED : bt);
-	o_tmpdrop(2);
-	if (locals == 1) {
-		o_local(-ret, bt);
-		o_addr();
+	if (syms) {
+		long o1 = SYM_PTR(t1) ? t1->off : t1->addr;
+		long o2 = SYM_PTR(t2) ? t2->off : t2->addr;
+		long ret = cop(o2, o1, bt);
+		if (!SYM_PTR(t2))
+			o_tmpswap();
+		t2->off = ret;
+		o_tmpdrop(1);
 	} else {
-		o_num(ret, bt);
+		long ret = cop(t2->addr, t1->addr, locals ? 4 | BT_SIGNED : bt);
+		o_tmpdrop(2);
+		if (locals == 1) {
+			o_local(-ret, bt);
+			o_addr();
+		} else {
+			o_num(ret, bt);
+		}
 	}
 	return 0;
 }
@@ -1074,7 +1087,7 @@ void o_call(int argc, unsigned *bt, unsigned ret_bt)
 		os("\xe8", 1);		/* call $x */
 		if (!nogen)
 			out_rela(t->addr, codeaddr(), 1);
-		oi(-4, 4);
+		oi(-4 + t->off, 4);
 		o_tmpdrop(1);
 	} else {
 		tmp_pop(0, R_RAX);
@@ -1092,4 +1105,18 @@ int o_nogen(void)
 void o_dogen(void)
 {
 	nogen = 0;
+}
+
+void o_datset(long addr, int off, unsigned bt)
+{
+	struct tmp *t = &tmp[ntmp - 1];
+	if (t->flags & LOC_NUM && !(t->flags & TMP_ADDR)) {
+		num_cast(t, bt);
+		out_datcpy(addr, off, (void *) &t->addr, BT_SZ(bt));
+	}
+	if (t->flags & LOC_SYM && !(t->flags & TMP_ADDR)) {
+		out_datrela(tmp->addr, addr, off);
+		out_datcpy(addr, off, (void *) &t->off, BT_SZ(bt));
+	}
+	o_tmpdrop(1);
 }
