@@ -74,7 +74,14 @@ static int esc_char(int *c, char *s)
 	return 2;
 }
 
+static long num;
+
 long tok_num(void)
+{
+	return num;
+}
+
+static void readnum(void)
 {
 	if (buf[cur] == '0' && buf[cur + 1] == 'x') {
 		long result = 0;
@@ -88,7 +95,8 @@ long tok_num(void)
 				result |= 10 + tolower(c) - 'a';
 			cur++;
 		}
-		return result;
+		num = result;
+		return;
 	}
 	if (isdigit(buf[cur])) {
 		long result = 0;
@@ -96,22 +104,31 @@ long tok_num(void)
 			result *= 10;
 			result += buf[cur++] - '0';
 		}
-		return result;
+		num = result;
+		return;
 	}
 	if (buf[cur] == '\'') {
 		int ret;
 		cur += 2 + esc_char(&ret, buf + cur + 1);
-		return ret;
+		num = ret;
+		return;
 	}
-	return -1;
+	num = -1;
 }
 
-static char snull[BUFSIZE];
+static char str[BUFSIZE];
+static int str_len;
 
-int tok_str(char *obuf)
+int tok_str(char *buf)
 {
-	char *out = obuf ? obuf : snull;
-	char *s = out;
+	if (buf)
+		memcpy(buf, str, str_len);
+	return str_len;
+}
+
+static void readstr(void)
+{
+	char *s = str;
 	char *r = buf + cur;
 	char *e = buf + len;
 	r++;
@@ -126,7 +143,7 @@ int tok_str(char *obuf)
 	}
 	*s++ = '\0';
 	cur = r - buf + 1;
-	return s - out;
+	str_len = s - str;
 }
 
 static int id_char(int c)
@@ -156,7 +173,6 @@ static int skipws(void)
 int tok_get(void)
 {
 	int num;
-	int _pre = pre;
 	if (next != -1) {
 		int tok = next;
 		next = -1;
@@ -166,16 +182,12 @@ int tok_get(void)
 	if (skipws())
 		return TOK_EOF;
 	if (buf[cur] == '"') {
-		if (cur > _pre)
-			return TOK_STR;
-		else
-			tok_str(NULL);
+		readstr();
+		return TOK_STR;
 	}
 	if (isdigit(buf[cur]) || buf[cur] == '\'') {
-		if (cur > _pre)
-			return TOK_NUM;
-		else
-			tok_num();
+		readnum();
+		return TOK_NUM;
 	}
 	if (id_char(buf[cur])) {
 		char *s = name;
