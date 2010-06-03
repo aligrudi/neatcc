@@ -440,7 +440,7 @@ void o_tmpcopy(void)
 		tmp_reg(t2, reg_get(~0), t2->bt, 0);
 	} else if (t1->flags & LOC_REG) {
 		t2->addr = reg_get(~t1->addr);
-		regop1(MOV_R2X, t1->addr, t2->addr, BT_TMPBT(TMP_BT(tmp)));
+		regop1(MOV_R2X, t1->addr, t2->addr, BT_TMPBT(TMP_BT(t1)));
 	}
 	t2->flags = t1->flags;
 }
