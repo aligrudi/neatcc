@@ -83,28 +83,25 @@ long tok_num(void)
 
 static void readnum(void)
 {
+	char *digs = "0123456789abcdef";
+	int base = 10;
 	if (buf[cur] == '0' && buf[cur + 1] == 'x') {
-		long result = 0;
+		base = 16;
 		cur += 2;
-		while (isalnum(buf[cur])) {
-			int c = buf[cur];
-			result <<= 4;
-			if (c >= '0' && c <= '9')
-				result |= c - '0';
-			else
-				result |= 10 + tolower(c) - 'a';
+	}
+	if (strchr(digs, buf[cur])) {
+		long result = 0;
+		char *c;
+		if (base == 10 && buf[cur] == '0')
+			base = 8;
+		while ((c = strchr(digs, buf[cur]))) {
+			result *= base;
+			result += c - digs;
 			cur++;
 		}
 		num = result;
-		return;
-	}
-	if (isdigit(buf[cur])) {
-		long result = 0;
-		while (isdigit(buf[cur])) {
-			result *= 10;
-			result += buf[cur++] - '0';
-		}
-		num = result;
+		while (tolower(buf[cur]) == 'u' || tolower(buf[cur]) == 'l')
+			cur++;
 		return;
 	}
 	if (buf[cur] == '\'') {
