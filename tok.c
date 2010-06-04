@@ -59,6 +59,7 @@ static int get_tok3(int num)
 
 static char *esc_code = "abefnrtv";
 static char *esc = "\a\b\e\f\n\r\t\v";
+static char *digs = "0123456789abcdef";
 
 static int esc_char(int *c, char *s)
 {
@@ -69,6 +70,23 @@ static int esc_char(int *c, char *s)
 	if (strchr(esc_code, s[1])) {
 		*c = esc[strchr(esc_code, s[1]) - esc_code];
 		return 2;
+	}
+	if (isdigit(s[1]) || s[1] == 'x') {
+		int ret = 0;
+		int base = 8;
+		int i = 1;
+		char *d;
+		if (s[1] == 'x') {
+			base = 16;
+			i++;
+		}
+		while ((d = strchr(digs, s[i]))) {
+			ret *= base;
+			ret += d - digs;
+			i++;
+		}
+		*c = ret;
+		return i;
 	}
 	*c = s[1];
 	return 2;
@@ -83,7 +101,6 @@ long tok_num(void)
 
 static void readnum(void)
 {
-	char *digs = "0123456789abcdef";
 	int base = 10;
 	if (buf[cur] == '0' && buf[cur + 1] == 'x') {
 		base = 16;
