@@ -1597,30 +1597,34 @@ static void readstmt(void)
 		return;
 	}
 	if (!tok_jmp(TOK_FOR)) {
-		long check, jump, end, body;
+		long l_check, l_jump, j_fail, j_pass;
 		int break_beg = nbreaks;
 		int continue_beg = ncontinues;
+		int has_cond = 0;
 		tok_expect('(');
 		if (tok_see() != ';')
 			readestmt();
 		tok_expect(';');
-		check = o_mklabel();
-		if (tok_see() != ';')
+		l_check = o_mklabel();
+		if (tok_see() != ';') {
 			readestmt();
+			j_fail = o_jz(0);
+			has_cond = 1;
+		}
 		tok_expect(';');
-		end = o_jz(0);
-		body = o_jmp(0);
-		jump = o_mklabel();
+		j_pass = o_jmp(0);
+		l_jump = o_mklabel();
 		if (tok_see() != ')')
 			readestmt();
 		tok_expect(')');
-		o_jmp(check);
-		o_filljmp(body);
+		o_jmp(l_check);
+		o_filljmp(j_pass);
 		readstmt();
-		o_jmp(jump);
-		o_filljmp(end);
+		o_jmp(l_jump);
+		if (has_cond)
+			o_filljmp(j_fail);
 		break_fill(o_mklabel(), break_beg);
-		continue_fill(jump, continue_beg);
+		continue_fill(l_jump, continue_beg);
 		return;
 	}
 	if (!tok_jmp(TOK_SWITCH)) {
