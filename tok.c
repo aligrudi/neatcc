@@ -126,9 +126,9 @@ int tok_str(char *buf)
 	return str_len;
 }
 
-static void readstr(void)
+static int readstr(char *out)
 {
-	char *s = str;
+	char *s = out;
 	char *r = buf + cur;
 	char *e = buf + len;
 	r++;
@@ -143,7 +143,7 @@ static void readstr(void)
 	}
 	*s++ = '\0';
 	cur = r - buf + 1;
-	str_len = s - str;
+	return s - out - 1;
 }
 
 static int id_char(int c)
@@ -182,7 +182,13 @@ int tok_get(void)
 	if (skipws())
 		return TOK_EOF;
 	if (buf[cur] == '"') {
-		readstr();
+		str_len = 0;
+		while (buf[cur] == '"') {
+			str_len += readstr(str + str_len);
+			if (skipws())
+				return TOK_EOF;
+		}
+		str_len++;
 		return TOK_STR;
 	}
 	if (isdigit(buf[cur]) || buf[cur] == '\'') {
