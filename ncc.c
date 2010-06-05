@@ -1240,7 +1240,9 @@ static void globaldef(void *data, struct name *name, unsigned flags)
 	if (t->flags & T_ARRAY && !t->ptr && !arrays[t->id].n)
 		arrays[t->id].n = initsize();
 	sz = type_totsz(t);
-	if (flags & F_EXTERN)
+	if (t->flags & T_FUNC && !t->ptr)
+		name->addr = out_mkundef(varname, 0);
+	else if (flags & F_EXTERN)
 		name->addr = out_mkundef(varname, sz);
 	else if (flags & F_INIT)
 		name->addr = out_mkdat(varname, NULL, sz, F_GLOBAL(flags));
