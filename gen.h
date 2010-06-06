@@ -1,4 +1,4 @@
-#define SECSIZE		(1 << 12)
+#define SECSIZE		(1 << 18)
 #define MAXTMP		(1 << 12)
 
 /* basic types */

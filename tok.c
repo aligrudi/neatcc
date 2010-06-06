@@ -4,6 +4,9 @@
 #include <string.h>
 #include "tok.h"
 
+extern void cpp_init(int fd);
+extern int cpp_read(char *s);
+
 static char buf[BUFSIZE];
 static int len;
 static int cur;
@@ -111,13 +114,14 @@ static void readnum(void)
 		char *c;
 		if (base == 10 && buf[cur] == '0')
 			base = 8;
-		while ((c = strchr(digs, buf[cur]))) {
+		while (cur < len && (c = strchr(digs, buf[cur]))) {
 			result *= base;
 			result += c - digs;
 			cur++;
 		}
 		num = result;
-		while (tolower(buf[cur]) == 'u' || tolower(buf[cur]) == 'l')
+		while (cur < len && tolower(buf[cur]) == 'u' ||
+				tolower(buf[cur]) == 'l')
 			cur++;
 		return;
 	}
@@ -168,10 +172,18 @@ static int id_char(int c)
 static int skipws(void)
 {
 	while (1) {
+		if (cur == len) {
+			int r;
+			while (!(r = cpp_read(buf + cur)))
+				;
+			if (r == -1)
+				return 1;
+			len += r;
+		}
 		while (cur < len && isspace(buf[cur]))
 			cur++;
 		if (cur == len)
-			return 1;
+			continue;
 		if (TOK2(buf + cur) != TOK2("/*"))
 			return 0;
 		while (++cur < len) {
@@ -242,10 +254,8 @@ int tok_see(void)
 
 void tok_init(int fd)
 {
-	int n = 0;
-	while ((n = read(fd, buf + len, sizeof(buf) - len)) > 0)
-		len += n;
 	next = -1;
+	cpp_init(fd);
 }
 
 char *tok_id(void)
