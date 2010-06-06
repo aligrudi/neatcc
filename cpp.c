@@ -1,10 +1,11 @@
-#include <unistd.h>
-#include <stdlib.h>
 #include <ctype.h>
+#include <fcntl.h>
+#include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 #include "tok.h"
 
-static char buf[BUFSIZE];
+static char *buf;
 static int len;
 static int cur;
 
@@ -17,11 +18,44 @@ static struct define {
 } defines[MAXDEFS];
 static int ndefines;
 
-void cpp_init(int fd)
+#define MAXBUFS			(1 << 3)
+
+static struct buf {
+	char buf[BUFSIZE];
+	int len;
+	int cur;
+} bufs[MAXBUFS];
+static int nbufs;
+
+static void buf_new(void)
+{
+	bufs[nbufs - 1].cur = cur;
+	bufs[nbufs - 1].len = len;
+	nbufs++;
+	cur = 0;
+	len = 0;
+	buf = bufs[nbufs - 1].buf;
+}
+
+static void buf_pop(void)
+{
+	nbufs--;
+	cur = bufs[nbufs - 1].cur;
+	len = bufs[nbufs - 1].len;
+	buf = bufs[nbufs - 1].buf;
+}
+
+static void include(int fd)
 {
 	int n = 0;
-	while ((n = read(fd, buf + len, sizeof(buf) - len)) > 0)
+	buf_new();
+	while ((n = read(fd, buf + len, BUFSIZE - len)) > 0)
 		len += n;
+}
+
+void cpp_init(int fd)
+{
+	include(fd);
 }
 
 static void jumpws(void)
@@ -49,6 +83,13 @@ static void read_tilleol(char *dst)
 	*dst = '\0';
 }
 
+static void include_file(char *file)
+{
+	int fd = open(file, O_RDONLY);
+	include(fd);
+	close (fd);
+}
+
 static void cpp_cmd(void)
 {
 	char cmd[NAMELEN];
@@ -58,6 +99,18 @@ static void cpp_cmd(void)
 		struct define *d = &defines[ndefines++];
 		read_word(d->name);
 		read_tilleol(d->def);
+		return;
+	}
+	if (!strcmp("include", cmd)) {
+		char file[NAMELEN];
+		char *s, *e;
+		jumpws();
+		s = buf + cur + 1;
+		e = strchr(buf + cur + 1, buf[cur] == '"' ? '"' : '>');
+		memcpy(file, s, e - s);
+		file[e - s] = '\0';
+		cur += e - s + 2;
+		include_file(file);
 		return;
 	}
 }
@@ -71,14 +124,15 @@ static int macro_find(char *name)
 	return -1;
 }
 
-static int macro_expand(char *s)
+static void macro_expand(void)
 {
 	char name[NAMELEN];
 	struct define *m;
 	read_word(name);
+	buf_new();
 	m = &defines[macro_find(name)];
-	strcpy(s, m->def);
-	return strlen(m->def);
+	strcpy(buf, m->def);
+	len = strlen(m->def);
 }
 
 static void jumpstr(void)
@@ -113,16 +167,20 @@ static int definedword;
 
 int cpp_read(char *s)
 {
-	int old = cur;
-	if (cur == len)
-		return -1;
+	int old;
+	if (definedword) {
+		definedword = 0;
+		macro_expand();
+	}
+	if (cur == len) {
+		if (nbufs < 2)
+			return -1;
+		buf_pop();
+	}
+	old = cur;
 	if (buf[cur] == '#') {
 		cpp_cmd();
 		return 0;
-	}
-	if (definedword) {
-		definedword = 0;
-		return macro_expand(s);
 	}
 	while (cur < len) {
 		if (buf[cur] == '#')
