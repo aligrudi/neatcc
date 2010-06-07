@@ -83,11 +83,42 @@ static void read_tilleol(char *dst)
 	*dst = '\0';
 }
 
-static void include_file(char *file)
+static char *putstr(char *d, char *s)
 {
-	int fd = open(file, O_RDONLY);
-	include(fd);
-	close (fd);
+	while (*s)
+		*d++ = *s++;
+	*d = '\0';
+	return d;
+}
+
+#define MAXLOCS			(1 << 10)
+
+static char *locs[MAXLOCS] = {".", NULL, "/usr/include"};
+static int nlocs = 3;
+
+void cpp_addpath(char *s)
+{
+	locs[nlocs++] = s;
+}
+
+static int include_find(char *name, int std)
+{
+	int i;
+	int fd;
+	for (i = std ? 1 : 0; i < nlocs; i++) {
+		char path[1 << 10];
+		char *s;
+		if (!locs[i] && *name != '/')
+			continue;
+		s = putstr(path, locs[i]);
+		if (locs[i])
+			*s++ = '/';
+		s = putstr(s, name);
+		fd = open(path, O_RDONLY);
+		if (fd != -1)
+			return fd;
+	}
+	return -1;
 }
 
 static void cpp_cmd(void)
@@ -104,13 +135,18 @@ static void cpp_cmd(void)
 	if (!strcmp("include", cmd)) {
 		char file[NAMELEN];
 		char *s, *e;
+		int fd;
 		jumpws();
 		s = buf + cur + 1;
 		e = strchr(buf + cur + 1, buf[cur] == '"' ? '"' : '>');
 		memcpy(file, s, e - s);
 		file[e - s] = '\0';
 		cur += e - s + 2;
-		include_file(file);
+		fd = include_find(file, *e == '>');
+		if (fd == -1)
+			return;
+		include(fd);
+		close(fd);
 		return;
 	}
 }

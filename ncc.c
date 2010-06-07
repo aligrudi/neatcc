@@ -1697,8 +1697,11 @@ int main(int argc, char *argv[])
 	char obj[128];
 	int ifd, ofd;
 	int i = 1;
-	while (i < argc && argv[i][0] == '-')
+	while (i < argc && argv[i][0] == '-') {
+		if (argv[i][1] == 'I')
+			cpp_addpath(argv[i][2] ? argv[i] + 2 : argv[++i]);
 		i++;
+	}
 	if (i == argc)
 		die("no file given\n");
 	ifd = open(argv[i], O_RDONLY);

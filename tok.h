@@ -46,3 +46,5 @@ long tok_num(void);
 int tok_str(char *out);
 long tok_addr(void);
 void tok_jump(long addr);
+
+void cpp_addpath(char *s);
