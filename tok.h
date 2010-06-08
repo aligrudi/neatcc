@@ -49,3 +49,5 @@ void tok_jump(long addr);
 
 void cpp_addpath(char *s);
 void cpp_define(char *name, char *def);
+
+void die(char *msg);

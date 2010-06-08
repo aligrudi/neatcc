@@ -64,6 +64,12 @@ static void ts_pop(struct type *type)
 		*type = ts[nts];
 }
 
+void die(char *s)
+{
+	print(s);
+	exit(1);
+}
+
 struct name {
 	char name[NAMELEN];
 	struct type type;
@@ -78,6 +84,8 @@ static int nglobals;
 
 static void local_add(struct name *name)
 {
+	if (nlocals >= MAXLOCALS)
+		die("nomem: MAXLOCALS reached!\n");
 	memcpy(&locals[nlocals++], name, sizeof(*name));
 }
 
@@ -94,13 +102,9 @@ static void global_add(struct name *name)
 {
 	int found = global_find(name->name);
 	int i = found == -1 ? nglobals++ : found;
+	if (nglobals >= MAXGLOBALS)
+		die("nomem: MAXGLOBALS reached!\n");
 	memcpy(&globals[i], name, sizeof(*name));
-}
-
-static void die(char *s)
-{
-	print(s);
-	exit(1);
 }
 
 #define MAXENUMS		(1 << 10)
@@ -114,6 +118,8 @@ static int nenums;
 static void enum_add(char *name, int val)
 {
 	struct enumval *ev = &enums[nenums++];
+	if (nenums >= MAXENUMS)
+		die("nomem: MAXENUMS reached!\n");
 	strcpy(ev->name, name);
 	ev->n = val;
 }
@@ -140,6 +146,8 @@ static int ntypedefs;
 static void typedef_add(char *name, struct type *type)
 {
 	struct typdefinfo *ti = &typedefs[ntypedefs++];
+	if (ntypedefs >= MAXTYPEDEFS)
+		die("nomem: MAXTYPEDEFS reached!\n");
 	strcpy(ti->name, name);
 	memcpy(&ti->type, type, sizeof(*type));
 }
@@ -164,6 +172,8 @@ static int narrays;
 static int array_add(struct type *type, int n)
 {
 	struct array *a = &arrays[narrays++];
+	if (narrays >= MAXARRAYS)
+		die("nomem: MAXARRAYS reached!\n");
 	memcpy(&a->type, type, sizeof(*type));
 	a->n = n;
 	return a - arrays;
@@ -177,7 +187,7 @@ static void array2ptr(struct type *t)
 	t->ptr++;
 }
 
-#define MAXTYPES		(1 << 10)
+#define MAXSTRUCTS		(1 << 10)
 #define MAXFIELDS		(1 << 7)
 
 static struct structinfo {
@@ -186,7 +196,7 @@ static struct structinfo {
 	int nfields;
 	int isunion;
 	int size;
-} structs[MAXTYPES];
+} structs[MAXSTRUCTS];
 static int nstructs;
 
 static int struct_find(char *name, int isunion)
@@ -197,6 +207,8 @@ static int struct_find(char *name, int isunion)
 				structs[i].isunion == isunion)
 			return i;
 	i = nstructs++;
+	if (nstructs >= MAXSTRUCTS)
+		die("nomem: MAXTYPES reached!\n");
 	memset(&structs[i], 0, sizeof(structs[i]));
 	strcpy(structs[i].name, name);
 	structs[i].isunion = isunion;
@@ -618,6 +630,8 @@ static int func_create(struct type *ret, struct name *args, int nargs)
 {
 	struct funcinfo *fi = &funcs[nfuncs++];
 	int i;
+	if (nfuncs >= MAXFUNCS)
+		die("nomem: MAXFUNCS reached!\n");
 	memcpy(&fi->ret, ret, sizeof(*ret));
 	for (i = 0; i < nargs; i++)
 		memcpy(&fi->args[i], &args[i].type, sizeof(*ret));

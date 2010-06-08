@@ -37,6 +37,8 @@ static void buf_new(void)
 		bufs[nbufs - 1].cur = cur;
 		bufs[nbufs - 1].len = len;
 	}
+	if (nbufs >= MAXBUFS)
+		die("nomem: MAXBUFS reached!\n");
 	nbufs++;
 	cur = 0;
 	len = 0;
@@ -217,6 +219,8 @@ static int macro_new(char *name)
 			return i;
 		}
 	}
+	if (nmacros >= MAXDEFS)
+		die("nomem: MAXDEFS reached!\n");
 	strcpy(macros[nmacros++].name, name);
 	return nmacros - 1;
 }
