@@ -22,7 +22,7 @@ static struct macro {
 } macros[MAXDEFS];
 static int nmacros;
 
-#define MAXBUFS			(1 << 3)
+#define MAXBUFS			(1 << 5)
 
 static struct buf {
 	char buf[BUFSIZE];
@@ -63,6 +63,9 @@ static void include(int fd)
 
 void cpp_init(int fd)
 {
+	cpp_define("__STDC__", "");
+	cpp_define("__x86_64__", "");
+	cpp_define("__linux__", "");
 	include(fd);
 }
 
@@ -75,18 +78,33 @@ static void jumpws(void)
 static void read_word(char *dst)
 {
 	jumpws();
-	while (cur < len && isalnum(buf[cur]) || buf[cur] == '_')
+	while (cur < len && (isalnum(buf[cur]) || buf[cur] == '_'))
 		*dst++ = buf[cur++];
 	*dst = '\0';
 }
 
+static void jumpcomment(void)
+{
+	while (++cur < len) {
+		if (buf[cur] == '*' && buf[cur + 1] == '/') {
+			cur += 2;
+			break;
+		}
+	}
+}
+
 static void read_tilleol(char *dst)
 {
-	while (cur < len && buf[cur] != '\n')
+	while (cur < len && isspace(buf[cur]) && buf[cur] != '\n')
+		cur++;
+	while (cur < len && buf[cur] != '\n') {
 		if (buf[cur] == '\\')
 			cur += 2;
+		else if (buf[cur] == '/' && buf[cur + 1] == '*')
+			jumpcomment();
 		else
 			*dst++ = buf[cur++];
+	}
 	*dst = '\0';
 }
 
@@ -143,16 +161,6 @@ static void jumpstr(void)
 				cur++;
 		cur++;
 		return;
-	}
-}
-
-static void jumpcomment(void)
-{
-	while (++cur < len) {
-		if (buf[cur] == '*' && buf[cur + 1] == '/') {
-			cur += 2;
-			break;
-		}
 	}
 }
 
@@ -220,19 +228,49 @@ static void macro_define(void)
 	read_word(name);
 	d = &macros[macro_new(name)];
 	d->isfunc = 0;
-	if (buf[cur++] == '(') {
+	if (buf[cur] == '(') {
+		cur++;
 		jumpws();
 		while (cur < len && buf[cur] != ')') {
 			readarg(d->args[d->nargs++]);
 			jumpws();
-			if (buf[cur] != ',')
+			if (buf[cur++] != ',')
 				break;
 			jumpws();
 		}
 		d->isfunc = 1;
-		cur++;
 	}
 	read_tilleol(d->def);
+}
+
+int cpp_read(char *buf);
+
+static char ebuf[BUFSIZE];
+static int elen;
+static int ecur;
+static int cppeval;
+
+static long evalexpr(void);
+
+static int cpp_eval(void)
+{
+	int bufid;
+	int ret;
+	char evalbuf[BUFSIZE];
+	read_tilleol(evalbuf);
+	buf_new();
+	strcpy(buf, evalbuf);
+	len = strlen(evalbuf);
+	bufid = nbufs;
+	elen = 0;
+	ecur = 0;
+	cppeval = 1;
+	while (bufid < nbufs || cur < len)
+		elen += cpp_read(ebuf + elen);
+	cppeval = 0;
+	ret = evalexpr();
+	buf_pop();
+	return ret;
 }
 
 static void jumpifs(int jumpelse)
@@ -246,13 +284,19 @@ static void jumpifs(int jumpelse)
 			if (!strcmp("else", cmd))
 				if (!depth && !jumpelse)
 					break;
-			if (!strcmp("endif", cmd))
+			if (!strcmp("elif", cmd))
+				if (!depth && !jumpelse && cpp_eval())
+					break;
+			if (!strcmp("endif", cmd)) {
 				if (!depth)
 					break;
 				else
 					depth--;
-			if (!strcmp("ifdef", cmd) || !strcmp("ifndef", cmd))
+			}
+			if (!strcmp("ifdef", cmd) || !strcmp("ifndef", cmd) ||
+					!strcmp("if", cmd))
 				depth++;
+			continue;
 		}
 		if (buf[cur] == '/' && buf[cur + 1] == '*') {
 			jumpcomment();
@@ -284,15 +328,23 @@ static void cpp_cmd(void)
 			strcpy(macros[idx].name, "");
 		return;
 	}
-	if (!strcmp("ifdef", cmd) || !strcmp("ifndef", cmd)) {
+	if (!strcmp("ifdef", cmd) || !strcmp("ifndef", cmd) ||
+						!strcmp("if", cmd)) {
 		char name[NAMELEN];
-		int not = cmd[2] == 'n';
-		read_word(name);
-		if (!not && macro_find(name) < 0 || not && macro_find(name) >= 0)
+		int matched = 0;
+		if (cmd[2]) {
+			int not = cmd[2] == 'n';
+			read_word(name);
+			matched = not ? macro_find(name) < 0 :
+					macro_find(name) >= 0;
+		} else {
+			matched = cpp_eval();
+		}
+		if (!matched)
 			jumpifs(0);
 		return;
 	}
-	if (!strcmp("else", cmd)) {
+	if (!strcmp("else", cmd) || !strcmp("elif", cmd)) {
 		jumpifs(1);
 		return;
 	}
@@ -330,7 +382,7 @@ static void macro_expand(void)
 {
 	char name[NAMELEN];
 	char args[MAXARGS][MACROLEN];
-	int nargs;
+	int nargs = 0;
 	struct macro *m;
 	char *dst;
 	int dstlen = 0;
@@ -447,10 +499,302 @@ int cpp_read(char *s)
 				definedword = 1;
 				break;
 			}
+			if (cppeval && !strcmp("defined", word)) {
+				int parens = 0;
+				jumpws();
+				if (buf[cur] == '(') {
+					parens = 1;
+					cur++;
+				}
+				read_word(word);
+				if (parens) {
+					jumpws();
+					cur++;
+				}
+			}
 			continue;
 		}
 		cur++;
 	}
 	memcpy(s, buf + old, cur - old);
+	s[cur - old] = '\0';
 	return cur - old;
+}
+
+/* preprocessor constant expression evaluation */
+
+static char etok[NAMELEN];
+static int enext;
+
+static char *tok2[] = {
+	"<<", ">>", "&&", "||", "==", "!=", "<=", ">="
+};
+
+static int eval_tok(void)
+{
+	char *s = etok;
+	int i;
+	while (ecur < elen) {
+		while (ecur < elen && isspace(ebuf[ecur]))
+			ecur++;
+		if (ebuf[ecur] == '/' && ebuf[ecur + 1] == '*') {
+			while (ecur < elen && (ebuf[ecur - 2] != '*' ||
+						ebuf[ecur - 1] != '/'))
+				ecur++;
+			continue;
+		}
+		break;
+	}
+	if (ecur >= elen)
+		return TOK_EOF;
+	if (isalpha(ebuf[ecur]) || ebuf[ecur] == '_') {
+		while (isalnum(ebuf[ecur]) || ebuf[ecur] == '_')
+			*s++ = ebuf[ecur++];
+		*s = '\0';
+		return TOK_NAME;
+	}
+	if (isdigit(ebuf[ecur])) {
+		while (isdigit(ebuf[ecur]))
+			*s++ = ebuf[ecur++];
+		while (tolower(ebuf[ecur]) == 'u' || tolower(ebuf[ecur]) == 'l')
+			ecur++;
+		return TOK_NUM;
+	}
+	for (i = 0; i < ARRAY_SIZE(tok2); i++)
+		if (TOK2(tok2[i]) == TOK2(ebuf + ecur)) {
+			int ret = TOK2(tok2[i]);
+			ecur += 2;
+			return ret;
+		}
+	return ebuf[ecur++];
+}
+
+static int eval_see(void)
+{
+	if (enext == -1)
+		enext = eval_tok();
+	return enext;
+}
+
+static int eval_get(void)
+{
+	if (enext != -1) {
+		int ret = enext;
+		enext = -1;
+		return ret;
+	}
+	return eval_tok();
+}
+
+static long eval_num(void)
+{
+	return atol(etok);
+}
+
+static int eval_jmp(int tok)
+{
+	if (eval_see() == tok) {
+		eval_get();
+		return 0;
+	}
+	return 1;
+}
+
+static void eval_expect(int tok)
+{
+	eval_jmp(tok);
+}
+
+static char *eval_id(void)
+{
+	return etok;
+}
+
+static long evalcexpr(void);
+
+static long evalatom(void)
+{
+	if (!eval_jmp(TOK_NUM))
+		return eval_num();
+	if (!eval_jmp(TOK_NAME)) {
+		int parens = !eval_jmp('(');
+		long ret;
+		eval_expect(TOK_NAME);
+		ret = macro_find(eval_id()) >= 0;
+		if (parens)
+			eval_expect(')');
+		return ret;
+	}
+	if (!eval_jmp('(')) {
+		long ret = evalcexpr();
+		eval_expect(')');
+		return ret;
+	}
+	return -1;
+}
+
+static long evalpre(void)
+{
+	if (!eval_jmp('!'))
+		return !evalpre();
+	if (!eval_jmp('-'))
+		return -evalpre();
+	if (!eval_jmp('~'))
+		return ~evalpre();
+	return evalatom();
+}
+
+static long evalmul(void)
+{
+	long ret = evalpre();
+	while (1) {
+		if (!eval_jmp('*')) {
+			ret *= evalpre();
+			continue;
+		}
+		if (!eval_jmp('/')) {
+			ret /= evalpre();
+			continue;
+		}
+		if (!eval_jmp('%')) {
+			ret %= evalpre();
+			continue;
+		}
+		break;
+	}
+	return ret;
+}
+
+static long evaladd(void)
+{
+	long ret = evalmul();
+	while (1) {
+		if (!eval_jmp('+')) {
+			ret += evalmul();
+			continue;
+		}
+		if (!eval_jmp('-')) {
+			ret -= evalmul();
+			continue;
+		}
+		break;
+	}
+	return ret;
+}
+
+static long evalshift(void)
+{
+	long ret = evaladd();
+	while (1) {
+		if (!eval_jmp(TOK2("<<"))) {
+			ret <<= evaladd();
+			continue;
+		}
+		if (!eval_jmp(TOK2(">>"))) {
+			ret >>= evaladd();
+			continue;
+		}
+		break;
+	}
+	return ret;
+}
+
+static long evalcmp(void)
+{
+	long ret = evalshift();
+	while (1) {
+		if (!eval_jmp('<')) {
+			ret = ret < evalshift();
+			continue;
+		}
+		if (!eval_jmp('>')) {
+			ret = ret > evalshift();
+			continue;
+		}
+		if (!eval_jmp(TOK2("<="))) {
+			ret = ret <= evalshift();
+			continue;
+		}
+		if (!eval_jmp(TOK2(">="))) {
+			ret = ret >= evalshift();
+			continue;
+		}
+		break;
+	}
+	return ret;
+}
+
+static long evaleq(void)
+{
+	long ret = evalcmp();
+	while (1) {
+		if (!eval_jmp(TOK2("=="))) {
+			ret = ret == evalcmp();
+			continue;
+		}
+		if (!eval_jmp(TOK2("!="))) {
+			ret = ret != evalcmp();
+			continue;
+		}
+		break;
+	}
+	return ret;
+}
+
+static long evalbitand(void)
+{
+	long ret = evaleq();
+	while (!eval_jmp('&'))
+		ret &= evaleq();
+	return ret;
+}
+
+static long evalxor(void)
+{
+	long ret = evalbitand();
+	while (!eval_jmp('^'))
+		ret ^= evalbitand();
+	return ret;
+}
+
+static long evalbitor(void)
+{
+	long ret = evalxor();
+	while (!eval_jmp('|'))
+		ret |= evalxor();
+	return ret;
+}
+
+static long evaland(void)
+{
+	long ret = evalbitor();
+	while (!eval_jmp(TOK2("&&")))
+		ret = ret && evalbitor();
+	return ret;
+}
+
+static long evalor(void)
+{
+	long ret = evaland();
+	while (!eval_jmp(TOK2("||")))
+		ret = ret || evaland();
+	return ret;
+}
+
+static long evalcexpr(void)
+{
+	long ret = evalor();
+	if (eval_jmp('?'))
+		return ret;
+	if (ret)
+		return evalor();
+	while (eval_get() != ':')
+		;
+	return evalor();
+}
+
+static long evalexpr(void)
+{
+	enext = -1;
+	return evalcexpr();
 }
