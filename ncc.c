@@ -1700,6 +1700,16 @@ int main(int argc, char *argv[])
 	while (i < argc && argv[i][0] == '-') {
 		if (argv[i][1] == 'I')
 			cpp_addpath(argv[i][2] ? argv[i] + 2 : argv[++i]);
+		if (argv[i][1] == 'D') {
+			char *name = argv[i] + 2;
+			char *def = "";
+			char *eq = strchr(name, '=');
+			if (eq) {
+				*eq = '\0';
+				def = eq + 1;
+			}
+			cpp_define(name, def);
+		}
 		i++;
 	}
 	if (i == argc)

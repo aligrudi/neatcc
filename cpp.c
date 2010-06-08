@@ -33,8 +33,10 @@ static int nbufs;
 
 static void buf_new(void)
 {
-	bufs[nbufs - 1].cur = cur;
-	bufs[nbufs - 1].len = len;
+	if (nbufs) {
+		bufs[nbufs - 1].cur = cur;
+		bufs[nbufs - 1].len = len;
+	}
 	nbufs++;
 	cur = 0;
 	len = 0;
@@ -44,9 +46,11 @@ static void buf_new(void)
 static void buf_pop(void)
 {
 	nbufs--;
-	cur = bufs[nbufs - 1].cur;
-	len = bufs[nbufs - 1].len;
-	buf = bufs[nbufs - 1].buf;
+	if (nbufs) {
+		cur = bufs[nbufs - 1].cur;
+		len = bufs[nbufs - 1].len;
+		buf = bufs[nbufs - 1].buf;
+	}
 }
 
 static void include(int fd)
@@ -185,29 +189,34 @@ static void readarg(char *s)
 	s[cur - beg] = '\0';
 }
 
+static void macro_define(void)
+{
+	struct define *d = &defines[ndefines++];
+	read_word(d->name);
+	d->isfunc = 0;
+	if (buf[cur++] == '(') {
+		jumpws();
+		while (cur < len && buf[cur] != ')') {
+			readarg(d->args[d->nargs++]);
+			jumpws();
+			if (buf[cur] != ',')
+				break;
+			jumpws();
+		}
+		d->isfunc = 1;
+		cur++;
+	}
+	jumpws();
+	read_tilleol(d->def);
+}
+
 static void cpp_cmd(void)
 {
 	char cmd[NAMELEN];
 	cur++;
 	read_word(cmd);
 	if (!strcmp("define", cmd)) {
-		struct define *d = &defines[ndefines++];
-		read_word(d->name);
-		d->isfunc = 0;
-		if (buf[cur++] == '(') {
-			jumpws();
-			while (cur < len && buf[cur] != ')') {
-				readarg(d->args[d->nargs++]);
-				jumpws();
-				if (buf[cur] != ',')
-					break;
-				jumpws();
-			}
-			d->isfunc = 1;
-			cur++;
-		}
-		jumpws();
-		read_tilleol(d->def);
+		macro_define();
 		return;
 	}
 	if (!strcmp("include", cmd)) {
@@ -315,6 +324,19 @@ static void macro_expand(void)
 	len = dstlen;
 	cur = 0;
 	buf[len] = '\0';
+}
+
+void cpp_define(char *name, char *def)
+{
+	char *s;
+	buf_new();
+	s = buf;
+	s = putstr(s, name);
+	*s++ = '\t';
+	s = putstr(s, def);
+	len = s - buf;
+	macro_define();
+	buf_pop();
 }
 
 static int definedword;
