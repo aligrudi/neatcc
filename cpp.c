@@ -13,14 +13,14 @@ static int cur;
 #define MACROLEN		(1 << 10)
 #define MAXARGS			(1 << 5)
 
-static struct define {
+static struct macro {
 	char name[NAMELEN];
 	char def[MACROLEN];
 	char args[MAXARGS][NAMELEN];
 	int nargs;
 	int isfunc;
-} defines[MAXDEFS];
-static int ndefines;
+} macros[MAXDEFS];
+static int nmacros;
 
 #define MAXBUFS			(1 << 3)
 
@@ -189,10 +189,36 @@ static void readarg(char *s)
 	s[cur - beg] = '\0';
 }
 
+static int macro_find(char *name)
+{
+	int i;
+	for (i = 0; i < nmacros; i++)
+		if (!strcmp(name, macros[i].name))
+			return i;
+	return -1;
+}
+
+static int macro_new(char *name)
+{
+	int i;
+	for (i = 0; i < nmacros; i++) {
+		if (!strcmp(name, macros[i].name))
+			return i;
+		if (!*macros[i].name) {
+			strcpy(macros[i].name, name);
+			return i;
+		}
+	}
+	strcpy(macros[nmacros++].name, name);
+	return nmacros - 1;
+}
+
 static void macro_define(void)
 {
-	struct define *d = &defines[ndefines++];
-	read_word(d->name);
+	char name[NAMELEN];
+	struct macro *d;
+	read_word(name);
+	d = &macros[macro_new(name)];
 	d->isfunc = 0;
 	if (buf[cur++] == '(') {
 		jumpws();
@@ -219,6 +245,15 @@ static void cpp_cmd(void)
 		macro_define();
 		return;
 	}
+	if (!strcmp("undef", cmd)) {
+		char name[NAMELEN];
+		int idx;
+		read_word(name);
+		idx = macro_find(name);
+		if (idx != -1)
+			strcpy(macros[idx].name, "");
+		return;
+	}
 	if (!strcmp("include", cmd)) {
 		char file[NAMELEN];
 		char *s, *e;
@@ -238,16 +273,7 @@ static void cpp_cmd(void)
 	}
 }
 
-static int macro_find(char *name)
-{
-	int i;
-	for (i = 0; i < ndefines; i++)
-		if (!strcmp(name, defines[i].name))
-			return i;
-	return -1;
-}
-
-static int macro_arg(struct define *m, char *arg)
+static int macro_arg(struct macro *m, char *arg)
 {
 	int i;
 	for (i = 0; i < m->nargs; i++)
@@ -261,12 +287,12 @@ static void macro_expand(void)
 	char name[NAMELEN];
 	char args[MAXARGS][MACROLEN];
 	int nargs;
-	struct define *m;
+	struct macro *m;
 	char *dst;
 	int dstlen = 0;
 	int beg;
 	read_word(name);
-	m = &defines[macro_find(name)];
+	m = &macros[macro_find(name)];
 	if (!m->isfunc) {
 		buf_new();
 		strcpy(buf, m->def);
