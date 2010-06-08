@@ -68,6 +68,7 @@ struct name {
 	char name[NAMELEN];
 	struct type type;
 	long addr;
+	int unused;		/* unreferenced external symbols */
 };
 
 static struct name locals[MAXLOCALS];
@@ -516,8 +517,16 @@ static void readprimary(void)
 			}
 		}
 		if ((n = global_find(name)) != -1) {
-			struct type *t = &globals[n].type;
-			o_symaddr(globals[n].addr, TYPE_BT(t));
+			struct name *g = &globals[n];
+			struct type *t = &g->type;
+			if (g->unused) {
+				g->unused = 0;
+				if (t->flags & T_FUNC && !t->ptr)
+					g->addr = out_mkundef(name, 0);
+				else
+					g->addr = out_mkundef(name, type_totsz(t));
+			}
+			o_symaddr(g->addr, TYPE_BT(t));
 			ts_push(t);
 			return;
 		}
@@ -1240,10 +1249,8 @@ static void globaldef(void *data, struct name *name, unsigned flags)
 	if (t->flags & T_ARRAY && !t->ptr && !arrays[t->id].n)
 		arrays[t->id].n = initsize();
 	sz = type_totsz(t);
-	if (t->flags & T_FUNC && !t->ptr)
-		name->addr = out_mkundef(varname, 0);
-	else if (flags & F_EXTERN)
-		name->addr = out_mkundef(varname, sz);
+	if (flags & F_EXTERN || t->flags & T_FUNC && !t->ptr)
+		name->unused = 1;
 	else if (flags & F_INIT)
 		name->addr = out_mkdat(varname, NULL, sz, F_GLOBAL(flags));
 	else
@@ -1302,11 +1309,12 @@ static void localdef(void *data, struct name *name, unsigned flags)
 static void funcdef(char *name, struct type *type, struct name *args,
 			int nargs, unsigned flags)
 {
-	int i;
 	struct name global;
+	int i;
 	strcpy(global.name, name);
 	memcpy(&global.type, type, sizeof(*type));
 	global.addr = o_func_beg(name, F_GLOBAL(flags));
+	global.unused = 0;
 	global_add(&global);
 	ret_bt = TYPE_BT(&funcs[type->id].ret);
 	for (i = 0; i < nargs; i++) {
@@ -1408,6 +1416,7 @@ static int readdefs(void (*def)(void *data, struct name *name, unsigned flags),
 		return 1;
 	while (tok_see() != ';' && tok_see() != '{') {
 		struct name name;
+		name.unused = 0;
 		if (readname(&name.type, name.name, &base, flags))
 			break;
 		if (!tok_jmp('='))
