@@ -399,6 +399,7 @@ static void macro_expand(void)
 		len = strlen(m->def);
 		return;
 	}
+	jumpws();
 	if (buf[cur] == '(') {
 		cur++;
 		jumpws();
