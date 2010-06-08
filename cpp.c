@@ -11,10 +11,14 @@ static int cur;
 
 #define MAXDEFS			(1 << 10)
 #define MACROLEN		(1 << 10)
+#define MAXARGS			(1 << 5)
 
 static struct define {
 	char name[NAMELEN];
 	char def[MACROLEN];
+	char args[MAXARGS][NAMELEN];
+	int nargs;
+	int isfunc;
 } defines[MAXDEFS];
 static int ndefines;
 
@@ -74,12 +78,11 @@ static void read_word(char *dst)
 
 static void read_tilleol(char *dst)
 {
-	while (cur < len && buf[cur] != '\n') {
+	while (cur < len && buf[cur] != '\n')
 		if (buf[cur] == '\\')
 			cur += 2;
 		else
 			*dst++ = buf[cur++];
-	}
 	*dst = '\0';
 }
 
@@ -121,6 +124,67 @@ static int include_find(char *name, int std)
 	return -1;
 }
 
+static void jumpstr(void)
+{
+	if (buf[cur] == '\'') {
+		while (cur < len && buf[++cur] != '\'')
+			if (buf[cur] == '\\')
+				cur++;
+		cur++;
+		return;
+	}
+	if (buf[cur] == '"') {
+		while (cur < len && buf[++cur] != '"')
+			if (buf[cur] == '\\')
+				cur++;
+		cur++;
+		return;
+	}
+}
+
+static void jumpcomment(void)
+{
+	while (++cur < len) {
+		if (buf[cur] == '*' && buf[cur + 1] == '/') {
+			cur += 2;
+			break;
+		}
+	}
+}
+
+static void readarg(char *s)
+{
+	int depth = 0;
+	int beg = cur;
+	while (cur < len && (depth || buf[cur] != ',' && buf[cur] != ')')) {
+		switch (buf[cur]) {
+		case '(':
+		case '[':
+		case '{':
+			cur++;
+			depth++;
+			break;
+		case ')':
+		case ']':
+		case '}':
+			cur++;
+			depth--;
+			break;
+		case '\'':
+		case '"':
+			jumpstr();
+			break;
+		default:
+			if (buf[cur] == '/' && buf[cur + 1] == '*')
+				jumpcomment();
+			else
+				cur++;
+		}
+	}
+	memcpy(s, buf + beg, cur - beg);
+	s[cur - beg] = '\0';
+}
+
 static void cpp_cmd(void)
 {
 	char cmd[NAMELEN];
@@ -129,6 +193,20 @@ static void cpp_cmd(void)
 	if (!strcmp("define", cmd)) {
 		struct define *d = &defines[ndefines++];
 		read_word(d->name);
+		d->isfunc = 0;
+		if (buf[cur++] == '(') {
+			jumpws();
+			while (cur < len && buf[cur] != ')') {
+				readarg(d->args[d->nargs++]);
+				jumpws();
+				if (buf[cur] != ',')
+					break;
+				jumpws();
+			}
+			d->isfunc = 1;
+			cur++;
+		}
+		jumpws();
 		read_tilleol(d->def);
 		return;
 	}
@@ -160,43 +238,83 @@ static int macro_find(char *name)
 	return -1;
 }
 
+static int macro_arg(struct define *m, char *arg)
+{
+	int i;
+	for (i = 0; i < m->nargs; i++)
+		if (!strcmp(arg, m->args[i]))
+			return i;
+	return -1;
+}
+
 static void macro_expand(void)
 {
 	char name[NAMELEN];
+	char args[MAXARGS][MACROLEN];
+	int nargs;
 	struct define *m;
+	char *dst;
+	int dstlen = 0;
+	int beg;
 	read_word(name);
-	buf_new();
 	m = &defines[macro_find(name)];
-	strcpy(buf, m->def);
-	len = strlen(m->def);
-}
-
-static void jumpstr(void)
-{
-	if (buf[cur] == '\'') {
-		while (cur < len && buf[++cur] != '\'')
-			if (buf[cur] == '\\')
-				cur++;
-		cur++;
+	if (!m->isfunc) {
+		buf_new();
+		strcpy(buf, m->def);
+		len = strlen(m->def);
 		return;
 	}
-	if (buf[cur] == '"') {
-		while (cur < len && buf[++cur] != '"')
-			if (buf[cur] == '\\')
-				cur++;
+	if (buf[cur] == '(') {
 		cur++;
-		return;
-	}
-}
-
-static void jumpcomment(void)
-{
-	while (++cur < len) {
-		if (buf[cur] == '*' && buf[cur + 1] == '/') {
-			cur += 2;
-			break;
+		jumpws();
+		while (cur < len && buf[cur] != ')') {
+			readarg(args[nargs++]);
+			jumpws();
+			if (buf[cur] != ',')
+				break;
+			jumpws();
 		}
+		cur++;
+		m->isfunc = 1;
 	}
+	buf_new();
+	dst = buf;
+	buf = m->def;
+	len = strlen(m->def);
+	beg = cur;
+	while (cur < len) {
+		if (buf[cur] == '/' && buf[cur + 1] == '*') {
+			jumpcomment();
+			continue;
+		}
+		if (strchr("'\"", buf[cur])) {
+			jumpstr();
+			continue;
+		}
+		if (isalpha(buf[cur]) || buf[cur] == '_') {
+			int arg;
+			char word[NAMELEN];
+			read_word(word);
+			if ((arg = macro_arg(m, word)) != -1) {
+				int len = cur - beg - strlen(word);
+				char *argstr = arg > nargs ? "" : args[arg];
+				int arglen = strlen(argstr);
+				memcpy(dst + dstlen, buf + beg, len);
+				dstlen += len;
+				memcpy(dst + dstlen, argstr, arglen);
+				dstlen += arglen;
+				beg = cur;
+			}
+			continue;
+		}
+		cur++;
+	}
+	memcpy(dst + dstlen, buf + beg, len - beg);
+	dstlen += len - beg;
+	buf = dst;
+	len = dstlen;
+	cur = 0;
+	buf[len] = '\0';
 }
 
 static int definedword;
@@ -221,10 +339,14 @@ int cpp_read(char *s)
 	while (cur < len) {
 		if (buf[cur] == '#')
 			break;
-		if (buf[cur] == '/' && buf[cur + 1] == '*')
+		if (buf[cur] == '/' && buf[cur + 1] == '*') {
 			jumpcomment();
-		if (strchr("'\"", buf[cur]))
+			continue;
+		}
+		if (buf[cur] == '\'' || buf[cur] == '"') {
 			jumpstr();
+			continue;
+		}
 		if (isalpha(buf[cur]) || buf[cur] == '_') {
 			char word[NAMELEN];
 			read_word(word);
@@ -233,6 +355,7 @@ int cpp_read(char *s)
 				definedword = 1;
 				break;
 			}
+			continue;
 		}
 		cur++;
 	}
