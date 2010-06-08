@@ -100,8 +100,8 @@ static char *putstr(char *d, char *s)
 
 #define MAXLOCS			(1 << 10)
 
-static char *locs[MAXLOCS] = {".", NULL, "/usr/include"};
-static int nlocs = 3;
+static char *locs[MAXLOCS] = {"/usr/include"};
+static int nlocs = 1;
 
 void cpp_addpath(char *s)
 {
@@ -112,14 +112,14 @@ static int include_find(char *name, int std)
 {
 	int i;
 	int fd;
-	for (i = std ? 1 : 0; i < nlocs; i++) {
+	for (i = std ? nlocs - 1 : nlocs; i >= 0; i--) {
 		char path[1 << 10];
 		char *s;
-		if (!locs[i] && *name != '/')
-			continue;
-		s = putstr(path, locs[i]);
-		if (locs[i])
+		s = path;
+		if (locs[i]) {
+			s = putstr(s, locs[i]);
 			*s++ = '/';
+		}
 		s = putstr(s, name);
 		fd = open(path, O_RDONLY);
 		if (fd != -1)
@@ -232,8 +232,38 @@ static void macro_define(void)
 		d->isfunc = 1;
 		cur++;
 	}
-	jumpws();
 	read_tilleol(d->def);
+}
+
+static void jumpifs(int jumpelse)
+{
+	int depth = 0;
+	while (cur < len) {
+		if (buf[cur] == '#') {
+			char cmd[NAMELEN];
+			cur++;
+			read_word(cmd);
+			if (!strcmp("else", cmd))
+				if (!depth && !jumpelse)
+					break;
+			if (!strcmp("endif", cmd))
+				if (!depth)
+					break;
+				else
+					depth--;
+			if (!strcmp("ifdef", cmd) || !strcmp("ifndef", cmd))
+				depth++;
+		}
+		if (buf[cur] == '/' && buf[cur + 1] == '*') {
+			jumpcomment();
+			continue;
+		}
+		if (buf[cur] == '\'' || buf[cur] == '"') {
+			jumpstr();
+			continue;
+		}
+		cur++;
+	}
 }
 
 static void cpp_cmd(void)
@@ -254,6 +284,20 @@ static void cpp_cmd(void)
 			strcpy(macros[idx].name, "");
 		return;
 	}
+	if (!strcmp("ifdef", cmd) || !strcmp("ifndef", cmd)) {
+		char name[NAMELEN];
+		int not = cmd[2] == 'n';
+		read_word(name);
+		if (!not && macro_find(name) < 0 || not && macro_find(name) >= 0)
+			jumpifs(0);
+		return;
+	}
+	if (!strcmp("else", cmd)) {
+		jumpifs(1);
+		return;
+	}
+	if (!strcmp("endif", cmd))
+		return;
 	if (!strcmp("include", cmd)) {
 		char file[NAMELEN];
 		char *s, *e;
