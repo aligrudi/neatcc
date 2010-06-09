@@ -23,15 +23,20 @@ static struct macro {
 static int nmacros;
 
 #define MAXBUFS			(1 << 5)
+#define BUF_FILE		0
+#define BUF_MACRO		1
+#define BUF_TEMP		2
 
 static struct buf {
 	char buf[BUFSIZE];
+	char name[NAMELEN];
 	int len;
 	int cur;
+	int type;
 } bufs[MAXBUFS];
 static int nbufs;
 
-static void buf_new(void)
+static void buf_new(int type, char *name)
 {
 	if (nbufs) {
 		bufs[nbufs - 1].cur = cur;
@@ -43,6 +48,8 @@ static void buf_new(void)
 	cur = 0;
 	len = 0;
 	buf = bufs[nbufs - 1].buf;
+	bufs[nbufs - 1].type = type;
+	strcpy(bufs[nbufs -1].name, name ? name : "");
 }
 
 static void buf_pop(void)
@@ -55,10 +62,19 @@ static void buf_pop(void)
 	}
 }
 
+static int macro_expanded(char *macro)
+{
+	int i;
+	for (i = 0; i < nbufs; i++)
+		if (bufs[i].type == BUF_MACRO && !strcmp(macro, bufs[i].name))
+			return 1;
+	return 0;
+}
+
 static void include(int fd)
 {
 	int n = 0;
-	buf_new();
+	buf_new(BUF_FILE, NULL);
 	while ((n = read(fd, buf + len, BUFSIZE - len)) > 0)
 		len += n;
 }
@@ -262,7 +278,7 @@ static int cpp_eval(void)
 	int ret;
 	char evalbuf[BUFSIZE];
 	read_tilleol(evalbuf);
-	buf_new();
+	buf_new(BUF_TEMP, NULL);
 	strcpy(buf, evalbuf);
 	len = strlen(evalbuf);
 	bufid = nbufs;
@@ -394,7 +410,7 @@ static void macro_expand(void)
 	read_word(name);
 	m = &macros[macro_find(name)];
 	if (!m->isfunc) {
-		buf_new();
+		buf_new(BUF_MACRO, name);
 		strcpy(buf, m->def);
 		len = strlen(m->def);
 		return;
@@ -414,7 +430,7 @@ static void macro_expand(void)
 		cur++;
 		m->isfunc = 1;
 	}
-	buf_new();
+	buf_new(BUF_MACRO, name);
 	dst = buf;
 	buf = m->def;
 	len = strlen(m->def);
@@ -457,7 +473,7 @@ static void macro_expand(void)
 void cpp_define(char *name, char *def)
 {
 	char *s;
-	buf_new();
+	buf_new(BUF_TEMP, NULL);
 	s = buf;
 	s = putstr(s, name);
 	*s++ = '\t';
@@ -500,7 +516,7 @@ int cpp_read(char *s)
 		if (isalpha(buf[cur]) || buf[cur] == '_') {
 			char word[NAMELEN];
 			read_word(word);
-			if (macro_find(word) != -1) {
+			if (!macro_expanded(word) && macro_find(word) != -1) {
 				cur -= strlen(word);
 				definedword = 1;
 				break;
