@@ -9,7 +9,7 @@ static char *buf;
 static int len;
 static int cur;
 
-#define MAXDEFS			(1 << 10)
+#define MAXDEFS			(1 << 12)
 #define MACROLEN		(1 << 10)
 #define MAXARGS			(1 << 5)
 
@@ -408,6 +408,7 @@ static void macro_expand(void)
 			jumpws();
 			if (buf[cur] != ',')
 				break;
+			cur++;
 			jumpws();
 		}
 		cur++;
