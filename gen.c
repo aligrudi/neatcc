@@ -338,9 +338,15 @@ static unsigned tmp_pop(int deref, int reg)
 	return t->bt;
 }
 
+static struct tmp *tmp_new(void)
+{
+	cmp_last = -1;
+	return &tmp[ntmp++];
+}
+
 static void tmp_push_reg(unsigned bt, unsigned reg)
 {
-	struct tmp *t = &tmp[ntmp++];
+	struct tmp *t = tmp_new();
 	t->addr = reg;
 	t->bt = bt;
 	t->flags = LOC_REG;
@@ -349,7 +355,7 @@ static void tmp_push_reg(unsigned bt, unsigned reg)
 
 void o_local(long addr, unsigned bt)
 {
-	struct tmp *t = &tmp[ntmp++];
+	struct tmp *t = tmp_new();
 	t->addr = -addr;
 	t->bt = bt;
 	t->flags = LOC_LOCAL | TMP_ADDR;
@@ -357,7 +363,7 @@ void o_local(long addr, unsigned bt)
 
 void o_num(long num, unsigned bt)
 {
-	struct tmp *t = &tmp[ntmp++];
+	struct tmp *t = tmp_new();
 	t->addr = num;
 	t->bt = bt;
 	t->flags = LOC_NUM;
@@ -365,7 +371,7 @@ void o_num(long num, unsigned bt)
 
 void o_symaddr(long addr, unsigned bt)
 {
-	struct tmp *t = &tmp[ntmp++];
+	struct tmp *t = tmp_new();
 	t->bt = bt;
 	t->addr = addr;
 	t->flags = LOC_SYM | TMP_ADDR;
@@ -375,6 +381,7 @@ void o_symaddr(long addr, unsigned bt)
 void o_tmpdrop(int n)
 {
 	int i;
+	cmp_last = -1;
 	if (n == -1 || n > ntmp)
 		n = ntmp;
 	ntmp -= n;
@@ -432,7 +439,7 @@ static int reg_get(int mask)
 void o_tmpcopy(void)
 {
 	struct tmp *t1 = &tmp[ntmp - 1];
-	struct tmp *t2 = &tmp[ntmp++];
+	struct tmp *t2 = tmp_new();
 	memcpy(t2, t1, sizeof(*t1));
 	if (!(t1->flags & (LOC_REG | LOC_MEM)))
 		return;
