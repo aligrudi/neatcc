@@ -394,7 +394,7 @@ void o_tmpfork(void)
 {
 	struct tmp *t = &tmp[ntmp - 1];
 	reg_for(FORK_REG, t);
-	tmp_reg(t, FORK_REG, t->bt, 0);
+	tmp_reg(t, FORK_REG, t->bt, 1);
 	o_tmpdrop(1);
 }
 
@@ -402,7 +402,7 @@ void o_tmpjoin(void)
 {
 	struct tmp *t = &tmp[ntmp - 1];
 	reg_for(FORK_REG, t);
-	tmp_reg(t, FORK_REG, t->bt, 0);
+	tmp_reg(t, FORK_REG, t->bt, 1);
 }
 
 void o_tmpswap(void)
