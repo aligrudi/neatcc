@@ -1075,8 +1075,8 @@ void o_call(int argc, unsigned *bt, unsigned ret_bt)
 	int i;
 	struct tmp *t;
 	for (i = 0; i < ARRAY_SIZE(tmpregs); i++)
-		if (regs[i] && (tmp - regs[i]) < ntmp - argc)
-			tmp_mem(regs[i]);
+		if (regs[tmpregs[i]] && regs[tmpregs[i]] - tmp < ntmp - argc)
+			tmp_mem(regs[tmpregs[i]]);
 	if (argc > R_NARGS) {
 		long addr = sp_push(8 * (argc - R_NARGS));
 		for (i = argc - 1; i >= R_NARGS; --i) {
