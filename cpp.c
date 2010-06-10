@@ -25,7 +25,8 @@ static int nmacros;
 #define MAXBUFS			(1 << 5)
 #define BUF_FILE		0
 #define BUF_MACRO		1
-#define BUF_TEMP		2
+#define BUF_EVAL		2
+#define BUF_TEMP		3
 
 static struct buf {
 	char buf[BUFSIZE];
@@ -62,7 +63,16 @@ static void buf_pop(void)
 	}
 }
 
-static int macro_expanded(char *macro)
+static int buf_iseval(void)
+{
+	int i;
+	for (i = 0; i < nbufs; i++)
+		if (bufs[i].type == BUF_EVAL)
+			return 1;
+	return 0;
+}
+
+static int buf_expanding(char *macro)
 {
 	int i;
 	for (i = 0; i < nbufs; i++)
@@ -268,7 +278,6 @@ int cpp_read(char *buf);
 static char ebuf[BUFSIZE];
 static int elen;
 static int ecur;
-static int cppeval;
 
 static long evalexpr(void);
 
@@ -278,16 +287,14 @@ static int cpp_eval(void)
 	int ret;
 	char evalbuf[BUFSIZE];
 	read_tilleol(evalbuf);
-	buf_new(BUF_TEMP, NULL);
+	buf_new(BUF_EVAL, NULL);
 	strcpy(buf, evalbuf);
 	len = strlen(evalbuf);
 	bufid = nbufs;
 	elen = 0;
 	ecur = 0;
-	cppeval = 1;
 	while (bufid < nbufs || cur < len)
 		elen += cpp_read(ebuf + elen);
-	cppeval = 0;
 	ret = evalexpr();
 	buf_pop();
 	return ret;
@@ -516,12 +523,12 @@ int cpp_read(char *s)
 		if (isalpha(buf[cur]) || buf[cur] == '_') {
 			char word[NAMELEN];
 			read_word(word);
-			if (!macro_expanded(word) && macro_find(word) != -1) {
+			if (!buf_expanding(word) && macro_find(word) != -1) {
 				cur -= strlen(word);
 				definedword = 1;
 				break;
 			}
-			if (cppeval && !strcmp("defined", word)) {
+			if (buf_iseval() && !strcmp("defined", word)) {
 				int parens = 0;
 				jumpws();
 				if (buf[cur] == '(') {
