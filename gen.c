@@ -252,10 +252,10 @@ static void num_reg(int reg, unsigned bt, long num)
 
 static void tmp_reg(struct tmp *tmp, int dst, unsigned bt, int deref)
 {
-	if (!(tmp->flags & TMP_ADDR))
-		deref = 0;
-	if (deref)
+	if (deref && tmp->flags & TMP_ADDR)
 		tmp->flags &= ~TMP_ADDR;
+	else
+		deref = 0;
 	if (tmp->flags & LOC_NUM) {
 		num_cast(tmp, bt);
 		tmp->bt = BT_TMPBT(bt);
@@ -277,12 +277,9 @@ static void tmp_reg(struct tmp *tmp, int dst, unsigned bt, int deref)
 		if (deref)
 			mov_m2r(dst, tmp->addr, 0, tmp->bt, bt);
 		else
-			mov_r2r(tmp->addr, dst, TMP_BT(tmp), bt);
+			mov_r2r(tmp->addr, dst, TMP_BT(tmp),
+				tmp->flags & TMP_ADDR ? 8 : bt);
 		regs[tmp->addr] = NULL;
-		tmp->addr = dst;
-		tmp->bt = BT_TMPBT(bt);
-		regs[dst] = tmp;
-		return;
 	}
 	if (tmp->flags & LOC_LOCAL) {
 		if (deref)
@@ -297,7 +294,7 @@ static void tmp_reg(struct tmp *tmp, int dst, unsigned bt, int deref)
 			mov_m2r(dst, dst, 0, tmp->bt, bt);
 	}
 	tmp->addr = dst;
-	tmp->bt = BT_TMPBT(bt);
+	tmp->bt = tmp->flags & TMP_ADDR ? bt : BT_TMPBT(bt);
 	regs[dst] = tmp;
 	tmp->flags = LOC_NEW(tmp->flags, LOC_REG);
 }
