@@ -1364,6 +1364,9 @@ static int readname(struct type *main, char *name,
 	struct type *type = &tpool[npool++];
 	struct type *func = NULL;
 	struct type *ret = NULL;
+	int arsz[10];
+	int nar = 0;
+	int i;
 	memset(tpool, 0, sizeof(tpool));
 	if (name)
 		*name = '\0';
@@ -1391,7 +1394,10 @@ static int readname(struct type *main, char *name,
 				die("const expr expected\n");
 			tok_expect(']');
 		}
-		type->id = array_add(type, n);
+		arsz[nar++] = n;
+	}
+	for (i = nar - 1; i >= 0; i--) {
+		type->id = array_add(type, arsz[i]);
 		if (type->flags & T_FUNC)
 			func = &arrays[type->id].type;
 		type->flags = T_ARRAY;
