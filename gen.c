@@ -629,7 +629,7 @@ static int mulop(int uop, int sop, int reg)
 		if (bt & BT_SIGNED)
 			o_op(&cqo, 1, R_RAX, R_RDX, bt);
 		else
-			bt = regop1(XOR_R2X, R_RDX, R_RDX, bt);
+			regop1(XOR_R2X, R_RDX, R_RDX, bt);
 	}
 	o_tmpdrop(2);
 	regop1(MUL_A2X, bt & BT_SIGNED ? sop : uop, reg, BT_TMPBT(bt2));
