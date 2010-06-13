@@ -113,7 +113,7 @@ static void readnum(void)
 		char *c;
 		if (base == 10 && buf[cur] == '0')
 			base = 8;
-		while (cur < len && (c = strchr(digs, buf[cur]))) {
+		while (cur < len && (c = strchr(digs, tolower(buf[cur])))) {
 			result *= base;
 			result += c - digs;
 			cur++;
