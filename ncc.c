@@ -64,9 +64,12 @@ static void ts_pop(struct type *type)
 		*type = ts[nts];
 }
 
-void die(char *s)
+void die(char *msg)
 {
-	print(s);
+	char err[1 << 7];
+	int len = cpp_loc(err, tok_addr());
+	strcpy(err + len, msg);
+	print(err);
 	exit(1);
 }
 
@@ -1724,7 +1727,7 @@ static void parse(void)
 int main(int argc, char *argv[])
 {
 	char obj[128];
-	int ifd, ofd;
+	int ofd;
 	int i = 1;
 	while (i < argc && argv[i][0] == '-') {
 		if (argv[i][1] == 'I')
@@ -1743,11 +1746,8 @@ int main(int argc, char *argv[])
 	}
 	if (i == argc)
 		die("no file given\n");
-	ifd = open(argv[i], O_RDONLY);
-	tok_init(ifd);
-	close(ifd);
+	cpp_init(argv[i]);
 	parse();
-
 	strcpy(obj, argv[i]);
 	obj[strlen(obj) - 1] = 'o';
 	ofd = open(obj, O_WRONLY | O_TRUNC | O_CREAT, 0600);

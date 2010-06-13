@@ -4,14 +4,13 @@
 #include <string.h>
 #include "tok.h"
 
-extern void cpp_init(int fd);
 extern int cpp_read(char *s);
 
 static char buf[BUFSIZE];
 static int len;
 static int cur;
 static char name[NAMELEN];
-static int next;
+static int next = -1;
 static int pre;
 
 static struct {
@@ -250,12 +249,6 @@ int tok_see(void)
 	if (next == -1)
 		next = tok_get();
 	return next;
-}
-
-void tok_init(int fd)
-{
-	next = -1;
-	cpp_init(fd);
 }
 
 char *tok_id(void)

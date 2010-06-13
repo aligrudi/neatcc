@@ -38,7 +38,7 @@ enum tok {
 	TOK_GOTO,
 };
 
-void tok_init(int fd);
+void tok_init(char *path);
 int tok_see(void);
 int tok_get(void);
 char *tok_id(void);
@@ -47,7 +47,9 @@ int tok_str(char *out);
 long tok_addr(void);
 void tok_jump(long addr);
 
+void cpp_init(char *path);
 void cpp_addpath(char *s);
 void cpp_define(char *name, char *def);
+int cpp_loc(char *s, long offset);
 
 void die(char *msg);

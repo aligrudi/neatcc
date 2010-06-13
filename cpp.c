@@ -81,20 +81,25 @@ static int buf_expanding(char *macro)
 	return 0;
 }
 
-static void include(int fd)
+static int include_file(char *path)
 {
+	int fd = open(path, O_RDONLY);
 	int n = 0;
-	buf_new(BUF_FILE, NULL);
+	if (fd == -1)
+		return -1;
+	buf_new(BUF_FILE, path);
 	while ((n = read(fd, buf + len, BUFSIZE - len)) > 0)
 		len += n;
+	close(fd);
+	return 0;
 }
 
-void cpp_init(int fd)
+void cpp_init(char *path)
 {
 	cpp_define("__STDC__", "");
 	cpp_define("__x86_64__", "");
 	cpp_define("__linux__", "");
-	include(fd);
+	include_file(path);
 }
 
 static void jumpws(void)
@@ -157,7 +162,6 @@ void cpp_addpath(char *s)
 static int include_find(char *name, int std)
 {
 	int i;
-	int fd;
 	for (i = std ? nlocs - 1 : nlocs; i >= 0; i--) {
 		char path[1 << 10];
 		char *s;
@@ -167,9 +171,8 @@ static int include_find(char *name, int std)
 			*s++ = '/';
 		}
 		s = putstr(s, name);
-		fd = open(path, O_RDONLY);
-		if (fd != -1)
-			return fd;
+		if (!include_file(path))
+			return 0;
 	}
 	return -1;
 }
@@ -380,18 +383,14 @@ static void cpp_cmd(void)
 	if (!strcmp("include", cmd)) {
 		char file[NAMELEN];
 		char *s, *e;
-		int fd;
 		jumpws();
 		s = buf + cur + 1;
 		e = strchr(buf + cur + 1, buf[cur] == '"' ? '"' : '>');
 		memcpy(file, s, e - s);
 		file[e - s] = '\0';
 		cur += e - s + 2;
-		fd = include_find(file, *e == '>');
-		if (fd == -1)
-			return;
-		include(fd);
-		close(fd);
+		if (include_find(file, *e == '>') == -1)
+			die("cannot include file\n");
 		return;
 	}
 }
@@ -492,6 +491,9 @@ void cpp_define(char *name, char *def)
 
 static int definedword;
 
+static int hunk_off;
+static int hunk_len;
+
 int cpp_read(char *s)
 {
 	int old;
@@ -547,6 +549,10 @@ int cpp_read(char *s)
 	}
 	memcpy(s, buf + old, cur - old);
 	s[cur - old] = '\0';
+	if (!buf_iseval()) {
+		hunk_off += hunk_len;
+		hunk_len = cur - old;
+	}
 	return cur - old;
 }
 
@@ -826,4 +832,56 @@ static long evalexpr(void)
 {
 	enext = -1;
 	return evalcexpr();
+}
+
+static int numwidth(int n)
+{
+	int i = 0;
+	do {
+		i++;
+		n /= 10;
+	} while (n);
+	return i;
+}
+
+static char *putnum(char *s, int n)
+{
+	int w = numwidth(n);
+	int i;
+	for (i = 0; i < w; i++) {
+		s[w - i - 1] = !i || n ? '0' + n % 10 : ' ';
+		n /= 10;
+	}
+	return s + w;
+}
+
+static int buf_loc(char *s, int off)
+{
+	char *e = s + off;
+	int n = 1;
+	while ((s = strchr(s, '\n')) && s < e) {
+		n++;
+		s++;
+	}
+	return n;
+}
+
+int cpp_loc(char *s, long addr)
+{
+	int line = -1;
+	int i;
+	char *o = s;
+	for (i = nbufs - 1; i > 0; i--)
+		if (bufs[i].type == BUF_FILE)
+			break;
+	if (addr >= hunk_off && i == nbufs - 1)
+		line = buf_loc(buf, (cur - hunk_len) + (addr - hunk_off));
+	else
+		line = buf_loc(bufs[i].buf, bufs[i].cur);
+	s = putstr(s, bufs[i].name);
+	*s++ = ':';
+	s = putnum(s, line);
+	*s++ = ':';
+	*s++ = ' ';
+	return s - o;
 }
