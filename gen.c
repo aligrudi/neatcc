@@ -1041,6 +1041,8 @@ static long jxcmp(long addr, int inv)
 	o_tmpdrop(1);
 	cur = buf + cmp_setl;
 	x = (unsigned char) buf[cmp_setl + 1];
+	if (!(x & 0x10))
+		inv = !inv;
 	return jx((inv ? x : x ^ 0x01) & ~0x10, addr);
 }
 
