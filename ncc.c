@@ -66,11 +66,16 @@ static void ts_pop(struct type *type)
 
 void die(char *msg)
 {
+	print(msg);
+	exit(1);
+}
+
+void err(char *msg)
+{
 	char err[1 << 7];
 	int len = cpp_loc(err, tok_addr());
 	strcpy(err + len, msg);
-	print(err);
-	exit(1);
+	die(err);
 }
 
 struct name {
@@ -88,7 +93,7 @@ static int nglobals;
 static void local_add(struct name *name)
 {
 	if (nlocals >= MAXLOCALS)
-		die("nomem: MAXLOCALS reached!\n");
+		err("nomem: MAXLOCALS reached!\n");
 	memcpy(&locals[nlocals++], name, sizeof(*name));
 }
 
@@ -106,7 +111,7 @@ static void global_add(struct name *name)
 	int found = global_find(name->name);
 	int i = found == -1 ? nglobals++ : found;
 	if (nglobals >= MAXGLOBALS)
-		die("nomem: MAXGLOBALS reached!\n");
+		err("nomem: MAXGLOBALS reached!\n");
 	memcpy(&globals[i], name, sizeof(*name));
 }
 
@@ -122,7 +127,7 @@ static void enum_add(char *name, int val)
 {
 	struct enumval *ev = &enums[nenums++];
 	if (nenums >= MAXENUMS)
-		die("nomem: MAXENUMS reached!\n");
+		err("nomem: MAXENUMS reached!\n");
 	strcpy(ev->name, name);
 	ev->n = val;
 }
@@ -150,7 +155,7 @@ static void typedef_add(char *name, struct type *type)
 {
 	struct typdefinfo *ti = &typedefs[ntypedefs++];
 	if (ntypedefs >= MAXTYPEDEFS)
-		die("nomem: MAXTYPEDEFS reached!\n");
+		err("nomem: MAXTYPEDEFS reached!\n");
 	strcpy(ti->name, name);
 	memcpy(&ti->type, type, sizeof(*type));
 }
@@ -176,7 +181,7 @@ static int array_add(struct type *type, int n)
 {
 	struct array *a = &arrays[narrays++];
 	if (narrays >= MAXARRAYS)
-		die("nomem: MAXARRAYS reached!\n");
+		err("nomem: MAXARRAYS reached!\n");
 	memcpy(&a->type, type, sizeof(*type));
 	a->n = n;
 	return a - arrays;
@@ -211,7 +216,7 @@ static int struct_find(char *name, int isunion)
 			return i;
 	i = nstructs++;
 	if (nstructs >= MAXSTRUCTS)
-		die("nomem: MAXTYPES reached!\n");
+		err("nomem: MAXTYPES reached!\n");
 	memset(&structs[i], 0, sizeof(structs[i]));
 	strcpy(structs[i].name, name);
 	structs[i].isunion = isunion;
@@ -225,7 +230,7 @@ static struct name *struct_field(int id, char *name)
 	for (i = 0; i < si->nfields; i++)
 		if (!strcmp(name, si->fields[i].name))
 			return &si->fields[i];
-	die("field not found\n");
+	err("field not found\n");
 }
 
 #define MAXBREAK		(1 << 7)
@@ -279,7 +284,7 @@ static int tok_jmp(int tok)
 static void tok_expect(int tok)
 {
 	if (tok_get() != tok)
-		die("syntax error\n");
+		err("syntax error\n");
 }
 
 static unsigned bt_op(unsigned bt1, unsigned bt2)
@@ -383,7 +388,7 @@ static void enum_create(void)
 			readexpr();
 			ts_pop(NULL);
 			if (o_popnum(&n))
-				die("const expr expected!\n");
+				err("const expr expected!\n");
 		}
 		enum_add(name, n++);
 		tok_jmp(',');
@@ -551,7 +556,7 @@ static void readprimary(void)
 			return;
 		}
 		if (tok_see() != '(')
-			die("unknown symbol\n");
+			err("unknown symbol\n");
 		unkn.addr = out_mkundef(unkn.name, 0);
 		global_add(&unkn);
 		ts_push_bt(8);
@@ -634,7 +639,7 @@ static int func_create(struct type *ret, struct name *args, int nargs)
 	struct funcinfo *fi = &funcs[nfuncs++];
 	int i;
 	if (nfuncs >= MAXFUNCS)
-		die("nomem: MAXFUNCS reached!\n");
+		err("nomem: MAXFUNCS reached!\n");
 	memcpy(&fi->ret, ret, sizeof(*ret));
 	for (i = 0; i < nargs; i++)
 		memcpy(&fi->args[i], &args[i].type, sizeof(*ret));
@@ -1394,7 +1399,7 @@ static int readname(struct type *main, char *name,
 			readexpr();
 			ts_pop(NULL);
 			if (o_popnum(&n))
-				die("const expr expected\n");
+				err("const expr expected\n");
 			tok_expect(']');
 		}
 		arsz[nar++] = n;
@@ -1745,8 +1750,9 @@ int main(int argc, char *argv[])
 		i++;
 	}
 	if (i == argc)
-		die("no file given\n");
-	cpp_init(argv[i]);
+		die("neatcc: no file given\n");
+	if (cpp_init(argv[i]))
+		die("neatcc: cannot open input file\n");
 	parse();
 	strcpy(obj, argv[i]);
 	obj[strlen(obj) - 1] = 'o';

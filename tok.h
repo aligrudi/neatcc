@@ -47,7 +47,7 @@ int tok_str(char *out);
 long tok_addr(void);
 void tok_jump(long addr);
 
-void cpp_init(char *path);
+int cpp_init(char *path);
 void cpp_addpath(char *s);
 void cpp_define(char *name, char *def);
 int cpp_loc(char *s, long offset);

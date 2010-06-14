@@ -94,12 +94,12 @@ static int include_file(char *path)
 	return 0;
 }
 
-void cpp_init(char *path)
+int cpp_init(char *path)
 {
 	cpp_define("__STDC__", "");
 	cpp_define("__x86_64__", "");
 	cpp_define("__linux__", "");
-	include_file(path);
+	return include_file(path);
 }
 
 static void jumpws(void)
