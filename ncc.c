@@ -267,10 +267,10 @@ static int type_totsz(struct type *t)
 
 static unsigned type_szde(struct type *t)
 {
-	if (t->flags & T_ARRAY)
-		return t->ptr > 0 ? 8 : TYPE_SZ(&arrays[t->id].type);
-	else
-		return t->ptr > 1 ? 8 : BT_SZ(t->bt);
+	struct type de = *t;
+	array2ptr(&de);
+	de.ptr--;
+	return type_totsz(&de);
 }
 
 static int tok_jmp(int tok)
