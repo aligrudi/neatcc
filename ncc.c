@@ -345,6 +345,9 @@ static void ts_binop_add(void (*o_sth)(void))
 	}
 }
 
+#define ALIGN(x, a)		(((x) + (a) - 1) & ~((a) - 1))
+#define MIN(a, b)		((a) < (b) ? (a) : (b))
+
 static void structdef(void *data, struct name *name, unsigned flags)
 {
 	struct structinfo *si = data;
@@ -353,6 +356,11 @@ static void structdef(void *data, struct name *name, unsigned flags)
 		if (si->size < type_totsz(&name->type))
 			si->size = type_totsz(&name->type);
 	} else {
+		struct type *t = &name->type;
+		int alignment = MIN(8, type_totsz(t));
+		if (t->flags & T_ARRAY && !t->ptr)
+			alignment = MIN(8, type_totsz(&arrays[t->id].type));
+		si->size = ALIGN(si->size, alignment);
 		name->addr = si->size;
 		si->size += type_totsz(&name->type);
 	}
