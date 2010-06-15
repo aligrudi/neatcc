@@ -332,12 +332,12 @@ static void ts_binop_add(void (*o_sth)(void))
 	}
 	if (!t1.ptr && t2.ptr)
 		if (type_szde(&t2) > 1) {
-			o_num(shifts(type_szde(&t2)), 1);
+			o_num(shifts(type_szde(&t2)), 4);
 			o_shl();
 		}
 	o_sth();
 	if (t1.ptr && t2.ptr) {
-		o_num(shifts(type_szde(&t1)), 1);
+		o_num(shifts(type_szde(&t1)), 4);
 		o_shr();
 		ts_push_bt(4 | BT_SIGNED);
 	} else {
