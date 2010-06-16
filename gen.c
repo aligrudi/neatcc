@@ -891,7 +891,7 @@ void o_lnot(void)
 	if (!c_op(c_lnot, 4))
 		return;
 	if (cmp_last == codeaddr()) {
-		buf[cmp_setl + 1] ^= 0x10;
+		buf[cmp_setl + 1] ^= 0x01;
 	} else {
 		o_num(0, 4 | BT_SIGNED);
 		o_eq();
@@ -1045,8 +1045,6 @@ static long jxcmp(long addr, int inv)
 	tmp_drop(1);
 	cur = buf + cmp_setl;
 	x = (unsigned char) buf[cmp_setl + 1];
-	if (!(x & 0x10))
-		inv = !inv;
 	return jx((inv ? x : x ^ 0x01) & ~0x10, addr);
 }
 
