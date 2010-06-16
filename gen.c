@@ -518,7 +518,7 @@ static unsigned bt_op(unsigned bt1, unsigned bt2)
 
 #define TMP_CONST(t)	((t)->flags & LOC_NUM && !((t)->flags & TMP_ADDR))
 #define LOCAL_PTR(t)	((t)->flags & LOC_LOCAL && !((t)->flags & TMP_ADDR))
-#define SYM_PTR(t)	((t)->flags & LOC_LOCAL && !((t)->flags & TMP_ADDR))
+#define SYM_PTR(t)	((t)->flags & LOC_SYM && !((t)->flags & TMP_ADDR))
 
 int o_popnum(long *c)
 {
