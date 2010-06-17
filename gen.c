@@ -267,7 +267,7 @@ static void tmp_reg(struct tmp *tmp, int dst, unsigned bt, int deref)
 		tmp->flags = LOC_NEW(tmp->flags, LOC_REG);
 	}
 	if (tmp->flags & LOC_SYM) {
-		regop1(MOV_I2X, 0, dst, TMP_BT(tmp));
+		regop1(MOV_I2X, 0, dst, 4);
 		if (!nogen)
 			out_rela(tmp->addr, codeaddr(), 0);
 		oi(tmp->off, 4);
