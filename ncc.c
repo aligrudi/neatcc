@@ -511,8 +511,10 @@ static void readprimary(void)
 {
 	int i;
 	if (!tok_jmp(TOK_NUM)) {
-		ts_push_bt(4 | BT_SIGNED);
-		o_num(tok_num(), 4 | BT_SIGNED);
+		long n;
+		int bt = tok_num(&n);
+		ts_push_bt(bt);
+		o_num(n, bt);
 		return;
 	}
 	if (!tok_jmp(TOK_STR)) {

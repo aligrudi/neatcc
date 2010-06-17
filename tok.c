@@ -2,6 +2,7 @@
 #include <unistd.h>
 #include <stdlib.h>
 #include <string.h>
+#include "gen.h"
 #include "tok.h"
 
 extern int cpp_read(char *s);
@@ -95,15 +96,18 @@ static int esc_char(int *c, char *s)
 }
 
 static long num;
+static int num_bt;
 
-long tok_num(void)
+int tok_num(long *n)
 {
-	return num;
+	*n = num;
+	return num_bt;
 }
 
 static void readnum(void)
 {
 	int base = 10;
+	num_bt = 4 | BT_SIGNED;
 	if (buf[cur] == '0' && buf[cur + 1] == 'x') {
 		base = 16;
 		cur += 2;
@@ -119,9 +123,16 @@ static void readnum(void)
 			cur++;
 		}
 		num = result;
-		while (cur < len && tolower(buf[cur]) == 'u' ||
-				tolower(buf[cur]) == 'l')
+		while (cur < len) {
+			int c = tolower(buf[cur]);
+			if (c != 'u' && c != 'l')
+				break;
+			if (c == 'u')
+				num_bt &= ~BT_SIGNED;
+			if (c == 'l')
+				num_bt = (num_bt & BT_SIGNED) | 8;
 			cur++;
+		}
 		return;
 	}
 	if (buf[cur] == '\'') {
