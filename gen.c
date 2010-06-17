@@ -290,8 +290,8 @@ static void tmp_reg(struct tmp *tmp, int dst, unsigned bt, int deref)
 			memop1(LEA_M2R, dst, R_RBP, tmp->addr, 8);
 	}
 	if (tmp->flags & LOC_MEM) {
-		mov_m2r(dst, R_RBP, tmp->addr,
-			deref ? 8 : TMP_BT(tmp), deref ? 8 : bt);
+		int nbt = deref ? 8 : TMP_BT(tmp);
+		mov_m2r(dst, R_RBP, tmp->addr, nbt, nbt);
 		if (deref)
 			mov_m2r(dst, dst, 0, tmp->bt, bt);
 	}
