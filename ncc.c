@@ -666,6 +666,10 @@ static void readcall(void)
 	struct funcinfo *fi;
 	int argc = 0;
 	int i;
+	ts_pop(&t);
+	if (t.flags & T_FUNC && t.ptr > 0)
+		o_deref(8);
+	fi = t.flags & T_FUNC ? &funcs[t.id] : NULL;
 	if (tok_see() != ')') {
 		readexpr();
 		ts_pop(&t);
@@ -677,10 +681,6 @@ static void readcall(void)
 		bt[argc++] = TYPE_BT(&t);
 	}
 	tok_expect(')');
-	ts_pop(&t);
-	if (t.flags & T_FUNC && t.ptr > 0)
-		o_deref(8);
-	fi = t.flags & T_FUNC ? &funcs[t.id] : NULL;
 	if (fi)
 		for (i = 0; i < fi->nargs; i++)
 			bt[i] = TYPE_BT(&fi->args[i]);
