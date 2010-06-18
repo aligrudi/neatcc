@@ -303,15 +303,6 @@ static void ts_binop(void (*o_sth)(void))
 	ts_push_bt(bt_op(TYPE_BT(&t1), TYPE_BT(&t2)));
 }
 
-static int shifts(int n)
-{
-	int i = -1;
-	while (i++ < 16)
-		if (n == 1 << i)
-			break;
-	return i;
-}
-
 static void ts_binop_add(void (*o_sth)(void))
 {
 	struct type t1, t2;
@@ -332,13 +323,13 @@ static void ts_binop_add(void (*o_sth)(void))
 	}
 	if (!t1.ptr && t2.ptr)
 		if (type_szde(&t2) > 1) {
-			o_num(shifts(type_szde(&t2)), 4);
-			o_shl();
+			o_num(type_szde(&t2), 4);
+			o_mul();
 		}
 	o_sth();
 	if (t1.ptr && t2.ptr) {
-		o_num(shifts(type_szde(&t1)), 4);
-		o_shr();
+		o_num(type_szde(&t1), 4);
+		o_div();
 		ts_push_bt(4 | BT_SIGNED);
 	} else {
 		ts_push(&t2);
@@ -533,7 +524,7 @@ static void readprimary(void)
 		return;
 	}
 	if (!tok_jmp(TOK_NAME)) {
-		struct name unkn;
+		struct name unkn = {0};
 		char *name = unkn.name;
 		int n;
 		strcpy(name, tok_id());
