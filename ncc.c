@@ -976,6 +976,7 @@ static void readand(void)
 	readbitor();
 	if (tok_see() != TOK2("&&"))
 		return;
+	o_fork();
 	conds[nconds++] = o_jz(0);
 	ts_pop(NULL);
 	while (!tok_jmp(TOK2("&&"))) {
@@ -984,12 +985,13 @@ static void readand(void)
 		ts_pop(NULL);
 	}
 	o_num(1, 4 | BT_SIGNED);
-	o_tmpfork();
+	o_forkpush();
 	passed = o_jmp(0);
 	for (i = 0; i < nconds; i++)
 		o_filljmp(conds[i]);
 	o_num(0, 4 | BT_SIGNED);
-	o_tmpjoin();
+	o_forkpush();
+	o_forkjoin();
 	o_filljmp(passed);
 	ts_push_bt(4 | BT_SIGNED);
 }
@@ -1003,6 +1005,7 @@ static void reador(void)
 	readand();
 	if (tok_see() != TOK2("||"))
 		return;
+	o_fork();
 	conds[nconds++] = o_jnz(0);
 	ts_pop(NULL);
 	while (!tok_jmp(TOK2("||"))) {
@@ -1011,60 +1014,65 @@ static void reador(void)
 		ts_pop(NULL);
 	}
 	o_num(0, 4 | BT_SIGNED);
-	o_tmpfork();
+	o_forkpush();
 	failed = o_jmp(0);
 	for (i = 0; i < nconds; i++)
 		o_filljmp(conds[i]);
 	o_num(1, 4 | BT_SIGNED);
-	o_tmpjoin();
+	o_forkpush();
+	o_forkjoin();
 	o_filljmp(failed);
 	ts_push_bt(4 | BT_SIGNED);
+}
+
+static int readcexpr_const(void)
+{
+	long c;
+	int nogen;
+	if (o_popnum(&c))
+		return -1;
+	if (!c)
+		nogen = !o_nogen();
+	reador();
+	ts_pop(NULL);
+	tok_expect(':');
+	if (c) {
+		nogen = !o_nogen();
+	} else {
+		if (nogen)
+			o_dogen();
+		o_tmpdrop(1);
+	}
+	reador();
+	if (c) {
+		if (nogen)
+			o_dogen();
+		o_tmpdrop(1);
+	}
+	return 0;
 }
 
 static void readcexpr(void)
 {
 	long l1, l2;
-	long c;
-	int cexpr, nogen;
 	reador();
 	if (tok_jmp('?'))
 		return;
 	ncexpr++;
-	cexpr = !o_popnum(&c);
 	ts_pop(NULL);
-	if (cexpr) {
-		if (!c)
-			nogen = !o_nogen();
-	} else {
+	o_fork();
+	if (readcexpr_const()) {
 		l1 = o_jz(0);
-	}
-	reador();
-	if (!cexpr) {
-		o_tmpfork();
+		reador();
+		o_forkpush();
 		l2 = o_jmp(0);
-	}
-	ts_pop(NULL);
-	tok_expect(':');
-	if (cexpr) {
-		if (c) {
-			nogen = !o_nogen();
-		} else {
-			if (nogen)
-				o_dogen();
-			o_tmpdrop(1);
-		}
-	} else {
+		ts_pop(NULL);
+
+		tok_expect(':');
 		o_filljmp(l1);
-	}
-	reador();
-	if (cexpr) {
-		if (c) {
-			if (nogen)
-				o_dogen();
-			o_tmpdrop(1);
-		}
-	} else {
-		o_tmpjoin();
+		reador();
+		o_forkpush();
+		o_forkjoin();
 		o_filljmp(l2);
 	}
 	ncexpr--;

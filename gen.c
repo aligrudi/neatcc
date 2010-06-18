@@ -405,14 +405,22 @@ void o_tmpdrop(int n)
 
 #define FORK_REG		R_RAX
 
-void o_tmpfork(void)
+/* make sure tmps remain intact after a conditional expression */
+void o_fork(void)
 {
-	tmp_pop(FORK_REG, 0);
+	int i;
+	for (i = 0; i < ntmp - 1; i++)
+		tmp_mem(&tmps[i]);
 }
 
-void o_tmpjoin(void)
+void o_forkpush(void)
 {
-	tmp_to(TMP(0), FORK_REG, 0);
+	tmp_pop(R_RAX, 0);
+}
+
+void o_forkjoin(void)
+{
+	tmp_push(FORK_REG, 0);
 }
 
 void o_tmpswap(void)
