@@ -12,6 +12,7 @@ static int cur;
 #define MAXDEFS			(1 << 12)
 #define MACROLEN		(1 << 10)
 #define MAXARGS			(1 << 5)
+#define NBUCKET			(MAXDEFS << 1)
 
 static struct macro {
 	char name[NAMELEN];
@@ -21,6 +22,9 @@ static struct macro {
 	int isfunc;
 } macros[MAXDEFS];
 static int nmacros;
+/* macro hash table */
+static struct macro *mh_next[MAXDEFS];
+static struct macro *mh_head[NBUCKET];
 
 #define MAXBUFS			(1 << 5)
 #define BUF_FILE		0
@@ -228,30 +232,55 @@ static void readarg(char *s)
 	s[cur - beg] = '\0';
 }
 
+static int mh_hash(char *s)
+{
+	unsigned h = 0x12345678;
+	while (*s) {
+		h ^= (h >> ((h & 0xf) + 1));
+		h += *s++;
+		h ^= (h << ((h & 0xf) + 5));
+	}
+	return h & (NBUCKET - 1);
+}
+
 static int macro_find(char *name)
 {
-	int i;
-	for (i = 0; i < nmacros; i++)
-		if (!strcmp(name, macros[i].name))
-			return i;
+	int h = mh_hash(name);
+	struct macro *m = mh_head[h];
+	while (m) {
+		if (!strcmp(name, m->name))
+			return m - macros;
+		m = mh_next[m - macros];
+	}
 	return -1;
+}
+
+static void mh_add(int i)
+{
+	struct macro *m = &macros[i];
+	int h = mh_hash(m->name);
+	mh_next[i] = mh_head[h];
+	mh_head[h] = m;
+}
+
+static void macro_undef(char *name)
+{
+	int i = macro_find(name);
+	if (i >= 0)
+		strcpy(macros[i].name, "");
 }
 
 static int macro_new(char *name)
 {
-	int i;
-	for (i = 0; i < nmacros; i++) {
-		if (!strcmp(name, macros[i].name))
-			return i;
-		if (!*macros[i].name) {
-			strcpy(macros[i].name, name);
-			return i;
-		}
-	}
+	int i = macro_find(name);
+	if (i >= 0)
+		return i;
 	if (nmacros >= MAXDEFS)
 		die("nomem: MAXDEFS reached!\n");
-	strcpy(macros[nmacros++].name, name);
-	return nmacros - 1;
+	i = nmacros++;
+	strcpy(macros[i].name, name);
+	mh_add(i);
+	return i;
 }
 
 static void macro_define(void)
@@ -351,11 +380,8 @@ static void cpp_cmd(void)
 	}
 	if (!strcmp("undef", cmd)) {
 		char name[NAMELEN];
-		int idx;
 		read_word(name);
-		idx = macro_find(name);
-		if (idx != -1)
-			strcpy(macros[idx].name, "");
+		macro_undef(name);
 		return;
 	}
 	if (!strcmp("ifdef", cmd) || !strcmp("ifndef", cmd) ||
