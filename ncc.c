@@ -725,8 +725,9 @@ static void readpost(void)
 
 static void inc_pre(void (*op)(void))
 {
-	unsigned bt = TYPE_BT(&ts[nts - 1]);
+	unsigned bt;
 	readpre();
+	bt = TYPE_BT(&ts[nts - 1]);
 	o_tmpcopy();
 	o_num(1, 4);
 	ts_push_bt(bt);
