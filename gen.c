@@ -392,7 +392,6 @@ void o_symaddr(long addr, unsigned bt)
 
 void o_tmpdrop(int n)
 {
-	int i;
 	if (n == -1 || n > ntmp)
 		n = ntmp;
 	tmp_drop(n);
@@ -969,7 +968,7 @@ long o_arg(int i, unsigned bt)
 	long addr;
 	if (i < R_NARGS) {
 		addr = o_mklocal(BT_SZ(bt));
-		memop1(MOV_R2X, arg_regs[i], R_RBP, -addr, bt);
+		memop1(MOV_R2X, arg_regs[i], R_RBP, -addr, BT_TMPBT(bt));
 	} else {
 		addr = -8 * (i - R_NARGS + 2);
 	}
@@ -1102,7 +1101,7 @@ void o_call(int argc, unsigned *bt, unsigned ret_bt)
 		}
 	}
 	for (i = MIN(argc, R_NARGS) - 1; i >= 0; i--)
-		tmp_pop(arg_regs[i], bt[i]);
+		tmp_pop(arg_regs[i], BT_TMPBT(bt[i]));
 	t = TMP(0);
 	if (t->flags & LOC_SYM) {
 		os("\x31\xc0", 2);	/* xor %eax, %eax */
