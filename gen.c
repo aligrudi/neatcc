@@ -209,7 +209,7 @@ static void mov_r2r(int r1, int r2, unsigned bt1, unsigned bt2)
 	int s2 = bt2 & BT_SIGNED;
 	int sz1 = BT_SZ(bt1);
 	int sz2 = BT_SZ(bt2);
-	if (sz2 < 4 && (sz1 >= sz2 && s1 != s2)) {
+	if (sz2 < 4 && (sz1 > sz2 || s1 != s2)) {
 		regop(movxx_x2r(bt2), 2, r1, r2, 4);
 		return;
 	}
