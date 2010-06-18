@@ -328,8 +328,11 @@ static void ts_binop_add(void (*o_sth)(void))
 		}
 	o_sth();
 	if (t1.ptr && t2.ptr) {
-		o_num(type_szde(&t1), 4);
-		o_div();
+		int sz = type_szde(&t1);
+		if (sz > 1) {
+			o_num(sz, 4);
+			o_div();
+		}
 		ts_push_bt(4 | BT_SIGNED);
 	} else {
 		ts_push(&t2);
