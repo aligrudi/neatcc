@@ -4,6 +4,7 @@
 #include <string.h>
 #include <unistd.h>
 #include "tok.h"
+#include "tab.h"
 
 static char *buf;
 static int len;
@@ -23,8 +24,7 @@ static struct macro {
 } macros[MAXDEFS];
 static int nmacros;
 /* macro hash table */
-static struct macro *mh_next[MAXDEFS];
-static struct macro *mh_head[NBUCKET];
+static struct tab mtab;
 
 #define MAXBUFS			(1 << 5)
 #define BUF_FILE		0
@@ -232,42 +232,19 @@ static void readarg(char *s)
 	s[cur - beg] = '\0';
 }
 
-static int mh_hash(char *s)
-{
-	unsigned h = 0x12345678;
-	while (*s) {
-		h ^= (h >> ((h & 0xf) + 1));
-		h += *s++;
-		h ^= (h << ((h & 0xf) + 5));
-	}
-	return h & (NBUCKET - 1);
-}
-
 static int macro_find(char *name)
 {
-	int h = mh_hash(name);
-	struct macro *m = mh_head[h];
-	while (m) {
-		if (!strcmp(name, m->name))
-			return m - macros;
-		m = mh_next[m - macros];
-	}
-	return -1;
-}
-
-static void mh_add(int i)
-{
-	struct macro *m = &macros[i];
-	int h = mh_hash(m->name);
-	mh_next[i] = mh_head[h];
-	mh_head[h] = m;
+	char *n = tab_get(&mtab, name);
+	if (!n)
+		return -1;
+	return container(n, struct macro, name) - macros;
 }
 
 static void macro_undef(char *name)
 {
 	int i = macro_find(name);
 	if (i >= 0)
-		strcpy(macros[i].name, "");
+		tab_del(&mtab, macros[i].name);
 }
 
 static int macro_new(char *name)
@@ -279,7 +256,7 @@ static int macro_new(char *name)
 		die("nomem: MAXDEFS reached!\n");
 	i = nmacros++;
 	strcpy(macros[i].name, name);
-	mh_add(i);
+	tab_add(&mtab, macros[i].name);
 	return i;
 }
 
