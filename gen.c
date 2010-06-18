@@ -214,7 +214,8 @@ static void mov_r2r(int r1, int r2, unsigned bt1, unsigned bt2)
 		return;
 	}
 	if (sz1 == 4 && sz2 == 8) {
-		regop1(MOVSXD, r2, r1, sz2);
+		if (s1)
+			regop1(MOVSXD, r2, r1, sz2);
 		return;
 	}
 	if (r1 != r2 || sz1 > sz2)
