@@ -503,7 +503,9 @@ static void readptrs(struct type *type)
 	}
 }
 
+/* used to differenciate labels from case and cond exprs */
 static int ncexpr;
+static int caseexpr;
 
 static void readpre(void);
 
@@ -536,7 +538,7 @@ static void readprimary(void)
 		int n;
 		strcpy(name, tok_id());
 		/* don't search for labels here */
-		if (!ncexpr && tok_see() == ':')
+		if (!ncexpr && !caseexpr && tok_see() == ':')
 			return;
 		for (i = nlocals - 1; i >= 0; --i) {
 			struct type *t = &locals[i].type;
@@ -1509,7 +1511,9 @@ static void readswitch(void)
 			if (!ref++)
 				o_filljmp(next);
 			if (!tok_jmp(TOK_CASE)) {
+				caseexpr = 1;
 				readexpr();
+				caseexpr = 0;
 				o_local(val_addr, TYPE_BT(&t));
 				o_eq();
 				next = o_jz(0);
