@@ -91,8 +91,6 @@ static long cmp_setl;
 
 static void putint(char *s, long n, int l)
 {
-	if (nogen)
-		return;
 	while (l--) {
 		*s++ = n;
 		n >>= 8;
@@ -109,6 +107,8 @@ static void os(char *s, int n)
 
 static void oi(long n, int l)
 {
+	if (nogen)
+		return;
 	while (l--) {
 		*cur++ = n;
 		n >>= 8;
