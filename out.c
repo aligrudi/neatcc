@@ -106,7 +106,7 @@ void out_datrela(long addr, long dataddr, int off)
 	rela->r_info = ELF64_R_INFO(addr, R_X86_64_32);
 }
 
-#define SYMLOCAL(i)		(ELF64_ST_BIND(syms[i].st_info) & STB_LOCAL)
+#define SYMLOCAL(i)		(ELF64_ST_BIND(syms[i].st_info) == STB_LOCAL)
 
 static void mvrela(int *mv, Elf64_Rela *rela, int nrela)
 {
@@ -122,26 +122,26 @@ static int syms_sort(void)
 {
 	int mv[MAXSYMS];
 	int i, j;
-	int glob_beg;
+	int glob_beg = 1;
 	for (i = 0; i < nsyms; i++)
 		mv[i] = i;
 	i = 1;
 	j = nsyms - 1;
 	while (1) {
 		Elf64_Sym t;
-		while (j > i && !SYMLOCAL(j))
-			j--;
 		while (i < j && SYMLOCAL(i))
 			i++;
+		while (j >= i && !SYMLOCAL(j))
+			j--;
 		if (i >= j)
 			break;
 		t = syms[j];
-		syms[i] = syms[j];
+		syms[j] = syms[i];
 		syms[i] = t;
 		mv[i] = j;
 		mv[j] = i;
 	}
-	glob_beg = i;
+	glob_beg = j + 1;
 	for (i = 0; i < nsecs; i++)
 		mvrela(mv, sec[i].rela, sec[i].nrela);
 	mvrela(mv, datrela, ndatrela);
@@ -184,7 +184,7 @@ void out_write(int fd)
 	offset += syms_shdr->sh_size;
 
 	dat_shdr->sh_type = SHT_PROGBITS;
-	dat_shdr->sh_flags = SHF_WRITE;
+	dat_shdr->sh_flags = SHF_ALLOC | SHF_WRITE;
 	dat_shdr->sh_offset = offset;
 	dat_shdr->sh_size = datlen;
 	dat_shdr->sh_entsize = 1;
@@ -216,7 +216,7 @@ void out_write(int fd)
 		struct sec *sec = &secs[i];
 
 		sec->sec_shdr->sh_type = SHT_PROGBITS;
-		sec->sec_shdr->sh_flags = SHF_EXECINSTR;
+		sec->sec_shdr->sh_flags = SHF_EXECINSTR | SHF_ALLOC;
 		sec->sec_shdr->sh_offset = offset;
 		sec->sec_shdr->sh_size = sec->len;
 		sec->sec_shdr->sh_entsize = 1;
