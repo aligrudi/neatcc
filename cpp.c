@@ -267,6 +267,7 @@ static void macro_define(void)
 	read_word(name);
 	d = &macros[macro_new(name)];
 	d->isfunc = 0;
+	d->nargs = 0;
 	if (buf[cur] == '(') {
 		cur++;
 		jumpws();
