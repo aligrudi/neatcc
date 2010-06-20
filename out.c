@@ -5,7 +5,6 @@
 
 #define ALIGN(x, a)		(((x) + (a) - 1) & ~((a) - 1))
 
-#define MAXSECS			(1 << 10)
 #define MAXSYMS			(1 << 12)
 #define MAXRELA			(1 << 12)
 #define SEC_TEXT		1
@@ -18,7 +17,7 @@
 #define NSECS			8
 
 static Elf64_Ehdr ehdr;
-static Elf64_Shdr shdr[MAXSECS];
+static Elf64_Shdr shdr[NSECS];
 static Elf64_Sym syms[MAXSYMS];
 static int nsyms = 1;
 static char symstr[MAXSYMS * 8];
