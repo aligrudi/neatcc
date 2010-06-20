@@ -3,7 +3,7 @@
 #define container(ptr, type, field)	((type *) ((ptr) - offsetof(type, field)))
 
 struct tab {
-	int head[TABITEMS << 2];
+	int head[TABITEMS];
 	char *data[TABITEMS];
 	int next[TABITEMS];
 	int n;
