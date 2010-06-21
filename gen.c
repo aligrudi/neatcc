@@ -49,14 +49,10 @@
 
 #define MIN(a, b)		((a) < (b) ? (a) : (b))
 
-#define R_BYTEMASK		(1 << R_RAX | 1 << R_RDX | 1 << R_RCX)
 #define TMP_BT(t)		((t)->flags & TMP_ADDR ? 8 : (t)->bt)
 #define TMP_REG(t)		((t)->flags & LOC_REG ? (t)->addr : reg_get(~0))
 #define TMP_REG2(t, r)		((t)->flags & LOC_REG && (t)->addr != r ? \
 					(t)->addr : reg_get(~(1 << r)))
-#define TMP_BYTEREG(t)		((t)->flags & LOC_REG && \
-				 (1 << (t)->addr) & R_BYTEMASK ? \
-					(t)->addr : reg_get(R_BYTEMASK))
 #define BT_TMPBT(bt)		(BT_SZ(bt) >= 4 ? (bt) : (bt) & BT_SIGNED | 4)
 
 static char buf[SECSIZE];
@@ -123,21 +119,28 @@ static long codeaddr(void)
 static void o_op(int *op, int nop, int r1, int r2, unsigned bt)
 {
 	int rex = 0;
+	int sz = BT_SZ(bt);
 	int i;
 	if (r1 & 0x8)
 		rex |= 4;
 	if (r2 & 0x8)
 		rex |= 1;
-	if (BT_SZ(bt) == 8)
+	if (sz == 8)
 		rex |= 8;
-	if (rex || (bt & BT_SZMASK) == 8)
+	if (sz == 1 && (r1 == R_RSI || r1 == R_RDI ||
+			r2 == R_RSI || r2 == R_RDI))
+		rex |= 0x40;
+	/* hack: for movxx ops, bt does not represent the second arg */
+	if (nop == 2 && op[0] == 0x0f && (op[1] & 0xf7) == 0xb6 &&
+			(r2 == R_RSI || r2 == R_RDI))
+		rex |= 0x40;
+	if (rex || sz == 8)
 		oi(0x40 | rex, 1);
-	if ((bt & BT_SZMASK) == 2)
+	if (sz == 2)
 		oi(0x66, 1);
-	if ((bt & BT_SZMASK) == 1)
-		op[nop - 1] &= ~0x1;
-	for (i = 0; i < nop; i++)
+	for (i = 0; i < nop - 1; i++)
 		oi(op[i], 1);
+	oi(sz == 1 ? op[i] & ~0x1 : op[i], 1);
 }
 
 static void memop(int *op, int nop, int src, int base, int off, unsigned bt)
@@ -477,7 +480,7 @@ void o_cast(unsigned bt)
 		num_cast(t, bt);
 		return;
 	}
-	reg = BT_SZ(bt) == 1 ? TMP_BYTEREG(t) : TMP_REG(t);
+	reg = TMP_REG(t);
 	tmp_to(t, reg, bt);
 }
 
@@ -979,7 +982,7 @@ void o_assign(unsigned bt)
 {
 	struct tmp *t1 = TMP(0);
 	struct tmp *t2 = TMP(1);
-	int r1 = BT_SZ(bt) > 1 ? TMP_REG(t1) : TMP_BYTEREG(t1);
+	int r1 = TMP_REG(t1);
 	int reg;
 	int off;
 	tmp_to(t1, r1, BT_TMPBT(bt));
