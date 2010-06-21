@@ -46,6 +46,7 @@
 #define AND_R2X		0x23
 #define OR_R2X		0x0b
 #define TEST_R2R	0x85
+#define INC_X		0xff
 
 #define MIN(a, b)		((a) < (b) ? (a) : (b))
 
@@ -634,9 +635,7 @@ static int mulop(int uop, int sop, int reg)
 {
 	struct tmp *t1 = TMP(0);
 	struct tmp *t2 = TMP(1);
-	int bt1 = TMP_BT(t1);
-	int bt2 = TMP_BT(t2);
-	int bt = bt_op(bt1, bt2);
+	int bt = bt_op(t1->bt, t2->bt);
 	if (t1->flags & LOC_REG && t1->addr != R_RAX && t1->addr != R_RDX)
 		reg = t1->addr;
 	tmp_to(t1, reg, bt);
@@ -650,7 +649,7 @@ static int mulop(int uop, int sop, int reg)
 			regop1(XOR_R2X, R_RDX, R_RDX, bt);
 	}
 	tmp_drop(2);
-	regop1(MUL_A2X, bt & BT_SIGNED ? sop : uop, reg, BT_TMPBT(bt2));
+	regop1(MUL_A2X, bt & BT_SIGNED ? sop : uop, reg, BT_TMPBT(t2->bt));
 	return bt;
 }
 
@@ -739,6 +738,32 @@ void o_add(void)
 		return;
 	bt = binop(ADD_R2X, &reg);
 	tmp_push(reg, bt);
+}
+
+static void inc(int op)
+{
+	struct tmp *t = TMP(0);
+	int reg;
+	int off;
+	if (t->flags & LOC_LOCAL) {
+		reg = R_RBP;
+		off = t->addr;
+	} else {
+		reg = TMP_REG(t);
+		off = 0;
+		tmp_mv(t, reg);
+	}
+	memop1(INC_X, op, reg, off, t->bt);
+}
+
+void o_inc(void)
+{
+	inc(0);
+}
+
+void o_dec(void)
+{
+	inc(1);
 }
 
 static long c_xor(long a, long b, unsigned bt)

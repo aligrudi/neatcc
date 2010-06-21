@@ -607,19 +607,21 @@ void arrayderef(struct type *t)
 	o_deref(TYPE_BT(t));
 }
 
-static void inc_post(void (*op)(void))
+static void inc_post(void (*inc_one)(void), void (*inc_many)(void))
 {
-	unsigned bt = TYPE_BT(&ts[nts - 1]);
+	struct type *t = &ts[nts - 1];
+	int sz = type_szde(t);
 	o_tmpcopy();
 	o_load();
 	o_tmpswap();
-	o_tmpcopy();
-	o_num(1, 4);
-	ts_push_bt(bt);
-	ts_push_bt(bt);
-	ts_binop_add(op);
-	ts_pop(NULL);
-	o_assign(bt);
+	if (!t->ptr || sz == 1) {
+		inc_one();
+	} else {
+		o_tmpcopy();
+		o_num(sz, 4);
+		inc_many();
+		o_assign(TYPE_BT(t));
+	}
 	o_tmpdrop(1);
 }
 
@@ -715,11 +717,11 @@ static void readpost(void)
 			continue;
 		}
 		if (!tok_jmp(TOK2("++"))) {
-			inc_post(o_add);
+			inc_post(o_inc, o_add);
 			continue;
 		}
 		if (!tok_jmp(TOK2("--"))) {
-			inc_post(o_sub);
+			inc_post(o_dec, o_sub);
 			continue;
 		}
 		if (!tok_jmp('.')) {
@@ -735,18 +737,22 @@ static void readpost(void)
 	}
 }
 
-static void inc_pre(void (*op)(void))
+static void inc_pre(void (*inc_one)(void), void (*inc_many)(void))
 {
-	unsigned bt;
+	struct type t;
+	int sz;
 	readpre();
-	bt = TYPE_BT(&ts[nts - 1]);
-	o_tmpcopy();
-	o_num(1, 4);
-	ts_push_bt(bt);
-	ts_push_bt(bt);
-	ts_binop_add(op);
-	ts_pop(NULL);
-	o_assign(bt);
+	ts_pop(&t);
+	array2ptr(&t);
+	sz = type_totsz(&t);
+	if (!t.ptr || sz == 1) {
+		inc_one();
+	} else {
+		o_num(sz, 4);
+		inc_many();
+		o_assign(TYPE_BT(&t));
+	}
+	ts_push(&t);
 }
 
 static void readpre(void)
@@ -792,11 +798,11 @@ static void readpre(void)
 		return;
 	}
 	if (!tok_jmp(TOK2("++"))) {
-		inc_pre(o_add);
+		inc_pre(o_inc, o_add);
 		return;
 	}
 	if (!tok_jmp(TOK2("--"))) {
-		inc_pre(o_sub);
+		inc_pre(o_dec, o_sub);
 		return;
 	}
 	if (!tok_jmp(TOK_SIZEOF)) {

@@ -27,6 +27,8 @@ void o_not(void);
 void o_or(void);
 void o_xor(void);
 void o_and(void);
+void o_inc(void);
+void o_dec(void);
 
 void o_lt(void);
 void o_gt(void);
