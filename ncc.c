@@ -294,16 +294,16 @@ static unsigned bt_op(unsigned bt1, unsigned bt2)
 	return (bt1 | bt2) & BT_SIGNED | (s1 > s2 ? s1 : s2);
 }
 
-static void ts_binop(void (*o_sth)(void))
+static void ts_binop(int op)
 {
 	struct type t1, t2;
 	ts_pop(&t1);
 	ts_pop(&t2);
-	o_sth();
+	o_bop(op);
 	ts_push_bt(bt_op(TYPE_BT(&t1), TYPE_BT(&t2)));
 }
 
-static void ts_binop_add(void (*o_sth)(void))
+static void ts_addop(int op)
 {
 	struct type t1, t2;
 	ts_pop(&t1);
@@ -311,7 +311,7 @@ static void ts_binop_add(void (*o_sth)(void))
 	array2ptr(&t1);
 	array2ptr(&t2);
 	if (!t1.ptr && !t2.ptr) {
-		o_sth();
+		o_bop(op);
 		ts_push_bt(bt_op(TYPE_BT(&t1), TYPE_BT(&t2)));
 		return;
 	}
@@ -324,14 +324,14 @@ static void ts_binop_add(void (*o_sth)(void))
 	if (!t1.ptr && t2.ptr)
 		if (type_szde(&t2) > 1) {
 			o_num(type_szde(&t2), 4);
-			o_mul();
+			o_bop(O_MUL);
 		}
-	o_sth();
+	o_bop(op);
 	if (t1.ptr && t2.ptr) {
 		int sz = type_szde(&t1);
 		if (sz > 1) {
 			o_num(sz, 4);
-			o_div();
+			o_bop(O_DIV);
 		}
 		ts_push_bt(4 | BT_SIGNED);
 	} else {
@@ -601,13 +601,13 @@ void arrayderef(struct type *t)
 	int sz = type_totsz(t);
 	if (sz > 1) {
 		o_num(sz, 4);
-		o_mul();
+		o_bop(O_MUL);
 	}
-	o_add();
+	o_bop(O_ADD);
 	o_deref(TYPE_BT(t));
 }
 
-static void inc_post(void (*inc_one)(void), void (*inc_many)(void))
+static void inc_post(int inc_one, int inc_many)
 {
 	struct type *t = &ts[nts - 1];
 	int sz = type_szde(t);
@@ -615,11 +615,11 @@ static void inc_post(void (*inc_one)(void), void (*inc_many)(void))
 	o_load();
 	o_tmpswap();
 	if (!t->ptr || sz == 1) {
-		inc_one();
+		o_uop(inc_one);
 	} else {
 		o_tmpcopy();
 		o_num(sz, 4);
-		inc_many();
+		o_bop(inc_many);
 		o_assign(TYPE_BT(t));
 	}
 	o_tmpdrop(1);
@@ -635,7 +635,7 @@ static void readfield(void)
 	field = struct_field(t.id, tok_id());
 	if (field->addr) {
 		o_num(field->addr, 4);
-		o_add();
+		o_bop(O_ADD);
 	}
 	o_deref(TYPE_BT(&field->type));
 	ts_push(&field->type);
@@ -717,11 +717,11 @@ static void readpost(void)
 			continue;
 		}
 		if (!tok_jmp(TOK2("++"))) {
-			inc_post(o_inc, o_add);
+			inc_post(O_INC, O_ADD);
 			continue;
 		}
 		if (!tok_jmp(TOK2("--"))) {
-			inc_post(o_dec, o_sub);
+			inc_post(O_DEC, O_SUB);
 			continue;
 		}
 		if (!tok_jmp('.')) {
@@ -737,7 +737,7 @@ static void readpost(void)
 	}
 }
 
-static void inc_pre(void (*inc_one)(void), void (*inc_many)(void))
+static void inc_pre(int inc_one, int inc_many)
 {
 	struct type t;
 	int sz;
@@ -746,10 +746,10 @@ static void inc_pre(void (*inc_one)(void), void (*inc_many)(void))
 	array2ptr(&t);
 	sz = type_totsz(&t);
 	if (!t.ptr || sz == 1) {
-		inc_one();
+		o_uop(inc_one);
 	} else {
 		o_num(sz, 4);
-		inc_many();
+		o_bop(inc_many);
 		o_assign(TYPE_BT(&t));
 	}
 	ts_push(&t);
@@ -783,26 +783,26 @@ static void readpre(void)
 		struct type type;
 		readpre();
 		ts_pop(&type);
-		o_lnot();
+		o_uop(O_LNOT);
 		ts_push_bt(4 | BT_SIGNED);
 		return;
 	}
 	if (!tok_jmp('-')) {
 		readpre();
-		o_neg();
+		o_uop(O_NEG);
 		return;
 	}
 	if (!tok_jmp('~')) {
 		readpre();
-		o_not();
+		o_uop(O_NOT);
 		return;
 	}
 	if (!tok_jmp(TOK2("++"))) {
-		inc_pre(o_inc, o_add);
+		inc_pre(O_INC, O_ADD);
 		return;
 	}
 	if (!tok_jmp(TOK2("--"))) {
-		inc_pre(o_dec, o_sub);
+		inc_pre(O_DEC, O_SUB);
 		return;
 	}
 	if (!tok_jmp(TOK_SIZEOF)) {
@@ -831,17 +831,17 @@ static void readmul(void)
 	while (1) {
 		if (!tok_jmp('*')) {
 			readpre();
-			ts_binop(o_mul);
+			ts_binop(O_MUL);
 			continue;
 		}
 		if (!tok_jmp('/')) {
 			readpre();
-			ts_binop(o_div);
+			ts_binop(O_DIV);
 			continue;
 		}
 		if (!tok_jmp('%')) {
 			readpre();
-			ts_binop(o_mod);
+			ts_binop(O_MOD);
 			continue;
 		}
 		break;
@@ -854,25 +854,25 @@ static void readadd(void)
 	while (1) {
 		if (!tok_jmp('+')) {
 			readmul();
-			ts_binop_add(o_add);
+			ts_addop(O_ADD);
 			continue;
 		}
 		if (!tok_jmp('-')) {
 			readmul();
-			ts_binop_add(o_sub);
+			ts_addop(O_SUB);
 			continue;
 		}
 		break;
 	}
 }
 
-static void shift(void (*op)(void))
+static void shift(int op)
 {
 	struct type t;
 	readadd();
 	ts_pop(NULL);
 	ts_pop(&t);
-	op();
+	o_bop(op);
 	ts_push_bt(TYPE_BT(&t));
 }
 
@@ -881,23 +881,23 @@ static void readshift(void)
 	readadd();
 	while (1) {
 		if (!tok_jmp(TOK2("<<"))) {
-			shift(o_shl);
+			shift(O_SHL);
 			continue;
 		}
 		if (!tok_jmp(TOK2(">>"))) {
-			shift(o_shr);
+			shift(O_SHR);
 			continue;
 		}
 		break;
 	}
 }
 
-static void cmp(void (*op)(void))
+static void cmp(int op)
 {
 	readshift();
 	ts_pop(NULL);
 	ts_pop(NULL);
-	op();
+	o_bop(op);
 	ts_push_bt(4 | BT_SIGNED);
 }
 
@@ -906,31 +906,31 @@ static void readcmp(void)
 	readshift();
 	while (1) {
 		if (!tok_jmp('<')) {
-			cmp(o_lt);
+			cmp(O_LT);
 			continue;
 		}
 		if (!tok_jmp('>')) {
-			cmp(o_gt);
+			cmp(O_GT);
 			continue;
 		}
 		if (!tok_jmp(TOK2("<="))) {
-			cmp(o_le);
+			cmp(O_LE);
 			continue;
 		}
 		if (!tok_jmp(TOK2(">="))) {
-			cmp(o_ge);
+			cmp(O_GE);
 			continue;
 		}
 		break;
 	}
 }
 
-static void eq(void (*op)(void))
+static void eq(int op)
 {
 	readcmp();
 	ts_pop(NULL);
 	ts_pop(NULL);
-	op();
+	o_bop(op);
 	ts_push_bt(4 | BT_SIGNED);
 }
 
@@ -939,11 +939,11 @@ static void readeq(void)
 	readcmp();
 	while (1) {
 		if (!tok_jmp(TOK2("=="))) {
-			eq(o_eq);
+			eq(O_EQ);
 			continue;
 		}
 		if (!tok_jmp(TOK2("!="))) {
-			eq(o_neq);
+			eq(O_NEQ);
 			continue;
 		}
 		break;
@@ -955,7 +955,7 @@ static void readbitand(void)
 	readeq();
 	while (!tok_jmp('&')) {
 		readeq();
-		ts_binop(o_and);
+		ts_binop(O_AND);
 	}
 }
 
@@ -964,7 +964,7 @@ static void readxor(void)
 	readbitand();
 	while (!tok_jmp('^')) {
 		readbitand();
-		ts_binop(o_xor);
+		ts_binop(O_XOR);
 	}
 }
 
@@ -973,7 +973,7 @@ static void readbitor(void)
 	readxor();
 	while (!tok_jmp('|')) {
 		readxor();
-		ts_binop(o_or);
+		ts_binop(O_OR);
 	}
 }
 
@@ -1090,14 +1090,20 @@ static void readcexpr(void)
 	ncexpr--;
 }
 
-static void opassign(void (*bop)(void (*op)(void)), void (*op)(void))
+static void opassign(int op, int ptrop)
 {
-	unsigned bt = TYPE_BT(&ts[nts - 1]);
-	o_tmpcopy();
-	readexpr();
-	bop(op);
-	ts_pop(NULL);
-	o_assign(bt);
+	struct type *t = &ts[nts - 1];
+	if (ptrop && (t->flags & T_ARRAY || t->ptr)) {
+		o_tmpcopy();
+		readexpr();
+		ts_addop(op);
+		ts_pop(NULL);
+		o_assign(TYPE_BT(&ts[nts - 1]));
+	} else {
+		readexpr();
+		o_bop(op | O_SET);
+		ts_pop(NULL);
+	}
 }
 
 static void doassign(void)
@@ -1119,43 +1125,43 @@ static void readexpr(void)
 		return;
 	}
 	if (!tok_jmp(TOK2("+="))) {
-		opassign(ts_binop_add, o_add);
+		opassign(O_ADD, 1);
 		return;
 	}
 	if (!tok_jmp(TOK2("-="))) {
-		opassign(ts_binop_add, o_sub);
+		opassign(O_SUB, 1);
 		return;
 	}
 	if (!tok_jmp(TOK2("*="))) {
-		opassign(ts_binop, o_mul);
+		opassign(O_MUL, 0);
 		return;
 	}
 	if (!tok_jmp(TOK2("/="))) {
-		opassign(ts_binop, o_div);
+		opassign(O_DIV, 0);
 		return;
 	}
 	if (!tok_jmp(TOK2("%="))) {
-		opassign(ts_binop, o_mod);
+		opassign(O_MOD, 0);
 		return;
 	}
 	if (!tok_jmp(TOK3("<<="))) {
-		opassign(ts_binop, o_shl);
+		opassign(O_SHL, 0);
 		return;
 	}
 	if (!tok_jmp(TOK3(">>="))) {
-		opassign(ts_binop, o_shr);
+		opassign(O_SHR, 0);
 		return;
 	}
 	if (!tok_jmp(TOK3("&="))) {
-		opassign(ts_binop, o_and);
+		opassign(O_AND, 0);
 		return;
 	}
 	if (!tok_jmp(TOK3("|="))) {
-		opassign(ts_binop, o_or);
+		opassign(O_OR, 0);
 		return;
 	}
 	if (!tok_jmp(TOK3("^="))) {
-		opassign(ts_binop, o_xor);
+		opassign(O_XOR, 0);
 		return;
 	}
 }
@@ -1175,7 +1181,7 @@ static void o_localoff(long addr, int off, unsigned bt)
 	if (off) {
 		o_addr();
 		o_num(off, 4);
-		o_add();
+		o_bop(O_ADD);
 		o_deref(bt);
 	}
 }
@@ -1525,7 +1531,7 @@ static void readswitch(void)
 				readexpr();
 				caseexpr = 0;
 				o_local(val_addr, TYPE_BT(&t));
-				o_eq();
+				o_bop(O_EQ);
 				next = o_jz(0);
 				ref = 0;
 				tok_expect(':');

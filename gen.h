@@ -7,6 +7,33 @@
 #define BT_FLOAT		0x0200
 #define BT_SZ(bt)		((bt) & BT_SZMASK)
 
+#define O_ADD		0x00
+#define O_SUB		0x01
+#define O_AND		0x02
+#define O_OR		0x03
+#define O_XOR		0x04
+#define O_SHL		0x10
+#define O_SHR		0x11
+#define O_MUL		0x20
+#define O_DIV		0x21
+#define O_MOD		0x22
+#define O_LT		0x30
+#define O_GT		0x31
+#define O_LE		0x32
+#define O_GE		0x33
+#define O_EQ		0x34
+#define O_NEQ		0x35
+#define O_NEG		0x40
+#define O_NOT		0x41
+#define O_LNOT		0x42
+#define O_INC		0x50
+#define O_DEC		0x51
+
+#define O_SET		0x100
+
+void o_bop(int op);
+void o_uop(int op);
+
 void o_num(long n, unsigned bt);
 void o_local(long addr, unsigned bt);
 void o_assign(unsigned bt);
@@ -15,28 +42,6 @@ void o_load(void);
 void o_addr(void);
 void o_symaddr(long addr, unsigned bt);
 void o_call(int argc, unsigned *bt, unsigned ret_vs);
-void o_add(void);
-void o_sub(void);
-void o_mul(void);
-void o_div(void);
-void o_mod(void);
-void o_shl(void);
-void o_shr(void);
-void o_neg(void);
-void o_not(void);
-void o_or(void);
-void o_xor(void);
-void o_and(void);
-void o_inc(void);
-void o_dec(void);
-
-void o_lt(void);
-void o_gt(void);
-void o_le(void);
-void o_ge(void);
-void o_eq(void);
-void o_neq(void);
-void o_lnot(void);
 
 long o_mklocal(int size);
 long o_arg(int i, unsigned bt);
