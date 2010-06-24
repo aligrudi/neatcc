@@ -117,11 +117,14 @@ static long codeaddr(void)
 	return cur - buf;
 }
 
-static void o_op(int *op, int nop, int r1, int r2, unsigned bt)
+#define OP2(o2, o1)		(0x0100 | ((o2) << 8) | (o1))
+#define O2(op)			(((op) >> 8) & 0xff)
+#define O1(op)			((op) & 0xff)
+
+static void o_op(int op, int r1, int r2, unsigned bt)
 {
 	int rex = 0;
 	int sz = BT_SZ(bt);
-	int i;
 	if (r1 & 0x8)
 		rex |= 4;
 	if (r2 & 0x8)
@@ -132,23 +135,23 @@ static void o_op(int *op, int nop, int r1, int r2, unsigned bt)
 			r2 == R_RSI || r2 == R_RDI))
 		rex |= 0x40;
 	/* hack: for movxx ops, bt does not represent the second arg */
-	if (nop == 2 && op[0] == 0x0f && (op[1] & 0xf7) == 0xb6 &&
+	if (op & 0x100 && O2(op) == 0x0f && (O1(op) & 0xf7) == 0xb6 &&
 			(r2 == R_RSI || r2 == R_RDI))
 		rex |= 0x40;
 	if (rex || sz == 8)
 		oi(0x40 | rex, 1);
 	if (sz == 2)
 		oi(0x66, 1);
-	for (i = 0; i < nop - 1; i++)
-		oi(op[i], 1);
-	oi(sz == 1 ? op[i] & ~0x1 : op[i], 1);
+	if (op & 0x100)
+		oi(O2(op), 1);
+	oi(sz == 1 ? O1(op) & ~0x1 : O1(op), 1);
 }
 
-static void memop(int *op, int nop, int src, int base, int off, unsigned bt)
+static void memop(int op, int src, int base, int off, unsigned bt)
 {
 	int dis = off == (char) off ? 1 : 4;
 	int mod = dis == 4 ? 2 : 1;
-	o_op(op, nop, src, base, bt);
+	o_op(op, src, base, bt);
 	if (!off)
 		mod = 0;
 	oi((mod << 6) | ((src & 0x07) << 3) | (base & 0x07), 1);
@@ -156,20 +159,10 @@ static void memop(int *op, int nop, int src, int base, int off, unsigned bt)
 		oi(off, dis);
 }
 
-static void memop1(int op, int src, int base, int off, unsigned bt)
+static void regop(int op, int src, int dst, unsigned bt)
 {
-	memop(&op, 1, src, base, off, bt);
-}
-
-static void regop(int *op, int nop, int src, int dst, unsigned bt)
-{
-	o_op(op, nop, src, dst, bt);
+	o_op(op, src, dst, bt);
 	oi((3 << 6) | (src << 3) | (dst & 0x07), 1);
-}
-
-static void regop1(int op, int src, int dst, unsigned bt)
-{
-	regop(&op, 1, src, dst, bt);
 }
 
 static long sp_push(int size)
@@ -190,19 +183,19 @@ static void tmp_mem(struct tmp *tmp)
 	if (tmpsp == -1)
 		tmpsp = sp;
 	tmp->addr = -sp_push(8);
-	memop1(MOV_R2X, src, R_RBP, tmp->addr, BT_TMPBT(TMP_BT(tmp)));
+	memop(MOV_R2X, src, R_RBP, tmp->addr, BT_TMPBT(TMP_BT(tmp)));
 	regs[src] = NULL;
 	tmp->flags = LOC_NEW(tmp->flags, LOC_MEM);
 }
 
-static int *movxx_x2r(int bt)
+static int movxx_x2r(int bt)
 {
-	static int movxx[2] = {0x0f};
+	int o2;
 	if (BT_SZ(bt) == 1)
-		movxx[1] = bt & BT_SIGNED ? 0xbe : 0xb6;
+		o2 = bt & BT_SIGNED ? 0xbe : 0xb6;
 	else
-		movxx[1] = bt & BT_SIGNED ? 0xbf : 0xb7;
-	return movxx;
+		o2 = bt & BT_SIGNED ? 0xbf : 0xb7;
+	return OP2(0x0f, o2);
 }
 
 #define MOVSXD		0x63
@@ -214,25 +207,25 @@ static void mov_r2r(int r1, int r2, unsigned bt1, unsigned bt2)
 	int sz1 = BT_SZ(bt1);
 	int sz2 = BT_SZ(bt2);
 	if (sz2 < 4 && (sz1 > sz2 || s1 != s2)) {
-		regop(movxx_x2r(bt2), 2, r1, r2, 4);
+		regop(movxx_x2r(bt2), r1, r2, 4);
 		return;
 	}
 	if (sz1 == 4 && sz2 == 8 && s1) {
-		regop1(MOVSXD, r2, r1, sz2);
+		regop(MOVSXD, r2, r1, sz2);
 		return;
 	}
 	if (r1 != r2 || sz1 > sz2)
-		regop1(MOV_R2X, r1, r2, BT_TMPBT(bt2));
+		regop(MOV_R2X, r1, r2, BT_TMPBT(bt2));
 }
 
 static void mov_m2r(int dst, int base, int off, int bt1, int bt2)
 {
 	if (BT_SZ(bt1) < 4) {
-		memop(movxx_x2r(bt1), 2, dst, base, off,
+		memop(movxx_x2r(bt1), dst, base, off,
 			bt1 & BT_SIGNED && BT_SZ(bt2) == 8 ? 8 : 4);
 		mov_r2r(dst, dst, bt1, bt2);
 	} else {
-		memop1(MOV_M2R, dst, base, off, bt1);
+		memop(MOV_M2R, dst, base, off, bt1);
 		mov_r2r(dst, dst, bt1, bt2);
 	}
 }
@@ -252,7 +245,7 @@ static void num_reg(int reg, unsigned bt, long num)
 	int op = MOV_I2R + (reg & 7);
 	if (BT_SZ(bt) == 8 && num >= 0 && num == (unsigned) num)
 		bt = 4;
-	o_op(&op, 1, 0, reg, bt);
+	o_op(op, 0, reg, bt);
 	oi(num, BT_SZ(bt));
 }
 
@@ -271,7 +264,7 @@ static void tmp_reg(struct tmp *tmp, int dst, unsigned bt, int deref)
 		tmp->flags = LOC_NEW(tmp->flags, LOC_REG);
 	}
 	if (tmp->flags & LOC_SYM) {
-		regop1(MOV_I2X, 0, dst, 4);
+		regop(MOV_I2X, 0, dst, 4);
 		if (!nogen)
 			out_rela(tmp->addr, codeaddr(), 0);
 		oi(tmp->off, 4);
@@ -291,7 +284,7 @@ static void tmp_reg(struct tmp *tmp, int dst, unsigned bt, int deref)
 		if (deref)
 			mov_m2r(dst, R_RBP, tmp->addr, tmp->bt, bt);
 		else
-			memop1(LEA_M2R, dst, R_RBP, tmp->addr, 8);
+			memop(LEA_M2R, dst, R_RBP, tmp->addr, 8);
 	}
 	if (tmp->flags & LOC_MEM) {
 		int nbt = deref ? 8 : TMP_BT(tmp);
@@ -464,7 +457,7 @@ void tmp_copy(struct tmp *t1)
 		tmp_reg(t2, reg_get(~0), t2->bt, 0);
 	} else if (t1->flags & LOC_REG) {
 		t2->addr = reg_get(~(1 << t1->addr));
-		regop1(MOV_R2X, t1->addr, t2->addr, BT_TMPBT(TMP_BT(t1)));
+		regop(MOV_R2X, t1->addr, t2->addr, BT_TMPBT(TMP_BT(t1)));
 		regs[t2->addr] = t2;
 	}
 }
@@ -565,7 +558,7 @@ static void shx(int uop, int sop)
 	int bt;
 	tmp_pop(R_RCX, 0);
 	bt = tmp_pop(r2, 0);
-	regop1(SHX_REG, bt & BT_SIGNED ? sop : uop, r2, BT_TMPBT(bt));
+	regop(SHX_REG, bt & BT_SIGNED ? sop : uop, r2, BT_TMPBT(bt));
 	tmp_push(r2, bt);
 }
 
@@ -579,15 +572,14 @@ static int mulop(int uop, int sop, int reg)
 	tmp_to(t1, reg, bt);
 	tmp_to(t2, R_RAX, bt);
 	if (reg != R_RDX) {
-		int cqo = 0x99;
 		reg_free(R_RDX);
 		if (bt & BT_SIGNED)
-			o_op(&cqo, 1, R_RAX, R_RDX, bt);
+			o_op(0x99, R_RAX, R_RDX, bt);
 		else
-			regop1(XOR_R2X, R_RDX, R_RDX, bt);
+			regop(XOR_R2X, R_RDX, R_RDX, bt);
 	}
 	tmp_drop(2);
-	regop1(MUL_A2X, bt & BT_SIGNED ? sop : uop, reg, BT_TMPBT(t2->bt));
+	regop(MUL_A2X, bt & BT_SIGNED ? sop : uop, reg, BT_TMPBT(t2->bt));
 	return bt;
 }
 
@@ -619,7 +611,7 @@ static void inc(int op)
 		off = 0;
 		tmp_mv(t, reg);
 	}
-	memop1(INC_X, op, reg, off, t->bt);
+	memop(INC_X, op, reg, off, t->bt);
 }
 
 void o_lnot(void)
@@ -639,7 +631,7 @@ void o_neg(int id)
 	unsigned bt = BT_TMPBT(t->bt);
 	reg = TMP_REG(t);
 	tmp_to(t, reg, bt);
-	regop1(NOT_REG, id, reg, bt);
+	regop(NOT_REG, id, reg, bt);
 }
 
 void o_func_end(void)
@@ -671,7 +663,7 @@ long o_arg(int i, unsigned bt)
 	long addr;
 	if (i < R_NARGS) {
 		addr = o_mklocal(BT_SZ(bt));
-		memop1(MOV_R2X, arg_regs[i], R_RBP, -addr, BT_TMPBT(bt));
+		memop(MOV_R2X, arg_regs[i], R_RBP, -addr, BT_TMPBT(bt));
 	} else {
 		addr = -8 * (i - R_NARGS + 2);
 	}
@@ -695,7 +687,7 @@ void o_assign(unsigned bt)
 		tmp_mv(t2, reg);
 	}
 	tmp_drop(2);
-	memop1(MOV_R2X, r1, reg, off, bt);
+	memop(MOV_R2X, r1, reg, off, bt);
 	tmp_push(r1, bt);
 }
 
@@ -834,7 +826,7 @@ static int binop(int op, int *reg)
 	r2 = TMP_REG2(t2, r1);
 	tmp_pop(r1, bt);
 	tmp_pop(r2, bt);
-	regop1(op, r2, r1, bt);
+	regop(op, r2, r1, bt);
 	*reg = r2;
 	return bt;
 }
@@ -978,7 +970,7 @@ static long jx(int x, long addr)
 static long jxtest(int x, long addr)
 {
 	int bt = tmp_pop(R_RAX, 0);
-	regop1(TEST_R2R, R_RAX, R_RAX, bt);
+	regop(TEST_R2R, R_RAX, R_RAX, bt);
 	return jx(x, addr);
 }
 
@@ -1034,7 +1026,7 @@ void o_call(int argc, unsigned *bt, unsigned ret_bt)
 		for (i = argc - 1; i >= R_NARGS; --i) {
 			int reg = TMP_REG(TMP(0));
 			tmp_pop(reg, bt[i]);
-			memop1(MOV_R2X, reg, R_RBP,
+			memop(MOV_R2X, reg, R_RBP,
 				-(addr - (i - R_NARGS) * 8), BT_TMPBT(bt[i]));
 		}
 	}
@@ -1051,7 +1043,7 @@ void o_call(int argc, unsigned *bt, unsigned ret_bt)
 	} else {
 		tmp_mv(TMP(0), R_RAX);
 		tmp_drop(1);
-		regop1(CALL_REG, 2, R_RAX, 4);
+		regop(CALL_REG, 2, R_RAX, 4);
 	}
 	if (ret_bt)
 		tmp_push(R_RAX, ret_bt);
