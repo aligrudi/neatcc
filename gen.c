@@ -117,9 +117,10 @@ static long codeaddr(void)
 	return cur - buf;
 }
 
-#define OP2(o2, o1)		(0x0100 | ((o2) << 8) | (o1))
+#define OP2(o2, o1)		(0x010000 | ((o2) << 8) | (o1))
 #define O2(op)			(((op) >> 8) & 0xff)
 #define O1(op)			((op) & 0xff)
+#define MODRM(m, r1, r2)	((m) << 6 | (r1) << 3 | (r2))
 
 static void o_op(int op, int r1, int r2, unsigned bt)
 {
@@ -135,14 +136,14 @@ static void o_op(int op, int r1, int r2, unsigned bt)
 			r2 == R_RSI || r2 == R_RDI))
 		rex |= 0x40;
 	/* hack: for movxx ops, bt does not represent the second arg */
-	if (op & 0x100 && O2(op) == 0x0f && (O1(op) & 0xf7) == 0xb6 &&
+	if (op & 0x10000 && O2(op) == 0x0f && (O1(op) & 0xf7) == 0xb6 &&
 			(r2 == R_RSI || r2 == R_RDI))
 		rex |= 0x40;
 	if (rex || sz == 8)
 		oi(0x40 | rex, 1);
 	if (sz == 2)
 		oi(0x66, 1);
-	if (op & 0x100)
+	if (op & 0x10000)
 		oi(O2(op), 1);
 	oi(sz == 1 ? O1(op) & ~0x1 : O1(op), 1);
 }
@@ -154,7 +155,7 @@ static void memop(int op, int src, int base, int off, unsigned bt)
 	o_op(op, src, base, bt);
 	if (!off)
 		mod = 0;
-	oi((mod << 6) | ((src & 0x07) << 3) | (base & 0x07), 1);
+	oi(MODRM(mod, src & 0x07, base & 0x07), 1);
 	if (off)
 		oi(off, dis);
 }
@@ -162,7 +163,7 @@ static void memop(int op, int src, int base, int off, unsigned bt)
 static void regop(int op, int src, int dst, unsigned bt)
 {
 	o_op(op, src, dst, bt);
-	oi((3 << 6) | (src << 3) | (dst & 0x07), 1);
+	oi(MODRM(3, src & 0x07, dst & 0x07), 1);
 }
 
 static long sp_push(int size)
