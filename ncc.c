@@ -1,5 +1,5 @@
 /*
- * neatcc - A small and simple x86_64 C compiler
+ * neatcc - A small and simple C compiler
  *
  * Copyright (C) 2010 Ali Gholami Rudi
  *
@@ -21,8 +21,8 @@
 #define MAXARGS		(1 << 5)
 #define print(s)	write(2, (s), strlen(s));
 
-#define TYPE_BT(t)		((t)->ptr ? 8 : (t)->bt)
-#define TYPE_SZ(t)		((t)->ptr ? 8 : (t)->bt & BT_SZMASK)
+#define TYPE_BT(t)		((t)->ptr ? LONGSZ : (t)->bt)
+#define TYPE_SZ(t)		((t)->ptr ? LONGSZ : (t)->bt & BT_SZMASK)
 
 #define T_ARRAY		0x01
 #define T_STRUCT	0x02
@@ -259,7 +259,7 @@ static void continue_fill(long addr, int till)
 static int type_totsz(struct type *t)
 {
 	if (t->ptr)
-		return 8;
+		return LONGSZ;
 	if (t->flags & T_ARRAY)
 		return arrays[t->id].n * type_totsz(&arrays[t->id].type);
 	return t->flags & T_STRUCT ? structs[t->id].size : BT_SZ(t->bt);
@@ -348,7 +348,7 @@ static int type_alignment(struct type *t)
 		return type_alignment(&arrays[t->id].type);
 	if (t->flags & T_STRUCT && !t->ptr)
 		return type_alignment(&structs[t->id].fields[0].type);
-	return MIN(8, type_totsz(t));
+	return MIN(LONGSZ, type_totsz(t));
 }
 
 static void structdef(void *data, struct name *name, unsigned flags)
@@ -362,7 +362,7 @@ static void structdef(void *data, struct name *name, unsigned flags)
 		struct type *t = &name->type;
 		int alignment = type_alignment(t);
 		if (t->flags & T_ARRAY && !t->ptr)
-			alignment = MIN(8, type_totsz(&arrays[t->id].type));
+			alignment = MIN(LONGSZ, type_totsz(&arrays[t->id].type));
 		si->size = ALIGN(si->size, alignment);
 		name->addr = si->size;
 		si->size += type_totsz(&name->type);
@@ -441,7 +441,7 @@ static int basetype(struct type *type, unsigned *flags)
 			size = 2;
 			break;
 		case TOK_LONG:
-			size = 8;
+			size = LONGSZ;
 			break;
 		case TOK_SIGNED:
 			break;
@@ -458,7 +458,7 @@ static int basetype(struct type *type, unsigned *flags)
 			else
 				type->id = struct_find(name, isunion);
 			type->flags |= T_STRUCT;
-			type->bt = 8;
+			type->bt = LONGSZ;
 			return 0;
 		case TOK_ENUM:
 			tok_get();
@@ -574,8 +574,8 @@ static void readprimary(void)
 			err("unknown symbol\n");
 		unkn.addr = out_mkundef(unkn.name, 0);
 		global_add(&unkn);
-		ts_push_bt(8);
-		o_symaddr(unkn.addr, 8);
+		ts_push_bt(LONGSZ);
+		o_symaddr(unkn.addr, LONGSZ);
 		return;
 	}
 	if (!tok_jmp('(')) {
@@ -673,7 +673,7 @@ static void readcall(void)
 	int i;
 	ts_pop(&t);
 	if (t.flags & T_FUNC && t.ptr > 0)
-		o_deref(8);
+		o_deref(LONGSZ);
 	fi = t.flags & T_FUNC ? &funcs[t.id] : NULL;
 	if (tok_see() != ')') {
 		readexpr();
@@ -1445,7 +1445,7 @@ static int readname(struct type *main, char *name,
 		if (type->flags & T_FUNC)
 			func = &arrays[type->id].type;
 		type->flags = T_ARRAY;
-		type->bt = 8;
+		type->bt = LONGSZ;
 		type->ptr = 0;
 	}
 	if (func)
@@ -1460,7 +1460,7 @@ static int readname(struct type *main, char *name,
 			func = type;
 		}
 		func->flags = T_FUNC;
-		func->bt = 8;
+		func->bt = LONGSZ;
 		func->id = func_create(ret, args, nargs);
 		if (fdef && tok_see() == '{') {
 			funcdef(name, func, args, nargs, flags);
@@ -1503,7 +1503,7 @@ static void readstmt(void);
 static void readswitch(void)
 {
 	int break_beg = nbreaks;
-	long val_addr = o_mklocal(8);
+	long val_addr = o_mklocal(LONGSZ);
 	long matched[MAXCASES];
 	int nmatched = 0;
 	struct type t;
@@ -1549,7 +1549,7 @@ static void readswitch(void)
 		nmatched = 0;
 		readstmt();
 	}
-	o_rmlocal(val_addr, 8);
+	o_rmlocal(val_addr, LONGSZ);
 	if (!ref++)
 		o_filljmp(next);
 	break_fill(o_mklabel(), break_beg);

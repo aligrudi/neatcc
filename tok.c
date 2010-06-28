@@ -131,7 +131,7 @@ static void readnum(void)
 			if (c == 'u')
 				num_bt &= ~BT_SIGNED;
 			if (c == 'l')
-				num_bt = (num_bt & BT_SIGNED) | 8;
+				num_bt = (num_bt & BT_SIGNED) | LONGSZ;
 			cur++;
 		}
 		return;

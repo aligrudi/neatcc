@@ -16,22 +16,22 @@
 #define SEC_BSS			7
 #define NSECS			8
 
-static Elf64_Ehdr ehdr;
-static Elf64_Shdr shdr[NSECS];
-static Elf64_Sym syms[MAXSYMS];
+static Elf32_Ehdr ehdr;
+static Elf32_Shdr shdr[NSECS];
+static Elf32_Sym syms[MAXSYMS];
 static int nsyms = 1;
 static char symstr[MAXSYMS * 8];
 static int nsymstr = 1;
 static int bsslen;
 static char dat[SECSIZE];
 static int datlen;
-static Elf64_Rela datrela[MAXRELA];
+static Elf32_Rel datrela[MAXRELA];
 static int ndatrela;
 
 static char buf[SECSIZE];
 static int len;
-static Elf64_Sym *cur_sym;
-static Elf64_Rela rela[MAXRELA];
+static Elf32_Sym *cur_sym;
+static Elf32_Rel rela[MAXRELA];
 static int nrela;
 
 static char *putstr(char *s, char *r)
@@ -51,10 +51,10 @@ static int sym_find(char *name)
 	return -1;
 }
 
-static Elf64_Sym *put_sym(char *name)
+static Elf32_Sym *put_sym(char *name)
 {
 	int found = name ? sym_find(name) : -1;
-	Elf64_Sym *sym = found != -1 ? &syms[found] : &syms[nsyms++];
+	Elf32_Sym *sym = found != -1 ? &syms[found] : &syms[nsyms++];
 	if (!name)
 		sym->st_name = 0;
 	if (name && found == -1) {
@@ -70,7 +70,7 @@ long out_func_beg(char *name, int global)
 {
 	cur_sym = put_sym(name);
 	cur_sym->st_shndx = SEC_TEXT;
-	cur_sym->st_info = ELF64_ST_INFO(S_BIND(global), STT_FUNC);
+	cur_sym->st_info = ELF32_ST_INFO(S_BIND(global), STT_FUNC);
 	cur_sym->st_value = len;
 	return cur_sym - syms;
 }
@@ -84,27 +84,27 @@ void out_func_end(char *sec, int sec_len)
 
 void out_rela(long addr, int off, int rel)
 {
-	Elf64_Rela *r = &rela[nrela++];
+	Elf32_Rel *r = &rela[nrela++];
 	r->r_offset = cur_sym->st_value + off;
-	r->r_info = ELF64_R_INFO(addr, rel ? R_X86_64_PC32 : R_X86_64_32);
+	r->r_info = ELF32_R_INFO(addr, rel ? R_386_PC32 : R_386_32);
 }
 
 void out_datrela(long addr, long dataddr, int off)
 {
-	Elf64_Rela *r = &datrela[ndatrela++];
+	Elf32_Rel *r = &datrela[ndatrela++];
 	r->r_offset = syms[dataddr].st_value + off;
-	r->r_info = ELF64_R_INFO(addr, R_X86_64_32);
+	r->r_info = ELF32_R_INFO(addr, R_386_32);
 }
 
-#define SYMLOCAL(i)		(ELF64_ST_BIND(syms[i].st_info) == STB_LOCAL)
+#define SYMLOCAL(i)		(ELF32_ST_BIND(syms[i].st_info) == STB_LOCAL)
 
-static void mvrela(int *mv, Elf64_Rela *rela, int nrela)
+static void mvrela(int *mv, Elf32_Rel *rela, int nrela)
 {
 	int i;
 	for (i = 0; i < nrela; i++) {
-		int sym = ELF64_R_SYM(rela[i].r_info);
-		int type = ELF64_R_TYPE(rela[i].r_info);
-		rela[i].r_info = ELF64_R_INFO(mv[sym], type);
+		int sym = ELF32_R_SYM(rela[i].r_info);
+		int type = ELF32_R_TYPE(rela[i].r_info);
+		rela[i].r_info = ELF32_R_INFO(mv[sym], type);
 	}
 }
 
@@ -118,7 +118,7 @@ static int syms_sort(void)
 	i = 1;
 	j = nsyms - 1;
 	while (1) {
-		Elf64_Sym t;
+		Elf32_Sym t;
 		while (i < j && SYMLOCAL(i))
 			i++;
 		while (j >= i && !SYMLOCAL(j))
@@ -139,24 +139,24 @@ static int syms_sort(void)
 
 void out_write(int fd)
 {
-	Elf64_Shdr *text_shdr = &shdr[SEC_TEXT];
-	Elf64_Shdr *rela_shdr = &shdr[SEC_RELA];
-	Elf64_Shdr *symstr_shdr = &shdr[SEC_SYMSTR];
-	Elf64_Shdr *syms_shdr = &shdr[SEC_SYMS];
-	Elf64_Shdr *dat_shdr = &shdr[SEC_DAT];
-	Elf64_Shdr *datrela_shdr = &shdr[SEC_DATRELA];
-	Elf64_Shdr *bss_shdr = &shdr[SEC_BSS];
+	Elf32_Shdr *text_shdr = &shdr[SEC_TEXT];
+	Elf32_Shdr *rela_shdr = &shdr[SEC_RELA];
+	Elf32_Shdr *symstr_shdr = &shdr[SEC_SYMSTR];
+	Elf32_Shdr *syms_shdr = &shdr[SEC_SYMS];
+	Elf32_Shdr *dat_shdr = &shdr[SEC_DAT];
+	Elf32_Shdr *datrela_shdr = &shdr[SEC_DATRELA];
+	Elf32_Shdr *bss_shdr = &shdr[SEC_BSS];
 	unsigned long offset = sizeof(ehdr);
 
 	ehdr.e_ident[0] = 0x7f;
 	ehdr.e_ident[1] = 'E';
 	ehdr.e_ident[2] = 'L';
 	ehdr.e_ident[3] = 'F';
-	ehdr.e_ident[4] = ELFCLASS64;
+	ehdr.e_ident[4] = ELFCLASS32;
 	ehdr.e_ident[5] = ELFDATA2LSB;
 	ehdr.e_ident[6] = EV_CURRENT;
 	ehdr.e_type = ET_REL;
-	ehdr.e_machine = EM_X86_64;
+	ehdr.e_machine = EM_386;
 	ehdr.e_version = EV_CURRENT;
 	ehdr.e_ehsize = sizeof(ehdr);
 	ehdr.e_shentsize = sizeof(shdr[0]);
@@ -172,7 +172,7 @@ void out_write(int fd)
 	text_shdr->sh_entsize = 1;
 	offset += text_shdr->sh_size;
 
-	rela_shdr->sh_type = SHT_RELA;
+	rela_shdr->sh_type = SHT_REL;
 	rela_shdr->sh_link = SEC_SYMS;
 	rela_shdr->sh_info = SEC_TEXT;
 	rela_shdr->sh_offset = offset;
@@ -193,10 +193,10 @@ void out_write(int fd)
 	dat_shdr->sh_offset = offset;
 	dat_shdr->sh_size = datlen;
 	dat_shdr->sh_entsize = 1;
-	dat_shdr->sh_addralign = 8;
+	dat_shdr->sh_addralign = 4;
 	offset += dat_shdr->sh_size;
 
-	datrela_shdr->sh_type = SHT_RELA;
+	datrela_shdr->sh_type = SHT_REL;
 	datrela_shdr->sh_offset = offset;
 	datrela_shdr->sh_size = ndatrela * sizeof(datrela[0]);
 	datrela_shdr->sh_entsize = sizeof(datrela[0]);
@@ -209,7 +209,7 @@ void out_write(int fd)
 	bss_shdr->sh_offset = offset;
 	bss_shdr->sh_size = bsslen;
 	bss_shdr->sh_entsize = 1;
-	bss_shdr->sh_addralign = 8;
+	bss_shdr->sh_addralign = 4;
 
 	symstr_shdr->sh_type = SHT_STRTAB;
 	symstr_shdr->sh_offset = offset;
@@ -229,36 +229,36 @@ void out_write(int fd)
 
 long out_mkvar(char *name, int size, int global)
 {
-	Elf64_Sym *sym = put_sym(name);
+	Elf32_Sym *sym = put_sym(name);
 	sym->st_shndx = SEC_BSS;
 	sym->st_value = bsslen;
 	sym->st_size = size;
-	sym->st_info = ELF64_ST_INFO(S_BIND(global), STT_OBJECT);
-	bsslen = ALIGN(bsslen + size, 8);
+	sym->st_info = ELF32_ST_INFO(S_BIND(global), STT_OBJECT);
+	bsslen = ALIGN(bsslen + size, 4);
 	return sym - syms;
 }
 
 long out_mkundef(char *name, int sz)
 {
-	Elf64_Sym *sym = put_sym(name);
+	Elf32_Sym *sym = put_sym(name);
 	sym->st_shndx = SHN_UNDEF;
-	sym->st_info = ELF64_ST_INFO(STB_GLOBAL, sz ? STT_OBJECT : STT_FUNC);
+	sym->st_info = ELF32_ST_INFO(STB_GLOBAL, sz ? STT_OBJECT : STT_FUNC);
 	sym->st_size = sz;
 	return sym - syms;
 }
 
 long out_mkdat(char *name, char *buf, int len, int global)
 {
-	Elf64_Sym *sym = put_sym(name);
+	Elf32_Sym *sym = put_sym(name);
 	sym->st_shndx = SEC_DAT;
 	sym->st_value = datlen;
 	sym->st_size = len;
-	sym->st_info = ELF64_ST_INFO(S_BIND(global), STT_OBJECT);
+	sym->st_info = ELF32_ST_INFO(S_BIND(global), STT_OBJECT);
 	if (buf)
 		memcpy(dat + datlen, buf, len);
 	else
 		memset(dat + datlen, 0, len);
-	datlen = ALIGN(datlen + len, 8);
+	datlen = ALIGN(datlen + len, 4);
 	return sym - syms;
 }
 
