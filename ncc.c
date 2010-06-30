@@ -739,20 +739,19 @@ static void readpost(void)
 
 static void inc_pre(int inc_one, int inc_many)
 {
-	struct type t;
+	struct type *t;
 	int sz;
 	readpre();
-	ts_pop(&t);
-	array2ptr(&t);
-	sz = type_totsz(&t);
-	if (!t.ptr || sz == 1) {
+	t = &ts[nts - 1];
+	sz = (t->flags & T_ARRAY || t->ptr) ? type_szde(t) : 1;
+	if (sz == 1) {
 		o_uop(inc_one);
 	} else {
+		o_tmpcopy();
 		o_num(sz, 4);
 		o_bop(inc_many);
-		o_assign(TYPE_BT(&t));
+		o_assign(TYPE_BT(t));
 	}
-	ts_push(&t);
 }
 
 static void readpre(void)
