@@ -64,7 +64,7 @@ static long maxsp;
 
 static struct tmp {
 	long addr;
-	long off;	/* used for LOC_SYM; offset from a symbol address */
+	long off;	/* offset from a symbol or a local */
 	unsigned flags;
 	unsigned bt;
 } tmps[MAXTMP];
@@ -316,9 +316,9 @@ static void tmp_reg(struct tmp *tmp, int dst, unsigned bt, int deref)
 	}
 	if (tmp->flags & LOC_LOCAL) {
 		if (deref)
-			mov_m2r(dst, R_EBP, tmp->addr, tmp->bt, bt);
+			mov_m2r(dst, R_EBP, tmp->addr + tmp->off, tmp->bt, bt);
 		else
-			op_rm(LEA_M2R, dst, R_EBP, tmp->addr, LONGSZ);
+			op_rm(LEA_M2R, dst, R_EBP, tmp->addr + tmp->off, LONGSZ);
 	}
 	if (tmp->flags & LOC_MEM) {
 		int nbt = deref ? LONGSZ : TMP_BT(tmp);
@@ -402,6 +402,7 @@ void o_local(long addr, unsigned bt)
 	t->addr = -addr;
 	t->bt = bt;
 	t->flags = LOC_LOCAL | TMP_ADDR;
+	t->off = 0;
 }
 
 void o_num(long num, unsigned bt)
@@ -559,8 +560,6 @@ static unsigned bt_op(unsigned bt1, unsigned bt2)
 }
 
 #define TMP_NUM(t)	((t)->flags & LOC_NUM && !((t)->flags & TMP_ADDR))
-#define TMP_SYM(t)	((t)->flags & LOC_SYM && (t)->flags & TMP_ADDR)
-#define TMP_LOCAL(t)	((t)->flags & LOC_LOCAL && (t)->flags & TMP_ADDR)
 #define LOCAL_PTR(t)	((t)->flags & LOC_LOCAL && !((t)->flags & TMP_ADDR))
 #define SYM_PTR(t)	((t)->flags & LOC_SYM && !((t)->flags & TMP_ADDR))
 
@@ -645,7 +644,7 @@ static void inc(int op)
 	int off;
 	if (t->flags & LOC_LOCAL) {
 		reg = R_EBP;
-		off = t->addr;
+		off = t->addr + t->off;
 	} else {
 		reg = TMP_REG(t);
 		off = 0;
@@ -710,7 +709,7 @@ void o_assign(unsigned bt)
 	tmp_to(t1, r1, TMPBT(bt));
 	if (t2->flags & LOC_LOCAL) {
 		reg = R_EBP;
-		off = t2->addr;
+		off = t2->addr + t2->off;
 	} else {
 		reg = TMP_REG2(t2, r1);
 		off = 0;
@@ -801,31 +800,23 @@ static int c_bop(int op)
 	int syms = SYM_PTR(t1) + SYM_PTR(t2);
 	int nums = TMP_NUM(t1) + TMP_NUM(t2);
 	int bt;
-	if (syms == 2 || syms && locals || syms + nums + locals != 2)
+	if (syms + locals == 2 || syms + nums + locals != 2)
 		return 1;
-	if (!locals)
-		bt = syms ? LONGSZ : bt_op(t1->bt, t2->bt);
-	if (locals == 1)
-		bt = LONGSZ;
-	if (locals == 2)
-		bt = 4 | BT_SIGNED;
-	if (syms) {
-		long o1 = SYM_PTR(t1) ? t1->off : t1->addr;
-		long o2 = SYM_PTR(t2) ? t2->off : t2->addr;
+	bt = BT_SIGNED | LONGSZ;
+	if (!locals && !syms)
+		bt = bt_op(t1->bt, t2->bt);
+	if (syms || locals) {
+		long o1 = TMP_NUM(t1) ? t1->addr : t1->off;
+		long o2 = TMP_NUM(t2) ? t2->addr : t2->off;
 		long ret = cb(op, o2, o1, &bt, t2->bt, t1->bt);
-		if (!SYM_PTR(t2))
+		if (!TMP_NUM(t1))
 			o_tmpswap();
 		t2->off = ret;
 		tmp_drop(1);
 	} else {
 		long ret = cb(op, t2->addr, t1->addr, &bt, t2->bt, t1->bt);
 		tmp_drop(2);
-		if (locals == 1) {
-			o_local(-ret, bt);
-			o_addr();
-		} else {
-			o_num(ret, bt);
-		}
+		o_num(ret, bt);
 	}
 	return 0;
 }
