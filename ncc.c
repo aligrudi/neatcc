@@ -1442,7 +1442,7 @@ static int readname(struct type *main, char *name,
 	}
 	for (i = nar - 1; i >= 0; i--) {
 		type->id = array_add(type, arsz[i]);
-		if (type->flags & T_FUNC)
+		if (func && i == nar - 1)
 			func = &arrays[type->id].type;
 		type->flags = T_ARRAY;
 		type->bt = LONGSZ;
