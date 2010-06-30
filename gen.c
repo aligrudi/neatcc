@@ -573,20 +573,6 @@ int o_popnum(long *c)
 	return 0;
 }
 
-static int c_op(long (*cop)(long a, unsigned bt), unsigned bt)
-{
-	struct tmp *t1 = TMP(0);
-	long ret;
-	if (!TMP_NUM(t1))
-		return 1;
-	if (!bt)
-		bt = t1->bt;
-	ret = cop(t1->addr, bt);
-	tmp_drop(1);
-	o_num(ret, bt);
-	return 0;
-}
-
 static void shx(int uop, int sop)
 {
 	struct tmp *t1 = TMP(0);
