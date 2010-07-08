@@ -1039,7 +1039,6 @@ void o_call(int argc, unsigned *bt, unsigned ret_bt)
 	}
 	t = TMP(0);
 	if (t->flags & LOC_SYM) {
-		os("\x31\xc0", 2);	/* xor %eax, %eax */
 		os("\xe8", 1);		/* call $x */
 		if (!nogen)
 			out_rela(t->addr, codeaddr(), 1);
