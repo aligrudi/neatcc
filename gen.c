@@ -788,10 +788,13 @@ static int c_bop(int op)
 	int bt;
 	if (syms + locals == 2 || syms + nums + locals != 2)
 		return 1;
+	if (nums == 1)
+		if (op != O_ADD && op != O_SUB || op == O_SUB && TMP_NUM(t2))
+			return 1;
 	bt = BT_SIGNED | LONGSZ;
-	if (!locals && !syms)
+	if (nums == 2)
 		bt = bt_op(t1->bt, t2->bt);
-	if (syms || locals) {
+	if (nums == 1) {
 		long o1 = TMP_NUM(t1) ? t1->addr : t1->off;
 		long o2 = TMP_NUM(t2) ? t2->addr : t2->off;
 		long ret = cb(op, o2, o1, &bt, t2->bt, t1->bt);
