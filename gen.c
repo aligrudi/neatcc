@@ -136,13 +136,13 @@ static void op_rm(int op, int src, int base, int off, int bt)
 {
 	int dis = off == (char) off ? 1 : 4;
 	int mod = dis == 4 ? 2 : 1;
-	if (!off)
+	if (!off && base != R_EBP)
 		mod = 0;
 	op_x(op, src, base, bt);
 	oi(MODRM(mod, src & 0x07, base & 0x07), 1);
 	if (base == R_ESP)
 		oi(0x24, 1);
-	if (off)
+	if (mod)
 		oi(off, dis);
 }
 
@@ -192,11 +192,11 @@ static void op_mi(int op, int o3, int base, int off, long num, int bt)
 {
 	int dis = off == (char) off ? 1 : 4;
 	int mod = dis == 4 ? 2 : 1;
-	if (!off)
+	if (!off && base != R_EBP)
 		mod = 0;
 	op_x(op, 0, base, bt);
 	oi(MODRM(mod, 0, base), 1);
-	if (off)
+	if (mod)
 		oi(off, dis);
 	oi(num, MIN(4, BT_SZ(bt)));
 }
@@ -659,6 +659,8 @@ void o_neg(int id)
 	op_rr(NOT_REG, id, reg, bt);
 }
 
+#define ALIGN(x, a)		(((x) + (a) - 1) & ~((a) - 1))
+
 void o_func_end(void)
 {
 	int i;
@@ -666,13 +668,13 @@ void o_func_end(void)
 		o_filljmp(ret[i]);
 	os("\x5f\x5e\x5b", 3);		/* pop edi; pop esi; pop ebx */
 	os("\xc9\xc3", 2);		/* leave; ret; */
-	putint(buf + spsub_addr, (maxsp + 7) & ~0x07, 4);
+	putint(buf + spsub_addr, ALIGN(maxsp, LONGSZ), 4);
 	out_func_end(buf, cur - buf);
 }
 
 long o_mklocal(int size)
 {
-	return sp_push((size + 7) & ~0x07);
+	return sp_push(ALIGN(size, LONGSZ));
 }
 
 void o_rmlocal(long addr, int sz)
