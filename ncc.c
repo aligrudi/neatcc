@@ -315,17 +315,15 @@ static void ts_addop(int op)
 		ts_push_bt(bt_op(TYPE_BT(&t1), TYPE_BT(&t2)));
 		return;
 	}
-	if (t1.ptr && !t2.ptr) {
-		struct type t = t2;
-		t2 = t1;
-		t1 = t;
+	if (t1.ptr && !t2.ptr)
 		o_tmpswap();
-	}
 	if (!t1.ptr && t2.ptr)
 		if (type_szde(&t2) > 1) {
 			o_num(type_szde(&t2), 4);
 			o_bop(O_MUL);
 		}
+	if (t1.ptr && !t2.ptr)
+		o_tmpswap();
 	o_bop(op);
 	if (t1.ptr && t2.ptr) {
 		int sz = type_szde(&t1);
@@ -335,7 +333,7 @@ static void ts_addop(int op)
 		}
 		ts_push_bt(4 | BT_SIGNED);
 	} else {
-		ts_push(&t2);
+		ts_push(t1.ptr ? &t1 : &t2);
 	}
 }
 
