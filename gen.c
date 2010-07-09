@@ -523,8 +523,8 @@ long o_func_beg(char *name, int global)
 	os("\x55", 1);			/* push %rbp */
 	os("\x89\xe5", 2);		/* mov %rsp, %rbp */
 	os("\x53\x56\x57", 3);		/* push ebx; push esi; push edi */
-	sp = 0;
-	maxsp = 0;
+	sp = 3 * LONGSZ;
+	maxsp = sp;
 	ntmp = 0;
 	tmpsp = -1;
 	nret = 0;
@@ -668,7 +668,7 @@ void o_func_end(void)
 		o_filljmp(ret[i]);
 	os("\x5f\x5e\x5b", 3);		/* pop edi; pop esi; pop ebx */
 	os("\xc9\xc3", 2);		/* leave; ret; */
-	putint(buf + spsub_addr, ALIGN(maxsp, LONGSZ), 4);
+	putint(buf + spsub_addr, ALIGN(maxsp - 3 * LONGSZ, LONGSZ), 4);
 	out_func_end(buf, cur - buf);
 }
 
