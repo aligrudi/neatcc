@@ -758,8 +758,7 @@ static void readpre(void)
 		struct type type;
 		readpre();
 		ts_pop(&type);
-		if (!(type.flags & T_FUNC) && !type.ptr)
-			type.ptr++;
+		type.ptr++;
 		ts_push(&type);
 		o_addr();
 		return;
@@ -769,10 +768,8 @@ static void readpre(void)
 		readpre();
 		ts_pop(&t);
 		array2ptr(&t);
-		if (!(t.flags & T_FUNC) || t.ptr > 0) {
-			t.ptr--;
-			o_deref(TYPE_BT(&t));
-		}
+		t.ptr--;
+		o_deref(TYPE_BT(&t));
 		ts_push(&t);
 		return;
 	}
