@@ -1091,8 +1091,8 @@ static void opassign(int op, int ptrop)
 		o_tmpcopy();
 		readexpr();
 		ts_addop(op);
-		ts_pop(NULL);
 		o_assign(TYPE_BT(&ts[nts - 1]));
+		ts_pop(NULL);
 	} else {
 		readexpr();
 		o_bop(op | O_SET);
