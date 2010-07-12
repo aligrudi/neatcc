@@ -591,7 +591,8 @@ static int mulop(int uop, int sop, int reg)
 {
 	struct tmp *t1 = TMP(0);
 	struct tmp *t2 = TMP(1);
-	int bt = bt_op(t1->bt, t2->bt);
+	/* for div and mod, the sign of the second operand don't matter */
+	int bt = uop == 4 ? bt_op(t1->bt, t2->bt) : TMPBT(t2->bt);
 	if (t1->flags & LOC_REG && t1->addr != R_EAX && t1->addr != R_EDX)
 		reg = t1->addr;
 	tmp_to(t1, reg, bt);
