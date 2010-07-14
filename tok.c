@@ -47,7 +47,7 @@ static struct {
 };
 
 static char *tok3[] = {
-	"<<", ">>", "++", "--", "<<=", ">>=", "...", "+=", "-=", "*=", "/=",
+	"<<=", ">>=", "...", "<<", ">>", "++", "--", "+=", "-=", "*=", "/=",
 	"%=", "|=", "&=", "^=", "&&", "||", "==", "!=", "<=", ">=", "->", "/*"
 };
 
@@ -243,7 +243,7 @@ int tok_get(void)
 				return kwds[i].id;
 		return TOK_NAME;
 	}
-	if ((num = get_tok3(TOK3(buf + cur)))) {
+	if (cur + 3 <= len && (num = get_tok3(TOK3(buf + cur)))) {
 		cur += 3;
 		return num;
 	}
