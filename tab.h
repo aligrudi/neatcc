@@ -1,6 +1,6 @@
 #define TABITEMS		(1 << 12)
-#define offsetof(type, field)		((int) (&((type *) 0)->field))
-#define container(ptr, type, field)	((type *) ((ptr) - offsetof(type, field)))
+#define container(ptr, type, field)	((type *) ((void *) (ptr) - \
+							offsetof(type, field)))
 
 struct tab {
 	int head[TABITEMS];
