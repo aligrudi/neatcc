@@ -1,8 +1,11 @@
 #include <ctype.h>
 #include <fcntl.h>
 #include <stdlib.h>
+#include <stdio.h>
 #include <string.h>
 #include <unistd.h>
+#include <sys/types.h>
+#include <sys/stat.h>
 #include "tok.h"
 #include "tab.h"
 
@@ -29,21 +32,29 @@ static struct tab mtab;
 #define MAXBUFS			(1 << 5)
 #define BUF_FILE		0
 #define BUF_MACRO		1
-#define BUF_EVAL		2
-#define BUF_TEMP		3
+#define BUF_ARG			2
+#define BUF_EVAL		3
+#define BUF_TEMP		4
 
 static struct buf {
-	char buf[BUFSIZE];
-	char name[NAMELEN];
+	char *buf;
 	int len;
 	int cur;
 	int type;
+	/* for BUF_FILE */
+	char path[NAMELEN];
+	/* for BUF_MACRO */
+	struct macro *macro;
+	char args[MAXARGS][MACROLEN];	/* arguments passed to a macro */
+	/* for BUF_ARG */
+	int arg_buf;			/* the bufs index of the owning macro */
 } bufs[MAXBUFS];
 static int nbufs;
 
-static void buf_new(int type, char *name)
+static void buf_new(int type, char *dat, int dlen)
 {
 	if (nbufs) {
+		bufs[nbufs - 1].buf = buf;
 		bufs[nbufs - 1].cur = cur;
 		bufs[nbufs - 1].len = len;
 	}
@@ -51,10 +62,27 @@ static void buf_new(int type, char *name)
 		die("nomem: MAXBUFS reached!\n");
 	nbufs++;
 	cur = 0;
-	len = 0;
-	buf = bufs[nbufs - 1].buf;
+	buf = dat;
+	len = dlen;
 	bufs[nbufs - 1].type = type;
-	strcpy(bufs[nbufs -1].name, name ? name : "");
+}
+
+static void buf_file(char *path, char *dat, int dlen)
+{
+	buf_new(BUF_FILE, dat, dlen);
+	strcpy(bufs[nbufs - 1].path, path ? path : "");
+}
+
+static void buf_macro(struct macro *m)
+{
+	buf_new(BUF_MACRO, m->def, strlen(m->def));
+	bufs[nbufs - 1].macro = m;
+}
+
+static void buf_arg(char *arg, int mbuf)
+{
+	buf_new(BUF_ARG, arg, strlen(arg));
+	bufs[nbufs - 1].arg_buf = mbuf;
 }
 
 static void buf_pop(void)
@@ -70,31 +98,35 @@ static void buf_pop(void)
 static int buf_iseval(void)
 {
 	int i;
-	for (i = 0; i < nbufs; i++)
+	for (i = nbufs - 1; i >= 0; i--)
 		if (bufs[i].type == BUF_EVAL)
 			return 1;
 	return 0;
 }
 
-static int buf_expanding(char *macro)
+static size_t file_size(int fd)
 {
-	int i;
-	for (i = 0; i < nbufs; i++)
-		if (bufs[i].type == BUF_MACRO && !strcmp(macro, bufs[i].name))
-			return 1;
+	struct stat st;
+	if (!fstat(fd, &st))
+		return st.st_size;
 	return 0;
 }
 
 static int include_file(char *path)
 {
 	int fd = open(path, O_RDONLY);
-	int n = 0;
+	int n = 0, nr = 0;
+	char *dat;
+	int size;
 	if (fd == -1)
 		return -1;
-	buf_new(BUF_FILE, path);
-	while ((n = read(fd, buf + len, BUFSIZE - len)) > 0)
-		len += n;
+	size = file_size(fd) + 1;
+	dat = malloc(size);
+	while ((n = read(fd, dat + nr, size - nr)) > 0)
+		nr += n;
 	close(fd);
+	dat[nr] = '\0';
+	buf_file(path, dat, nr);
 	return 0;
 }
 
@@ -228,8 +260,10 @@ static void readarg(char *s)
 				cur++;
 		}
 	}
-	memcpy(s, buf + beg, cur - beg);
-	s[cur - beg] = '\0';
+	if (s) {
+		memcpy(s, buf + beg, cur - beg);
+		s[cur - beg] = '\0';
+	}
 }
 
 static int macro_find(char *name)
@@ -297,13 +331,11 @@ static int cpp_eval(void)
 	int ret;
 	char evalbuf[BUFSIZE];
 	read_tilleol(evalbuf);
-	buf_new(BUF_EVAL, NULL);
-	strcpy(buf, evalbuf);
-	len = strlen(evalbuf);
+	buf_new(BUF_EVAL, evalbuf, strlen(evalbuf));
 	bufid = nbufs;
 	elen = 0;
 	ecur = 0;
-	while (bufid < nbufs || cur < len)
+	while (bufid < nbufs || (bufid == nbufs && cur < len))
 		elen += cpp_read(ebuf + elen);
 	ret = evalexpr();
 	buf_pop();
@@ -408,92 +440,91 @@ static int macro_arg(struct macro *m, char *arg)
 	return -1;
 }
 
+static int buf_arg_find(char *name)
+{
+	int i;
+	for (i = nbufs - 1; i >= 0; i--) {
+		struct buf *mbuf = &bufs[i];
+		struct macro *m = mbuf->macro;
+		if (mbuf->type == BUF_MACRO && macro_arg(m, name) >= 0)
+			return i;
+		if (mbuf->type == BUF_ARG)
+			i = mbuf->arg_buf;
+	}
+	return -1;
+}
+
 static void macro_expand(void)
 {
 	char name[NAMELEN];
-	char args[MAXARGS][MACROLEN];
-	int nargs = 0;
 	struct macro *m;
-	char *dst;
-	int dstlen = 0;
-	int beg;
+	int mbuf;
 	read_word(name);
+	if ((mbuf = buf_arg_find(name)) >= 0) {
+		int arg = macro_arg(bufs[mbuf].macro, name);
+		char *dat = bufs[mbuf].args[arg];
+		buf_arg(dat, mbuf);
+		return;
+	}
 	m = &macros[macro_find(name)];
 	if (!m->isfunc) {
-		buf_new(BUF_MACRO, name);
-		strcpy(buf, m->def);
-		len = strlen(m->def);
+		buf_macro(m);
 		return;
 	}
 	jumpws();
 	if (buf[cur] == '(') {
+		int i = 0;
+		struct buf *mbuf = &bufs[nbufs];
 		cur++;
 		jumpws();
 		while (cur < len && buf[cur] != ')') {
-			readarg(args[nargs++]);
+			readarg(mbuf->args[i++]);
 			jumpws();
 			if (buf[cur] != ',')
 				break;
 			cur++;
 			jumpws();
 		}
+		while (i < m->nargs)
+			mbuf->args[i++][0] = '\0';
 		cur++;
-		m->isfunc = 1;
+		buf_macro(m);
 	}
-	buf_new(BUF_MACRO, name);
-	dst = buf;
-	buf = m->def;
-	len = strlen(m->def);
-	beg = cur;
-	while (cur < len) {
-		if (buf[cur] == '/' && buf[cur + 1] == '*') {
-			jumpcomment();
-			continue;
-		}
-		if (strchr("'\"", buf[cur])) {
-			jumpstr();
-			continue;
-		}
-		if (isalpha(buf[cur]) || buf[cur] == '_') {
-			int arg;
-			char word[NAMELEN];
-			read_word(word);
-			if ((arg = macro_arg(m, word)) != -1) {
-				int len = cur - beg - strlen(word);
-				char *argstr = arg > nargs ? "" : args[arg];
-				int arglen = strlen(argstr);
-				memcpy(dst + dstlen, buf + beg, len);
-				dstlen += len;
-				memcpy(dst + dstlen, argstr, arglen);
-				dstlen += arglen;
-				beg = cur;
-			}
-			continue;
-		}
-		cur++;
+}
+
+static int buf_expanding(char *macro)
+{
+	int i;
+	for (i = nbufs - 1; i >= 0; i--) {
+		if (bufs[i].type == BUF_ARG)
+			return 0;
+		if (bufs[i].type == BUF_MACRO &&
+				!strcmp(macro, bufs[i].macro->name))
+			return 1;
 	}
-	memcpy(dst + dstlen, buf + beg, len - beg);
-	dstlen += len - beg;
-	buf = dst;
-	len = dstlen;
-	cur = 0;
-	buf[len] = '\0';
+	return 0;
+}
+
+static int expandable(char *word)
+{
+	if (buf_arg_find(word) >= 0)
+		return 1;
+	return !buf_expanding(word) && macro_find(word) != -1;
 }
 
 void cpp_define(char *name, char *def)
 {
-	char *s;
-	buf_new(BUF_TEMP, NULL);
-	s = buf;
+	char tmp_buf[MACROLEN];
+	char *s = tmp_buf;
 	s = putstr(s, name);
 	*s++ = '\t';
 	s = putstr(s, def);
-	len = s - buf;
+	buf_new(BUF_TEMP, tmp_buf, s - tmp_buf);
 	macro_define();
 	buf_pop();
 }
 
-static int definedword;
+static int seen_macro;
 
 static int hunk_off;
 static int hunk_len;
@@ -501,13 +532,16 @@ static int hunk_len;
 int cpp_read(char *s)
 {
 	int old;
-	if (definedword) {
-		definedword = 0;
+	if (seen_macro) {
+		seen_macro = 0;
 		macro_expand();
 	}
 	if (cur == len) {
+		struct buf *cbuf = &bufs[nbufs - 1];
 		if (nbufs < 2)
 			return -1;
+		if (cbuf->type & BUF_FILE)
+			free(buf);
 		buf_pop();
 	}
 	old = cur;
@@ -529,9 +563,9 @@ int cpp_read(char *s)
 		if (isalpha(buf[cur]) || buf[cur] == '_') {
 			char word[NAMELEN];
 			read_word(word);
-			if (!buf_expanding(word) && macro_find(word) != -1) {
+			if (expandable(word)) {
 				cur -= strlen(word);
-				definedword = 1;
+				seen_macro = 1;
 				break;
 			}
 			if (buf_iseval() && !strcmp("defined", word)) {
@@ -838,27 +872,6 @@ static long evalexpr(void)
 	return evalcexpr();
 }
 
-static int numwidth(int n)
-{
-	int i = 0;
-	do {
-		i++;
-		n /= 10;
-	} while (n);
-	return i;
-}
-
-static char *putnum(char *s, int n)
-{
-	int w = numwidth(n);
-	int i;
-	for (i = 0; i < w; i++) {
-		s[w - i - 1] = !i || n ? '0' + n % 10 : ' ';
-		n /= 10;
-	}
-	return s + w;
-}
-
 static int buf_loc(char *s, int off)
 {
 	char *e = s + off;
@@ -874,7 +887,6 @@ int cpp_loc(char *s, long addr)
 {
 	int line = -1;
 	int i;
-	char *o = s;
 	for (i = nbufs - 1; i > 0; i--)
 		if (bufs[i].type == BUF_FILE)
 			break;
@@ -882,10 +894,6 @@ int cpp_loc(char *s, long addr)
 		line = buf_loc(buf, (cur - hunk_len) + (addr - hunk_off));
 	else
 		line = buf_loc(bufs[i].buf, bufs[i].cur);
-	s = putstr(s, bufs[i].name);
-	*s++ = ':';
-	s = putnum(s, line);
-	*s++ = ':';
-	*s++ = ' ';
-	return s - o;
+	sprintf(s, "%s:%d: ", bufs[i].path, line);
+	return strlen(s);
 }
