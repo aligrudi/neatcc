@@ -1469,11 +1469,12 @@ static int readdefs(void (*def)(void *data, struct name *name, unsigned flags),
 			void *data)
 {
 	struct type base;
-	unsigned flags;
-	if (basetype(&base, &flags))
+	unsigned base_flags;
+	if (basetype(&base, &base_flags))
 		return 1;
 	while (tok_see() != ';' && tok_see() != '{') {
 		struct name name;
+		unsigned flags = base_flags;
 		name.unused = 0;
 		if (readname(&name.type, name.name, &base, flags))
 			break;
