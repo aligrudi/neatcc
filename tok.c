@@ -113,7 +113,7 @@ static void readnum(void)
 		base = 16;
 		cur += 2;
 	}
-	if (strchr(digs, buf[cur])) {
+	if (strchr(digs, tolower(buf[cur]))) {
 		long result = 0;
 		char *c;
 		if (base == 10 && buf[cur] == '0')
