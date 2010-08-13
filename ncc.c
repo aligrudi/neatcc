@@ -534,7 +534,7 @@ static void readprimary(void)
 		return;
 	}
 	if (!tok_jmp(TOK_NAME)) {
-		struct name unkn = {0};
+		struct name unkn = {""};
 		char *name = unkn.name;
 		int n;
 		strcpy(name, tok_id());
