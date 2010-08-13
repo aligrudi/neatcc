@@ -1299,7 +1299,8 @@ static void globaldef(void *data, struct name *name, unsigned flags)
 	char *varname = flags & F_STATIC ? NULL : name->name;
 	int sz;
 	if (t->flags & T_ARRAY && !t->ptr && !arrays[t->id].n)
-		arrays[t->id].n = initsize();
+		if (~flags & F_EXTERN)
+			arrays[t->id].n = initsize();
 	sz = type_totsz(t);
 	if (flags & F_EXTERN || t->flags & T_FUNC && !t->ptr)
 		name->unused = 1;
