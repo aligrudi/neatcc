@@ -1,0 +1,39 @@
+NEATCC
+======
+
+neatcc is a simple x86 C compiler.  I wrote it to complete my
+development toolchain (see http://litcave.berlios.de/):
+
+* cc:	git://repo.or.cz/neatcc.git
+* libc:	git://repo.or.cz/neatlibc.git
+* ld:	git://repo.or.cz/ld.git
+* gdb:	http://litcave.berlios.de/coredump.tar.gz
+  	http://litcave.berlios.de/elfloc.tar.gz
+
+neatcc supports a large subset of C language but lacks some of the
+features that I didn't use much myself.  The most important missing
+features are probably floating point and long long types.
+
+USAGE
+=====
+
+neatcc has been tested with neatlibc and dietlibc.  It can compile
+itself and neat* toolchain.  I use this script to run neatcc:
+
+# !/bin/sh
+NEAT="/path/to/neatlibc"
+CC="/path/to/neatcc/ncc"
+LD="/path/to/ld/ld"
+
+# these can be ignored
+CPPFLAGS="-Dconst= -Dfloat=long -Ddouble=long -D__restrict__= -D__attribute__(x)= -D__extension__= -D__builtin_va_list=long -Dinline= -Dregister= -Dvolatile="
+
+for x in $*
+do
+	if [ x$x == "x-c" ]
+	then
+		exec ${CC} ${CPPFLAGS} -I${NEAT} $*
+	fi
+done
+
+exec ${LD} $* ${NEAT}/start.o ${NEAT}/libc.a
