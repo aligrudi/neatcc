@@ -577,9 +577,10 @@ static void shx(int uop, int sop)
 {
 	struct tmp *t1 = TMP(0);
 	struct tmp *t2 = TMP(1);
-	int r2 = TMP_REG2(t2, R_ECX);
+	int r2;
 	int bt = t2->bt;
 	tmp_to(t1, R_ECX, 0);
+	r2 = TMP_REG2(t2, R_ECX);
 	tmp_to(t2, r2, 0);
 	tmp_drop(1);
 	op_rr(SHX_REG, bt & BT_SIGNED ? sop : uop, r2, TMPBT(bt));
@@ -839,6 +840,7 @@ static int binop(int op, int *reg)
 	int r1, r2;
 	unsigned bt = bt_op(t1->bt, t2->bt);
 	r1 = TMP_REG(t1);
+	tmp_to(t1, r1, bt);
 	r2 = TMP_REG2(t2, r1);
 	tmp_pop(r1, bt);
 	tmp_pop(r2, bt);
@@ -1051,7 +1053,7 @@ void o_call(int argc, unsigned *bt, unsigned ret_bt)
 		oi(-4 + t->off, 4);
 		tmp_drop(1);
 	} else {
-		tmp_mv(TMP(0), R_EAX);
+		tmp_mv(t, R_EAX);
 		tmp_drop(1);
 		op_rr(CALL_REG, 2, R_EAX, 4);
 	}
