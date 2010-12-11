@@ -134,7 +134,7 @@ static int include_file(char *path)
 int cpp_init(char *path)
 {
 	cpp_define("__STDC__", "");
-	cpp_define("__x86_64__", "");
+	cpp_define("__i386__", "");
 	cpp_define("__linux__", "");
 	return include_file(path);
 }
