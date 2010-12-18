@@ -155,8 +155,8 @@ static void op_rs(int op, int src, long addr, int off, int bt)
 	op_x(op, src, 0, bt);
 	oi(MODRM(0, src & 0x07, 5), 1);
 	if (!nogen)
-		out_rela(addr, codeaddr(), 1);
-	oi(off - 4, 4);
+		out_rela(addr, codeaddr(), 0);
+	oi(off, 4);
 }
 
 static void op_ri(int op, int o3, int src, long num, int bt)
