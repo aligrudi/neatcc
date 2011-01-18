@@ -168,7 +168,7 @@ static void read_tilleol(char *dst)
 	while (cur < len && isspace(buf[cur]) && buf[cur] != '\n')
 		cur++;
 	while (cur < len && buf[cur] != '\n') {
-		if (buf[cur] == '\\')
+		if (buf[cur] == '\\' && buf[cur + 1] == '\n')
 			cur += 2;
 		else if (buf[cur] == '/' && buf[cur + 1] == '*')
 			jumpcomment();
