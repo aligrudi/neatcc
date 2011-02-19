@@ -52,6 +52,12 @@ static struct buf {
 } bufs[MAXBUFS];
 static int nbufs;
 
+void die(char *msg)
+{
+	write(2, msg, strlen(msg));
+	exit(1);
+}
+
 static void buf_new(int type, char *dat, int dlen)
 {
 	if (nbufs) {

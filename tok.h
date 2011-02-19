@@ -51,5 +51,6 @@ int cpp_init(char *path);
 void cpp_addpath(char *s);
 void cpp_define(char *name, char *def);
 int cpp_loc(char *s, long offset);
+int cpp_read(char *s);
 
 void die(char *msg);

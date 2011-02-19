@@ -5,8 +5,6 @@
 #include "gen.h"
 #include "tok.h"
 
-extern int cpp_read(char *s);
-
 static char buf[BUFSIZE];
 static int len;
 static int cur;

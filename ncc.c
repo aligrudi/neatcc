@@ -1,11 +1,9 @@
 /*
- * neatcc - A small and simple C compiler
+ * neatcc - a small and simple C compiler
  *
- * Copyright (C) 2010 Ali Gholami Rudi
+ * Copyright (C) 2010-2011 Ali Gholami Rudi
  *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License, as published by the
- * Free Software Foundation.
+ * This file is released under GNU GPL version 2.
  */
 #include <fcntl.h>
 #include <unistd.h>
@@ -19,7 +17,6 @@
 #define MAXLOCALS	(1 << 10)
 #define MAXGLOBALS	(1 << 10)
 #define MAXARGS		(1 << 5)
-#define print(s)	write(2, (s), strlen(s));
 
 #define TYPE_BT(t)		((t)->ptr ? LONGSZ : (t)->bt)
 #define TYPE_SZ(t)		((t)->ptr ? LONGSZ : (t)->bt & BT_SZMASK)
@@ -62,12 +59,6 @@ static void ts_pop(struct type *type)
 	nts--;
 	if (type)
 		*type = ts[nts];
-}
-
-void die(char *msg)
-{
-	print(msg);
-	exit(1);
 }
 
 void err(char *msg)
