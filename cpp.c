@@ -386,20 +386,20 @@ static void jumpifs(int jumpelse)
 	}
 }
 
-static void cpp_cmd(void)
+static int cpp_cmd(void)
 {
 	char cmd[NAMELEN];
 	cur++;
 	read_word(cmd);
 	if (!strcmp("define", cmd)) {
 		macro_define();
-		return;
+		return 0;
 	}
 	if (!strcmp("undef", cmd)) {
 		char name[NAMELEN];
 		read_word(name);
 		macro_undef(name);
-		return;
+		return 0;
 	}
 	if (!strcmp("ifdef", cmd) || !strcmp("ifndef", cmd) ||
 						!strcmp("if", cmd)) {
@@ -415,14 +415,14 @@ static void cpp_cmd(void)
 		}
 		if (!matched)
 			jumpifs(0);
-		return;
+		return 0;
 	}
 	if (!strcmp("else", cmd) || !strcmp("elif", cmd)) {
 		jumpifs(1);
-		return;
+		return 0;
 	}
 	if (!strcmp("endif", cmd))
-		return;
+		return 0;
 	if (!strcmp("include", cmd)) {
 		char file[NAMELEN];
 		char *s, *e;
@@ -434,8 +434,9 @@ static void cpp_cmd(void)
 		cur += e - s + 2;
 		if (include_find(file, *e == '>') == -1)
 			die("cannot include file\n");
-		return;
+		return 0;
 	}
+	return 1;
 }
 
 static int macro_arg(struct macro *m, char *arg)
@@ -552,10 +553,9 @@ int cpp_read(char *s)
 		buf_pop();
 	}
 	old = cur;
-	if (buf[cur] == '#') {
-		cpp_cmd();
-		return 0;
-	}
+	if (buf[cur] == '#')
+		if (!cpp_cmd())
+			return 0;
 	while (cur < len) {
 		if (buf[cur] == '#')
 			break;
