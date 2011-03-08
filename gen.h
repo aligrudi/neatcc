@@ -41,7 +41,7 @@ void o_assign(unsigned bt);
 void o_deref(unsigned bt);
 void o_load(void);
 void o_addr(void);
-void o_symaddr(long addr, unsigned bt);
+void o_symaddr(char *sym, unsigned bt);
 void o_call(int argc, unsigned *bt, unsigned ret_vs);
 
 long o_mklocal(int size);
@@ -63,22 +63,15 @@ void o_filljmp(long addr);
 void o_filljmp2(long addr, long jmpdst);
 void o_memcpy(int sz);
 void o_memset(int x, int sz);
-void o_datset(long addr, int off, unsigned bt);
 
-long o_func_beg(char *name, int global);
+void o_func_beg(char *name, int global);
 void o_func_end(void);
 void o_ret(unsigned bt);
+void o_write(int fd);
 
 int o_nogen(void);
 void o_dogen(void);
 
-void out_init(void);
-void out_write(int fd);
-long out_func_beg(char *name, int global);
-void out_func_end(char *buf, int len);
-long out_mkvar(char *name, int size, int global);
-long out_mkdat(char *name, char *buf, int len, int global);
-long out_mkundef(char *name, int sz);
-void out_rela(long addr, int off, int rel);
-void out_datcpy(long addr, int off, char *buf, int len);
-void out_datrela(long addr, long dataddr, int off);
+void dat_bss(char *name, int size, int global);
+void *dat_dat(char *name, int size, int global);
+void o_datset(char *name, int off, unsigned bt);

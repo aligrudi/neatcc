@@ -1,6 +1,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "gen.h"
+#include "out.h"
 #include "tok.h"
 
 #define TMP_ADDR	0x0001
@@ -51,8 +52,12 @@
 					(1 << (t)->addr) & R_BYTEREGS ? \
 					(t)->addr : reg_get(R_BYTEREGS))
 
-static char buf[SECSIZE];
-static char *cur;
+static char cs[SECSIZE];	/* code segment */
+static int cslen;
+static char ds[SECSIZE];	/* data segment */
+static int dslen;
+static long bsslen;		/* bss segment size */
+
 static int nogen;
 static long sp;
 static long spsub_addr;
@@ -62,6 +67,7 @@ static long maxsp;
 
 static struct tmp {
 	long addr;
+	char sym[NAMELEN];
 	long off;	/* offset from a symbol or a local */
 	unsigned flags;
 	unsigned bt;
@@ -94,7 +100,7 @@ static void os(char *s, int n)
 	if (nogen)
 		return;
 	while (n--)
-		*cur++ = *s++;
+		cs[cslen++] = *s++;
 }
 
 static void oi(long n, int l)
@@ -102,14 +108,9 @@ static void oi(long n, int l)
 	if (nogen)
 		return;
 	while (l--) {
-		*cur++ = n;
+		cs[cslen++] = n;
 		n >>= 8;
 	}
-}
-
-static long codeaddr(void)
-{
-	return cur - buf;
 }
 
 #define OP2(o2, o1)		(0x010000 | ((o2) << 8) | (o1))
@@ -150,12 +151,12 @@ static void op_rr(int op, int src, int dst, int bt)
 	oi(MODRM(3, src & 0x07, dst & 0x07), 1);
 }
 
-static void op_rs(int op, int src, long addr, int off, int bt)
+static void op_rs(int op, int src, char *name, int off, int bt)
 {
 	op_x(op, src, 0, bt);
 	oi(MODRM(0, src & 0x07, 5), 1);
 	if (!nogen)
-		out_rela(addr, codeaddr(), 0);
+		out_rel(name, OUT_CS, cslen);
 	oi(off, 4);
 }
 
@@ -166,22 +167,22 @@ static void op_ri(int op, int o3, int src, long num, int bt)
 	oi(num, MIN(4, BT_SZ(bt)));
 }
 
-static void op_sr(int op, int src, long addr, int off, int bt)
+static void op_sr(int op, int src, char *name, int off, int bt)
 {
 	op_x(op, src, 0, bt);
 	oi(MODRM(0, src & 0x07, 5), 1);
 	if (!nogen)
-		out_rela(addr, codeaddr(), 1);
+		out_rel(name, OUT_CS | OUT_REL, cslen);
 	oi(off - 4, 4);
 }
 
-static void op_si(int op, int o3, long addr, int off, long num, int bt)
+static void op_si(int op, int o3, char *name, int off, long num, int bt)
 {
 	int sz = MIN(4, BT_SZ(bt));
 	op_x(op, 0, 0, bt);
 	oi(MODRM(0, o3, 5), 1);
 	if (!nogen)
-		out_rela(addr, codeaddr(), 1);
+		out_rel(name, OUT_CS | OUT_REL, cslen);
 	oi(off - 4 - sz, 4);
 	oi(num, sz);
 }
@@ -298,7 +299,7 @@ static void tmp_reg(struct tmp *tmp, int dst, unsigned bt, int deref)
 	if (tmp->flags & LOC_SYM) {
 		op_rr(I_MOVI, 0, dst, 4);
 		if (!nogen)
-			out_rela(tmp->addr, codeaddr(), 0);
+			out_rel(tmp->sym, OUT_CS, cslen);
 		oi(tmp->off, 4);
 		tmp->addr = dst;
 		regs[dst] = tmp;
@@ -411,11 +412,11 @@ void o_num(long num, unsigned bt)
 	t->flags = LOC_NUM;
 }
 
-void o_symaddr(long addr, unsigned bt)
+void o_symaddr(char *name, unsigned bt)
 {
 	struct tmp *t = tmp_new();
 	t->bt = bt;
-	t->addr = addr;
+	strcpy(t->sym, name);
 	t->flags = LOC_SYM | TMP_ADDR;
 	t->off = 0;
 }
@@ -480,7 +481,7 @@ static int reg_get(int mask)
 	return 0;
 }
 
-void tmp_copy(struct tmp *t1)
+static void tmp_copy(struct tmp *t1)
 {
 	struct tmp *t2 = tmp_new();
 	memcpy(t2, t1, sizeof(*t1));
@@ -514,10 +515,9 @@ void o_cast(unsigned bt)
 	tmp_to(t, reg, bt);
 }
 
-long o_func_beg(char *name, int global)
+void o_func_beg(char *name, int global)
 {
-	long addr = out_func_beg(name, global);
-	cur = buf;
+	out_sym(name, (global ? OUT_GLOB : 0) | OUT_CS, cslen, 0);
 	os("\x55", 1);			/* push %rbp */
 	os("\x89\xe5", 2);		/* mov %rsp, %rbp */
 	os("\x53\x56\x57", 3);		/* push ebx; push esi; push edi */
@@ -529,9 +529,8 @@ long o_func_beg(char *name, int global)
 	cmp_last = -1;
 	memset(regs, 0, sizeof(regs));
 	os("\x81\xec", 2);		/* sub $xxx, %rsp */
-	spsub_addr = codeaddr();
+	spsub_addr = cslen;
 	oi(0, 4);
-	return addr;
 }
 
 void o_deref(unsigned bt)
@@ -639,17 +638,17 @@ static void inc(int op)
 	op_rm(I_INC, op, reg, off, t->bt);
 }
 
-void o_lnot(void)
+static void o_lnot(void)
 {
-	if (cmp_last == codeaddr()) {
-		buf[cmp_setl + 1] ^= 0x01;
+	if (cmp_last == cslen) {
+		cs[cmp_setl + 1] ^= 0x01;
 	} else {
 		o_num(0, 4 | BT_SIGNED);
 		o_bop(O_EQ);
 	}
 }
 
-void o_neg(int id)
+static void o_neg(int id)
 {
 	struct tmp *t = TMP(0);
 	int reg;
@@ -668,8 +667,7 @@ void o_func_end(void)
 		o_filljmp(ret[i]);
 	os("\x5f\x5e\x5b", 3);		/* pop edi; pop esi; pop ebx */
 	os("\xc9\xc3", 2);		/* leave; ret; */
-	putint(buf + spsub_addr, ALIGN(maxsp - 3 * LONGSZ, LONGSZ), 4);
-	out_func_end(buf, cur - buf);
+	putint(cs + spsub_addr, ALIGN(maxsp - 3 * LONGSZ, LONGSZ), 4);
 }
 
 long o_mklocal(int size)
@@ -885,11 +883,11 @@ static void o_cmp(int uop, int sop)
 		reg_free(R_EAX);
 	bt = binop(I_CMP, &reg);
 	set[1] = bt & BT_SIGNED ? sop : uop;
-	cmp_setl = codeaddr();
+	cmp_setl = cslen;
 	os(set, 3);			/* setl %al */
 	os("\x0f\xb6\xc0", 3);		/* movzbl %al, %eax */
 	tmp_push(R_EAX, 4 | BT_SIGNED);
-	cmp_last = codeaddr();
+	cmp_last = cslen;
 }
 
 static void bin_cmp(int op)
@@ -971,7 +969,7 @@ void o_memset(int x, int sz)
 
 long o_mklabel(void)
 {
-	return codeaddr();
+	return cslen;
 }
 
 static long jx(int x, long addr)
@@ -979,8 +977,8 @@ static long jx(int x, long addr)
 	char op[2] = {0x0f};
 	op[1] = x;
 	os(op, 2);		/* jx $addr */
-	oi(addr - codeaddr() - 4, 4);
-	return codeaddr() - 4;
+	oi(addr - cslen - 4, 4);
+	return cslen - 4;
 }
 
 static long jxtest(int x, long addr)
@@ -993,11 +991,11 @@ static long jxtest(int x, long addr)
 static long jxcmp(long addr, int inv)
 {
 	int x;
-	if (codeaddr() != cmp_last)
+	if (cslen != cmp_last)
 		return -1;
 	tmp_drop(1);
-	cur = buf + cmp_setl;
-	x = (unsigned char) buf[cmp_setl + 1];
+	cslen = cmp_setl;
+	x = (unsigned char) cs[cmp_setl + 1];
 	return jx((inv ? x : x ^ 0x01) & ~0x10, addr);
 }
 
@@ -1016,18 +1014,18 @@ long o_jnz(long addr)
 long o_jmp(long addr)
 {
 	os("\xe9", 1);			/* jmp $addr */
-	oi(addr - codeaddr() - 4, 4);
-	return codeaddr() - 4;
+	oi(addr - cslen - 4, 4);
+	return cslen - 4;
 }
 
 void o_filljmp2(long addr, long jmpdst)
 {
-	putint(buf + addr, jmpdst - addr - 4, 4);
+	putint(cs + addr, jmpdst - addr - 4, 4);
 }
 
 void o_filljmp(long addr)
 {
-	o_filljmp2(addr, codeaddr());
+	o_filljmp2(addr, cslen);
 }
 
 void o_call(int argc, unsigned *bt, unsigned ret_bt)
@@ -1047,7 +1045,7 @@ void o_call(int argc, unsigned *bt, unsigned ret_bt)
 	if (t->flags & LOC_SYM) {
 		os("\xe8", 1);		/* call $x */
 		if (!nogen)
-			out_rela(t->addr, codeaddr(), 1);
+			out_rel(t->sym, OUT_CS | OUT_REL, cslen);
 		oi(-4 + t->off, 4);
 		tmp_drop(1);
 	} else {
@@ -1069,16 +1067,56 @@ void o_dogen(void)
 	nogen = 0;
 }
 
-void o_datset(long addr, int off, unsigned bt)
+void dat_bss(char *name, int size, int global)
+{
+	out_sym(name, OUT_BSS | (global ? OUT_GLOB : 0), bsslen, size);
+	bsslen += ALIGN(size, LONGSZ);
+}
+
+#define MAXDATS		(1 << 10)
+static char dat_names[MAXDATS][NAMELEN];
+static int dat_offs[MAXDATS];
+static int ndats;
+
+void err(char *msg);
+void *dat_dat(char *name, int size, int global)
+{
+	void *addr = ds + dslen;
+	int idx = ndats++;
+	if (idx >= MAXDATS)
+		err("nomem: MAXDATS reached!\n");
+	strcpy(dat_names[idx], name);
+	dat_offs[idx] = dslen;
+	out_sym(name, OUT_DS | (global ? OUT_GLOB : 0), dslen, size);
+	dslen += ALIGN(size, LONGSZ);
+	return addr;
+}
+
+static int dat_off(char *name)
+{
+	int i;
+	for (i = 0; i < ndats; i++)
+		if (!strcmp(name, dat_names[i]))
+			return dat_offs[i];
+	return 0;
+}
+
+void o_datset(char *name, int off, unsigned bt)
 {
 	struct tmp *t = TMP(0);
+	int sym_off = dat_off(name) + off;
 	if (t->flags & LOC_NUM && !(t->flags & TMP_ADDR)) {
 		num_cast(t, bt);
-		out_datcpy(addr, off, (void *) &t->addr, BT_SZ(bt));
+		memcpy(ds + sym_off, &t->addr, BT_SZ(bt));
 	}
 	if (t->flags & LOC_SYM && !(t->flags & TMP_ADDR)) {
-		out_datrela(t->addr, addr, off);
-		out_datcpy(addr, off, (void *) &t->off, BT_SZ(bt));
+		out_rel(t->sym, OUT_DS, sym_off);
+		memcpy(ds + sym_off, &t->off, BT_SZ(bt));
 	}
 	tmp_drop(1);
+}
+
+void o_write(int fd)
+{
+	out_write(fd, cs, cslen, ds, dslen);
 }

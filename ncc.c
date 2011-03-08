@@ -9,10 +9,12 @@
 #include <unistd.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdio.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include "gen.h"
 #include "tok.h"
+#include "out.h"
 
 #define MAXLOCALS	(1 << 10)
 #define MAXGLOBALS	(1 << 10)
@@ -71,9 +73,9 @@ void err(char *msg)
 
 struct name {
 	char name[NAMELEN];
+	char elfname[NAMELEN];	/* local elf name for static variables in function */
 	struct type type;
-	long addr;
-	int unused;		/* unreferenced external symbols */
+	long addr;	/* local stack offset, global data addr, struct offset */
 };
 
 static struct name locals[MAXLOCALS];
@@ -501,6 +503,17 @@ static int caseexpr;
 
 static void readpre(void);
 
+static char *tmp_str(char *buf, int len)
+{
+	static char name[NAMELEN];
+	static int id;
+	void *dat;
+	sprintf(name, "__neatcc.s%d", id++);
+	dat = dat_dat(name, len, 0);
+	memcpy(dat, buf, len);
+	return name;
+}
+
 static void readprimary(void)
 {
 	int i;
@@ -520,7 +533,7 @@ static void readprimary(void)
 		t.flags = 0;
 		ts_push(&t);
 		len = tok_str(buf);
-		o_symaddr(out_mkdat(NULL, buf, len, 0), TYPE_BT(&t));
+		o_symaddr(tmp_str(buf, len), TYPE_BT(&t));
 		o_addr();
 		return;
 	}
@@ -543,14 +556,8 @@ static void readprimary(void)
 		if ((n = global_find(name)) != -1) {
 			struct name *g = &globals[n];
 			struct type *t = &g->type;
-			if (g->unused) {
-				g->unused = 0;
-				if (t->flags & T_FUNC && !t->ptr)
-					g->addr = out_mkundef(name, 0);
-				else
-					g->addr = out_mkundef(name, type_totsz(t));
-			}
-			o_symaddr(g->addr, TYPE_BT(t));
+			char *elfname = *g->elfname ? g->elfname : g->name;
+			o_symaddr(elfname, TYPE_BT(t));
 			ts_push(t);
 			return;
 		}
@@ -561,10 +568,9 @@ static void readprimary(void)
 		}
 		if (tok_see() != '(')
 			err("unknown symbol\n");
-		unkn.addr = out_mkundef(unkn.name, 0);
 		global_add(&unkn);
 		ts_push_bt(LONGSZ);
-		o_symaddr(unkn.addr, LONGSZ);
+		o_symaddr(unkn.name, LONGSZ);
 		return;
 	}
 	if (!tok_jmp('(')) {
@@ -585,7 +591,7 @@ static void readprimary(void)
 	}
 }
 
-void arrayderef(struct type *t)
+static void arrayderef(struct type *t)
 {
 	int sz = type_totsz(t);
 	if (sz > 1) {
@@ -1267,7 +1273,8 @@ static int initsize(void)
 
 static void globalinit(void *obj, int off, struct type *t)
 {
-	long addr = *(long *) obj;
+	struct name *name = obj;
+	char *elfname = *name->elfname ? name->elfname : name->name;
 	if (t->flags & T_ARRAY && tok_see() == TOK_STR) {
 		struct type *t_de = &arrays[t->id].type;
 		if (!t_de->ptr && !t_de->flags && TYPE_SZ(t_de) == 1) {
@@ -1275,33 +1282,33 @@ static void globalinit(void *obj, int off, struct type *t)
 			int len;
 			tok_expect(TOK_STR);
 			len = tok_str(buf);
-			out_datcpy(addr, off, buf, len);
+			memcpy((void *) name->addr + off, buf, len);
 			return;
 		}
 	}
 	readexpr();
-	o_datset(addr, off, TYPE_BT(t));
+	o_datset(elfname, off, TYPE_BT(t));
 	ts_pop(NULL);
 }
 
 static void globaldef(void *data, struct name *name, unsigned flags)
 {
 	struct type *t = &name->type;
-	char *varname = flags & F_STATIC ? NULL : name->name;
+	char *elfname = *name->elfname ? name->elfname : name->name;
 	int sz;
 	if (t->flags & T_ARRAY && !t->ptr && !arrays[t->id].n)
 		if (~flags & F_EXTERN)
 			arrays[t->id].n = initsize();
 	sz = type_totsz(t);
-	if (flags & F_EXTERN || t->flags & T_FUNC && !t->ptr)
-		name->unused = 1;
-	else if (flags & F_INIT)
-		name->addr = out_mkdat(varname, NULL, sz, F_GLOBAL(flags));
-	else
-		name->addr = out_mkvar(varname, sz, F_GLOBAL(flags));
+	if (!(flags & F_EXTERN) && (!(t->flags & T_FUNC) || t->ptr)) {
+		if (flags & F_INIT)
+			name->addr = (long) dat_dat(elfname, sz, F_GLOBAL(flags));
+		else
+			dat_bss(elfname, sz, F_GLOBAL(flags));
+	}
 	global_add(name);
 	if (flags & F_INIT)
-		initexpr(t, 0, &name->addr, globalinit);
+		initexpr(t, 0, name, globalinit);
 }
 
 static void localinit(void *obj, int off, struct type *t)
@@ -1315,7 +1322,7 @@ static void localinit(void *obj, int off, struct type *t)
 			tok_expect(TOK_STR);
 			len = tok_str(buf);
 			o_localoff(addr, off, TYPE_BT(t));
-			o_symaddr(out_mkdat(NULL, buf, len, 0), TYPE_BT(t));
+			o_symaddr(tmp_str(buf, len), TYPE_BT(t));
 			o_memcpy(len);
 			o_tmpdrop(1);
 			return;
@@ -1329,10 +1336,14 @@ static void localinit(void *obj, int off, struct type *t)
 	o_tmpdrop(1);
 }
 
+/* current function name */
+static char func_name[NAMELEN];
+
 static void localdef(void *data, struct name *name, unsigned flags)
 {
 	struct type *t = &name->type;
 	if (flags & (F_STATIC | F_EXTERN)) {
+		sprintf(name->elfname, "__neatcc.%s.%s", func_name, name->name);
 		globaldef(data, name, flags);
 		return;
 	}
@@ -1353,12 +1364,12 @@ static void localdef(void *data, struct name *name, unsigned flags)
 static void funcdef(char *name, struct type *type, struct name *args,
 			int nargs, unsigned flags)
 {
-	struct name global;
+	struct name global = {""};
 	int i;
 	strcpy(global.name, name);
+	strcpy(func_name, name);
 	memcpy(&global.type, type, sizeof(*type));
-	global.addr = o_func_beg(name, F_GLOBAL(flags));
-	global.unused = 0;
+	o_func_beg(name, F_GLOBAL(flags));
 	global_add(&global);
 	ret_bt = TYPE_BT(&funcs[type->id].ret);
 	for (i = 0; i < nargs; i++) {
@@ -1437,7 +1448,7 @@ static int readname(struct type *main, char *name,
 	if (func)
 		tok_expect(')');
 	if (tok_see() == '(') {
-		struct name args[MAXARGS];
+		struct name args[MAXARGS] = {{""}};
 		int nargs = readargs(args);
 		int fdef = !func;
 		if (!func) {
@@ -1465,9 +1476,8 @@ static int readdefs(void (*def)(void *data, struct name *name, unsigned flags),
 	if (basetype(&base, &base_flags))
 		return 1;
 	while (tok_see() != ';' && tok_see() != '{') {
-		struct name name;
+		struct name name = {{""}};
 		unsigned flags = base_flags;
-		name.unused = 0;
 		if (readname(&name.type, name.name, &base, flags))
 			break;
 		if (!tok_jmp('='))
@@ -1740,6 +1750,7 @@ static void readdecl(void)
 		readstmt();
 		goto_fill();
 		o_func_end();
+		func_name[0] = '\0';
 		nlocals = 0;
 		ngotos = 0;
 		nlabels = 0;
@@ -1782,7 +1793,7 @@ int main(int argc, char *argv[])
 	strcpy(obj, argv[i]);
 	obj[strlen(obj) - 1] = 'o';
 	ofd = open(obj, O_WRONLY | O_TRUNC | O_CREAT, 0600);
-	out_write(ofd);
+	o_write(ofd);
 	close(ofd);
 	return 0;
 }

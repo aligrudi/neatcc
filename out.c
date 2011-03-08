@@ -1,7 +1,7 @@
 #include <elf.h>
 #include <string.h>
 #include <unistd.h>
-#include "gen.h"
+#include "out.h"
 
 #define ALIGN(x, a)		(((x) + (a) - 1) & ~((a) - 1))
 
@@ -22,15 +22,9 @@ static Elf32_Sym syms[MAXSYMS];
 static int nsyms = 1;
 static char symstr[MAXSYMS * 8];
 static int nsymstr = 1;
-static int bsslen;
-static char dat[SECSIZE];
-static int datlen;
+
 static Elf32_Rel datrela[MAXRELA];
 static int ndatrela;
-
-static char buf[SECSIZE];
-static int len;
-static Elf32_Sym *cur_sym;
 static Elf32_Rel rela[MAXRELA];
 static int nrela;
 
@@ -53,47 +47,15 @@ static int sym_find(char *name)
 
 static Elf32_Sym *put_sym(char *name)
 {
-	int found = name ? sym_find(name) : -1;
+	int found = sym_find(name);
 	Elf32_Sym *sym = found != -1 ? &syms[found] : &syms[nsyms++];
-	if (!name)
-		sym->st_name = 0;
-	if (name && found == -1) {
-		sym->st_name = nsymstr;
-		nsymstr = putstr(symstr + nsymstr, name) - symstr;
-	}
+	if (found >= 0)
+		return sym;
+	sym->st_name = nsymstr;
+	nsymstr = putstr(symstr + nsymstr, name) - symstr;
+	sym->st_shndx = SHN_UNDEF;
+	sym->st_info = ELF32_ST_INFO(STB_GLOBAL, STT_FUNC);
 	return sym;
-}
-
-#define S_BIND(global)		((global) ? STB_GLOBAL : STB_LOCAL)
-
-long out_func_beg(char *name, int global)
-{
-	cur_sym = put_sym(name);
-	cur_sym->st_shndx = SEC_TEXT;
-	cur_sym->st_info = ELF32_ST_INFO(S_BIND(global), STT_FUNC);
-	cur_sym->st_value = len;
-	return cur_sym - syms;
-}
-
-void out_func_end(char *sec, int sec_len)
-{
-	memcpy(buf + len, sec, sec_len);
-	len += sec_len;
-	cur_sym->st_size = sec_len;
-}
-
-void out_rela(long addr, int off, int rel)
-{
-	Elf32_Rel *r = &rela[nrela++];
-	r->r_offset = cur_sym->st_value + off;
-	r->r_info = ELF32_R_INFO(addr, rel ? R_386_PC32 : R_386_32);
-}
-
-void out_datrela(long addr, long dataddr, int off)
-{
-	Elf32_Rel *r = &datrela[ndatrela++];
-	r->r_offset = syms[dataddr].st_value + off;
-	r->r_info = ELF32_R_INFO(addr, R_386_32);
 }
 
 #define SYMLOCAL(i)		(ELF32_ST_BIND(syms[i].st_info) == STB_LOCAL)
@@ -137,7 +99,69 @@ static int syms_sort(void)
 	return glob_beg;
 }
 
-void out_write(int fd)
+void out_init(int flags)
+{
+}
+
+void out_sym(char *name, int flags, int off, int len)
+{
+	Elf32_Sym *sym = put_sym(name);
+	int type = (flags & OUT_CS) ? STT_FUNC : STT_OBJECT;
+	int bind = (flags & OUT_GLOB) ? STB_GLOBAL : STB_LOCAL;
+	if (flags & OUT_CS)
+		sym->st_shndx = SEC_TEXT;
+	if (flags & OUT_DS)
+		sym->st_shndx = SEC_DAT;
+	if (flags & OUT_BSS)
+		sym->st_shndx = SEC_BSS;
+	sym->st_info = ELF32_ST_INFO(bind, type);
+	sym->st_value = off;
+	sym->st_size = len;
+}
+
+static int rel_type(int flags)
+{
+	return flags & OUT_REL ? R_386_PC32 : R_386_32;
+}
+
+static void out_csrel(int idx, int off, int flags)
+{
+	Elf32_Rel *r = &rela[nrela++];
+	r->r_offset = off;
+	r->r_info = ELF32_R_INFO(idx, rel_type(flags));
+}
+
+static void out_dsrel(int idx, int off, int flags)
+{
+	Elf32_Rel *r = &datrela[ndatrela++];
+	r->r_offset = off;
+	r->r_info = ELF32_R_INFO(idx, rel_type(flags));
+}
+
+void out_rel(char *name, int flags, int off)
+{
+	Elf32_Sym *sym = put_sym(name);
+	int idx = sym - syms;
+	if (flags & OUT_DS)
+		out_dsrel(idx, off, flags);
+	else
+		out_csrel(idx, off, flags);
+}
+
+static int bss_len(void)
+{
+	int len = 0;
+	int i;
+	for (i = 0; i < nsyms; i++) {
+		int end = syms[i].st_value + syms[i].st_size;
+		if (syms[i].st_shndx == SEC_BSS)
+			if (len < end)
+				len = end;
+	}
+	return len;
+}
+
+void out_write(int fd, char *cs, int cslen, char *ds, int dslen)
 {
 	Elf32_Shdr *text_shdr = &shdr[SEC_TEXT];
 	Elf32_Shdr *rela_shdr = &shdr[SEC_RELA];
@@ -168,7 +192,7 @@ void out_write(int fd)
 	text_shdr->sh_type = SHT_PROGBITS;
 	text_shdr->sh_flags = SHF_EXECINSTR | SHF_ALLOC;
 	text_shdr->sh_offset = offset;
-	text_shdr->sh_size = len;
+	text_shdr->sh_size = cslen;
 	text_shdr->sh_entsize = 1;
 	offset += text_shdr->sh_size;
 
@@ -191,7 +215,7 @@ void out_write(int fd)
 	dat_shdr->sh_type = SHT_PROGBITS;
 	dat_shdr->sh_flags = SHF_ALLOC | SHF_WRITE;
 	dat_shdr->sh_offset = offset;
-	dat_shdr->sh_size = datlen;
+	dat_shdr->sh_size = dslen;
 	dat_shdr->sh_entsize = 1;
 	dat_shdr->sh_addralign = 4;
 	offset += dat_shdr->sh_size;
@@ -207,7 +231,7 @@ void out_write(int fd)
 	bss_shdr->sh_type = SHT_NOBITS;
 	bss_shdr->sh_flags = SHF_ALLOC | SHF_WRITE;
 	bss_shdr->sh_offset = offset;
-	bss_shdr->sh_size = bsslen;
+	bss_shdr->sh_size = bss_len();
 	bss_shdr->sh_entsize = 1;
 	bss_shdr->sh_addralign = 4;
 
@@ -219,50 +243,10 @@ void out_write(int fd)
 
 	write(fd, &ehdr, sizeof(ehdr));
 	write(fd, shdr,  NSECS * sizeof(shdr[0]));
-	write(fd, buf, len);
+	write(fd, cs, cslen);
 	write(fd, rela, nrela * sizeof(rela[0]));
 	write(fd, syms, nsyms * sizeof(syms[0]));
-	write(fd, dat, datlen);
+	write(fd, ds, dslen);
 	write(fd, datrela, ndatrela * sizeof(datrela[0]));
 	write(fd, symstr, nsymstr);
-}
-
-long out_mkvar(char *name, int size, int global)
-{
-	Elf32_Sym *sym = put_sym(name);
-	sym->st_shndx = SEC_BSS;
-	sym->st_value = bsslen;
-	sym->st_size = size;
-	sym->st_info = ELF32_ST_INFO(S_BIND(global), STT_OBJECT);
-	bsslen = ALIGN(bsslen + size, 4);
-	return sym - syms;
-}
-
-long out_mkundef(char *name, int sz)
-{
-	Elf32_Sym *sym = put_sym(name);
-	sym->st_shndx = SHN_UNDEF;
-	sym->st_info = ELF32_ST_INFO(STB_GLOBAL, sz ? STT_OBJECT : STT_FUNC);
-	sym->st_size = sz;
-	return sym - syms;
-}
-
-long out_mkdat(char *name, char *buf, int len, int global)
-{
-	Elf32_Sym *sym = put_sym(name);
-	sym->st_shndx = SEC_DAT;
-	sym->st_value = datlen;
-	sym->st_size = len;
-	sym->st_info = ELF32_ST_INFO(S_BIND(global), STT_OBJECT);
-	if (buf)
-		memcpy(dat + datlen, buf, len);
-	else
-		memset(dat + datlen, 0, len);
-	datlen = ALIGN(datlen + len, 4);
-	return sym - syms;
-}
-
-void out_datcpy(long addr, int off, char *buf, int len)
-{
-	memcpy(dat + syms[addr].st_value + off, buf, len);
 }
