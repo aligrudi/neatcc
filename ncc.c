@@ -36,6 +36,7 @@ struct type {
 	unsigned flags;
 	int ptr;
 	int id;		/* for structs, functions and arrays */
+	int addr;	/* the address is passed to gen.c; deref for value */
 };
 
 /* type stack */
@@ -46,14 +47,20 @@ static void ts_push_bt(unsigned bt)
 {
 	ts[nts].ptr = 0;
 	ts[nts].flags = 0;
+	ts[nts].addr = 0;
 	ts[nts++].bt = bt;
 }
 
 static void ts_push(struct type *t)
 {
-	memcpy(&ts[nts++], t, sizeof(*t));
-	if (t->flags & (T_FUNC | T_ARRAY) && !t->ptr)
-		o_addr();
+	struct type *d = &ts[nts++];
+	memcpy(d, t, sizeof(*t));
+}
+
+static void ts_push_addr(struct type *t)
+{
+	ts_push(t);
+	ts[nts - 1].addr = 1;
 }
 
 static void ts_pop(struct type *type)
@@ -182,10 +189,10 @@ static int array_add(struct type *type, int n)
 
 static void array2ptr(struct type *t)
 {
-	if (!(t->flags & T_ARRAY) || t->ptr)
-		return;
-	memcpy(t, &arrays[t->id].type, sizeof(*t));
-	t->ptr++;
+	if (t->flags & T_ARRAY && !t->ptr) {
+		memcpy(t, &arrays[t->id].type, sizeof(*t));
+		t->ptr++;
+	}
 }
 
 #define MAXSTRUCTS		(1 << 10)
@@ -266,6 +273,34 @@ static unsigned type_szde(struct type *t)
 	return type_totsz(&de);
 }
 
+static void ts_de(int deref)
+{
+	struct type *t = &ts[nts - 1];
+	if (deref && t->addr && (!(t->flags & T_ARRAY) || (t->ptr)))
+		o_deref(TYPE_BT(t));
+	t->addr = 0;
+}
+
+static void ts_pop_de(struct type *t)
+{
+	struct type de;
+	if (!t)
+		t = &de;
+	ts_pop(t);
+	array2ptr(t);
+	if (t->addr && !(t->flags & T_FUNC))
+		o_deref(TYPE_BT(t));
+	t->addr = 0;
+}
+
+static void ts_pop_de2(struct type *t1, struct type *t2)
+{
+	ts_pop_de(t1);
+	o_tmpswap();
+	ts_pop_de(t2);
+	o_tmpswap();
+}
+
 static int tok_jmp(int tok)
 {
 	if (tok_see() != tok)
@@ -290,8 +325,7 @@ static unsigned bt_op(unsigned bt1, unsigned bt2)
 static void ts_binop(int op)
 {
 	struct type t1, t2;
-	ts_pop(&t1);
-	ts_pop(&t2);
+	ts_pop_de2(&t1, &t2);
 	o_bop(op);
 	ts_push_bt(bt_op(TYPE_BT(&t1), TYPE_BT(&t2)));
 }
@@ -299,10 +333,7 @@ static void ts_binop(int op)
 static void ts_addop(int op)
 {
 	struct type t1, t2;
-	ts_pop(&t1);
-	ts_pop(&t2);
-	array2ptr(&t1);
-	array2ptr(&t2);
+	ts_pop_de2(&t1, &t2);
 	if (!t1.ptr && !t2.ptr) {
 		o_bop(op);
 		ts_push_bt(bt_op(TYPE_BT(&t1), TYPE_BT(&t2)));
@@ -312,7 +343,7 @@ static void ts_addop(int op)
 		o_tmpswap();
 	if (!t1.ptr && t2.ptr)
 		if (type_szde(&t2) > 1) {
-			o_num(type_szde(&t2), 4);
+			o_num(type_szde(&t2));
 			o_bop(O_MUL);
 		}
 	if (t1.ptr && !t2.ptr)
@@ -321,7 +352,7 @@ static void ts_addop(int op)
 	if (t1.ptr && t2.ptr) {
 		int sz = type_szde(&t1);
 		if (sz > 1) {
-			o_num(sz, 4);
+			o_num(sz);
 			o_bop(O_DIV);
 		}
 		ts_push_bt(4 | BT_SIGNED);
@@ -408,6 +439,7 @@ static int basetype(struct type *type, unsigned *flags)
 	*flags = 0;
 	type->flags = 0;
 	type->ptr = 0;
+	type->addr = 0;
 	while (!done) {
 		switch (tok_see()) {
 		case TOK_STATIC:
@@ -521,7 +553,7 @@ static void readprimary(void)
 		long n;
 		int bt = tok_num(&n);
 		ts_push_bt(bt);
-		o_num(n, bt);
+		o_num(n);
 		return;
 	}
 	if (!tok_jmp(TOK_STR)) {
@@ -530,11 +562,11 @@ static void readprimary(void)
 		int len;
 		t.bt = 1 | BT_SIGNED;
 		t.ptr = 1;
+		t.addr = 0;
 		t.flags = 0;
 		ts_push(&t);
 		len = tok_str(buf);
-		o_symaddr(tmp_str(buf, len), TYPE_BT(&t));
-		o_addr();
+		o_sym(tmp_str(buf, len));
 		return;
 	}
 	if (!tok_jmp(TOK_NAME)) {
@@ -548,8 +580,8 @@ static void readprimary(void)
 		for (i = nlocals - 1; i >= 0; --i) {
 			struct type *t = &locals[i].type;
 			if (!strcmp(locals[i].name, name)) {
-				o_local(locals[i].addr, TYPE_BT(t));
-				ts_push(t);
+				o_local(locals[i].addr);
+				ts_push_addr(t);
 				return;
 			}
 		}
@@ -557,20 +589,20 @@ static void readprimary(void)
 			struct name *g = &globals[n];
 			struct type *t = &g->type;
 			char *elfname = *g->elfname ? g->elfname : g->name;
-			o_symaddr(elfname, TYPE_BT(t));
-			ts_push(t);
+			o_sym(elfname);
+			ts_push_addr(t);
 			return;
 		}
 		if (!enum_find(&n, name)) {
 			ts_push_bt(4 | BT_SIGNED);
-			o_num(n, 4 | BT_SIGNED);
+			o_num(n);
 			return;
 		}
 		if (tok_see() != '(')
 			err("unknown symbol\n");
 		global_add(&unkn);
 		ts_push_bt(LONGSZ);
-		o_symaddr(unkn.name, LONGSZ);
+		o_sym(unkn.name);
 		return;
 	}
 	if (!tok_jmp('(')) {
@@ -579,7 +611,7 @@ static void readprimary(void)
 			struct type o;
 			tok_expect(')');
 			readpre();
-			ts_pop(&o);
+			ts_pop_de(&o);
 			ts_push(&t);
 			if (!t.ptr || !o.ptr)
 				o_cast(TYPE_BT(&t));
@@ -591,32 +623,47 @@ static void readprimary(void)
 	}
 }
 
-static void arrayderef(struct type *t)
+static void arrayderef(void)
 {
-	int sz = type_totsz(t);
+	struct type t;
+	int sz;
+	ts_pop_de(NULL);
+	ts_pop(&t);
+	if (!(t.flags & T_ARRAY) && t.addr) {
+		o_tmpswap();
+		o_deref(TYPE_BT(&t));
+		o_tmpswap();
+	}
+	array2ptr(&t);
+	t.ptr--;
+	sz = type_totsz(&t);
+	t.addr = 1;
 	if (sz > 1) {
-		o_num(sz, 4);
+		o_num(sz);
 		o_bop(O_MUL);
 	}
 	o_bop(O_ADD);
-	o_deref(TYPE_BT(t));
+	ts_push(&t);
 }
 
-static void inc_post(int inc_one, int inc_many)
+static void inc_post(int op)
 {
-	struct type *t = &ts[nts - 1];
-	int sz = type_szde(t);
+	struct type t = ts[nts - 1];
+	/* pushing the value before inc */
 	o_tmpcopy();
+	ts_de(1);
 	o_load();
 	o_tmpswap();
-	if (!t->ptr || sz == 1) {
-		o_uop(inc_one);
-	} else {
-		o_tmpcopy();
-		o_num(sz, 4);
-		o_bop(inc_many);
-		o_assign(TYPE_BT(t));
-	}
+
+	/* increment by 1 or pointer size */
+	o_tmpcopy();
+	ts_push(&t);
+	ts_pop_de(&t);
+	o_num(t.ptr > 0 ? type_szde(&t) : 1);
+	o_bop(op);
+
+	/* assign back */
+	o_assign(TYPE_BT(&t));
 	o_tmpdrop(1);
 }
 
@@ -629,11 +676,10 @@ static void readfield(void)
 	array2ptr(&t);
 	field = struct_field(t.id, tok_id());
 	if (field->addr) {
-		o_num(field->addr, 4);
+		o_num(field->addr);
 		o_bop(O_ADD);
 	}
-	o_deref(TYPE_BT(&field->type));
-	ts_push(&field->type);
+	ts_push_addr(&field->type);
 }
 
 #define MAXFUNCS		(1 << 10)
@@ -644,7 +690,6 @@ static struct funcinfo {
 	int nargs;
 } funcs[MAXFUNCS];
 static int nfuncs;
-static unsigned ret_bt;
 
 static int func_create(struct type *ret, struct name *args, int nargs)
 {
@@ -662,33 +707,27 @@ static int func_create(struct type *ret, struct name *args, int nargs)
 static void readcall(void)
 {
 	struct type t;
-	unsigned bt[MAXARGS];
 	struct funcinfo *fi;
 	int argc = 0;
-	int i;
 	ts_pop(&t);
 	if (t.flags & T_FUNC && t.ptr > 0)
 		o_deref(LONGSZ);
 	fi = t.flags & T_FUNC ? &funcs[t.id] : NULL;
 	if (tok_see() != ')') {
-		readexpr();
-		ts_pop(&t);
-		bt[argc++] = TYPE_BT(&t);
-	}
-	while (!tok_jmp(',')) {
-		readexpr();
-		ts_pop(&t);
-		bt[argc++] = TYPE_BT(&t);
+		do {
+			readexpr();
+			ts_pop_de(NULL);
+			argc++;
+		} while (!tok_jmp(','));
 	}
 	tok_expect(')');
-	if (fi)
-		for (i = 0; i < fi->nargs; i++)
-			bt[i] = TYPE_BT(&fi->args[i]);
-	o_call(argc, bt, fi ? TYPE_BT(&fi->ret) : 4 | BT_SIGNED);
-	if (fi)
+	o_call(argc, fi ? TYPE_BT(&fi->ret) : 4 | BT_SIGNED);
+	if (fi) {
+		o_cast(TYPE_BT(&fi->ret));
 		ts_push(&fi->ret);
-	else
+	} else {
 		ts_push_bt(4 | BT_SIGNED);
+	}
 }
 
 static void readpost(void)
@@ -696,15 +735,9 @@ static void readpost(void)
 	readprimary();
 	while (1) {
 		if (!tok_jmp('[')) {
-			struct type t;
-			ts_pop(&t);
 			readexpr();
-			ts_pop(NULL);
 			tok_expect(']');
-			array2ptr(&t);
-			t.ptr--;
-			arrayderef(&t);
-			ts_push(&t);
+			arrayderef();
 			continue;
 		}
 		if (!tok_jmp('(')) {
@@ -712,19 +745,20 @@ static void readpost(void)
 			continue;
 		}
 		if (!tok_jmp(TOK2("++"))) {
-			inc_post(O_INC, O_ADD);
+			inc_post(O_ADD);
 			continue;
 		}
 		if (!tok_jmp(TOK2("--"))) {
-			inc_post(O_DEC, O_SUB);
+			inc_post(O_SUB);
 			continue;
 		}
 		if (!tok_jmp('.')) {
-			o_addr();
 			readfield();
 			continue;
 		}
 		if (!tok_jmp(TOK2("->"))) {
+			struct type *t = &ts[nts - 1];
+			ts_de(1);
 			readfield();
 			continue;
 		}
@@ -732,21 +766,20 @@ static void readpost(void)
 	}
 }
 
-static void inc_pre(int inc_one, int inc_many)
+static void inc_pre(int op)
 {
-	struct type *t;
-	int sz;
+	struct type t;
 	readpre();
-	t = &ts[nts - 1];
-	sz = (t->flags & T_ARRAY || t->ptr) ? type_szde(t) : 1;
-	if (sz == 1) {
-		o_uop(inc_one);
-	} else {
-		o_tmpcopy();
-		o_num(sz, 4);
-		o_bop(inc_many);
-		o_assign(TYPE_BT(t));
-	}
+	/* copy the destination */
+	o_tmpcopy();
+	ts_push(&ts[nts - 1]);
+	/* increment by 1 or pointer size */
+	ts_pop_de(&t);
+	o_num(t.ptr > 0 ? type_szde(&t) : 1);
+	o_bop(op);
+	/* assign the result */
+	o_assign(TYPE_BT(&t));
+	ts_de(0);
 }
 
 static void readpre(void)
@@ -755,9 +788,11 @@ static void readpre(void)
 		struct type type;
 		readpre();
 		ts_pop(&type);
+		if (!type.addr)
+			die("cannot use the address\n");
 		type.ptr++;
+		type.addr = 0;
 		ts_push(&type);
-		o_addr();
 		return;
 	}
 	if (!tok_jmp('*')) {
@@ -765,35 +800,40 @@ static void readpre(void)
 		readpre();
 		ts_pop(&t);
 		array2ptr(&t);
+		if (!t.ptr)
+			err("dereferencing non-pointer\n");
+		if (t.addr)
+			o_deref(TYPE_BT(&t));
 		t.ptr--;
-		o_deref(TYPE_BT(&t));
+		t.addr = 1;
 		ts_push(&t);
 		return;
 	}
 	if (!tok_jmp('!')) {
-		struct type type;
 		readpre();
-		ts_pop(&type);
+		ts_pop_de(NULL);
 		o_uop(O_LNOT);
 		ts_push_bt(4 | BT_SIGNED);
 		return;
 	}
 	if (!tok_jmp('-')) {
 		readpre();
+		ts_de(1);
 		o_uop(O_NEG);
 		return;
 	}
 	if (!tok_jmp('~')) {
 		readpre();
+		ts_de(1);
 		o_uop(O_NOT);
 		return;
 	}
 	if (!tok_jmp(TOK2("++"))) {
-		inc_pre(O_INC, O_ADD);
+		inc_pre(O_ADD);
 		return;
 	}
 	if (!tok_jmp(TOK2("--"))) {
-		inc_pre(O_DEC, O_SUB);
+		inc_pre(O_SUB);
 		return;
 	}
 	if (!tok_jmp(TOK_SIZEOF)) {
@@ -808,7 +848,7 @@ static void readpre(void)
 			o_tmpdrop(1);
 		}
 		ts_push_bt(4);
-		o_num(type_totsz(&t), 4);
+		o_num(type_totsz(&t));
 		if (op)
 			tok_expect(')');
 		return;
@@ -857,13 +897,12 @@ static void readadd(void)
 	}
 }
 
-static void shift(int op)
+static void shift(int uop, int sop)
 {
 	struct type t;
 	readadd();
-	ts_pop(NULL);
-	ts_pop(&t);
-	o_bop(op);
+	ts_pop_de2(NULL, &t);
+	o_bop(BT_SIGNED & TYPE_BT(&t) ? sop : uop);
 	ts_push_bt(TYPE_BT(&t));
 }
 
@@ -872,11 +911,11 @@ static void readshift(void)
 	readadd();
 	while (1) {
 		if (!tok_jmp(TOK2("<<"))) {
-			shift(O_SHL);
+			shift(O_SHL, O_SHL);
 			continue;
 		}
 		if (!tok_jmp(TOK2(">>"))) {
-			shift(O_SHR);
+			shift(O_SHR, O_ASR);
 			continue;
 		}
 		break;
@@ -886,8 +925,7 @@ static void readshift(void)
 static void cmp(int op)
 {
 	readshift();
-	ts_pop(NULL);
-	ts_pop(NULL);
+	ts_pop_de2(NULL, NULL);
 	o_bop(op);
 	ts_push_bt(4 | BT_SIGNED);
 }
@@ -919,8 +957,7 @@ static void readcmp(void)
 static void eq(int op)
 {
 	readcmp();
-	ts_pop(NULL);
-	ts_pop(NULL);
+	ts_pop_de2(NULL, NULL);
 	o_bop(op);
 	ts_push_bt(4 | BT_SIGNED);
 }
@@ -980,19 +1017,19 @@ static void readand(void)
 	if (tok_see() != TOK2("&&"))
 		return;
 	o_fork();
+	ts_pop_de(NULL);
 	conds[nconds++] = o_jz(0);
-	ts_pop(NULL);
 	while (!tok_jmp(TOK2("&&"))) {
 		readbitor();
+		ts_pop_de(NULL);
 		conds[nconds++] = o_jz(0);
-		ts_pop(NULL);
 	}
-	o_num(1, 4 | BT_SIGNED);
+	o_num(1);
 	o_forkpush();
 	passed = o_jmp(0);
 	for (i = 0; i < nconds; i++)
 		o_filljmp(conds[i]);
-	o_num(0, 4 | BT_SIGNED);
+	o_num(0);
 	o_forkpush();
 	o_forkjoin();
 	o_filljmp(passed);
@@ -1009,19 +1046,19 @@ static void reador(void)
 	if (tok_see() != TOK2("||"))
 		return;
 	o_fork();
+	ts_pop_de(NULL);
 	conds[nconds++] = o_jnz(0);
-	ts_pop(NULL);
 	while (!tok_jmp(TOK2("||"))) {
 		readand();
+		ts_pop_de(NULL);
 		conds[nconds++] = o_jnz(0);
-		ts_pop(NULL);
 	}
-	o_num(0, 4 | BT_SIGNED);
+	o_num(0);
 	o_forkpush();
 	failed = o_jmp(0);
 	for (i = 0; i < nconds; i++)
 		o_filljmp(conds[i]);
-	o_num(1, 4 | BT_SIGNED);
+	o_num(1);
 	o_forkpush();
 	o_forkjoin();
 	o_filljmp(failed);
@@ -1062,7 +1099,7 @@ static void readcexpr(void)
 	if (tok_jmp('?'))
 		return;
 	ncexpr++;
-	ts_pop(NULL);
+	ts_pop_de(NULL);
 	o_fork();
 	if (readcexpr_const()) {
 		l1 = o_jz(0);
@@ -1083,28 +1120,28 @@ static void readcexpr(void)
 
 static void opassign(int op, int ptrop)
 {
-	struct type *t = &ts[nts - 1];
-	if (ptrop && (t->flags & T_ARRAY || t->ptr)) {
-		o_tmpcopy();
-		readexpr();
-		ts_addop(op);
-		o_assign(TYPE_BT(&ts[nts - 1]));
-		ts_pop(NULL);
-	} else {
-		readexpr();
-		o_bop(op | O_SET);
-		ts_pop(NULL);
-	}
+	struct type t = ts[nts - 1];
+	o_tmpcopy();
+	ts_push(&t);
+	readexpr();
+	ts_addop(op);
+	o_assign(TYPE_BT(&ts[nts - 1]));
+	ts_pop(NULL);
+	ts_de(0);
 }
 
 static void doassign(void)
 {
-	struct type t;
-	ts_pop(&t);
-	if (!t.ptr && t.flags & T_STRUCT)
-		o_memcpy(type_totsz(&t));
-	else
+	struct type t = ts[nts - 1];
+	if (!t.ptr && t.flags & T_STRUCT) {
+		ts_pop(NULL);
+		o_num(type_totsz(&t));
+		o_memcpy();
+	} else {
+		ts_pop_de(NULL);
 		o_assign(TYPE_BT(&ts[nts - 1]));
+		ts_de(0);
+	}
 }
 
 static void readexpr(void)
@@ -1166,14 +1203,12 @@ static void readestmt(void)
 	} while (!tok_jmp(','));
 }
 
-static void o_localoff(long addr, int off, unsigned bt)
+static void o_localoff(long addr, int off)
 {
-	o_local(addr, bt);
+	o_local(addr);
 	if (off) {
-		o_addr();
-		o_num(off, 4);
+		o_num(off);
 		o_bop(O_ADD);
-		o_deref(bt);
 	}
 }
 
@@ -1321,14 +1356,15 @@ static void localinit(void *obj, int off, struct type *t)
 			int len;
 			tok_expect(TOK_STR);
 			len = tok_str(buf);
-			o_localoff(addr, off, TYPE_BT(t));
-			o_symaddr(tmp_str(buf, len), TYPE_BT(t));
-			o_memcpy(len);
+			o_localoff(addr, off);
+			o_sym(tmp_str(buf, len));
+			o_num(len);
+			o_memcpy();
 			o_tmpdrop(1);
 			return;
 		}
 	}
-	o_localoff(addr, off, TYPE_BT(t));
+	o_localoff(addr, off);
 	ts_push(t);
 	readexpr();
 	doassign();
@@ -1353,8 +1389,10 @@ static void localdef(void *data, struct name *name, unsigned flags)
 	local_add(name);
 	if (flags & F_INIT) {
 		if (t->flags & (T_ARRAY | T_STRUCT) && !t->ptr) {
-			o_local(name->addr, TYPE_BT(t));
-			o_memset(0, type_totsz(t));
+			o_local(name->addr);
+			o_num(0);
+			o_num(type_totsz(t));
+			o_memset();
 			o_tmpdrop(1);
 		}
 		initexpr(t, 0, &name->addr, localinit);
@@ -1371,9 +1409,8 @@ static void funcdef(char *name, struct type *type, struct name *args,
 	memcpy(&global.type, type, sizeof(*type));
 	o_func_beg(name, F_GLOBAL(flags));
 	global_add(&global);
-	ret_bt = TYPE_BT(&funcs[type->id].ret);
 	for (i = 0; i < nargs; i++) {
-		args[i].addr = o_arg(i, type_totsz(&args[i].type));
+		args[i].addr = o_arg(i);
 		local_add(&args[i]);
 	}
 }
@@ -1509,10 +1546,11 @@ static void readswitch(void)
 	int i;
 	tok_expect('(');
 	readexpr();
-	ts_pop(&t);
-	o_local(val_addr, TYPE_BT(&t));
+	ts_pop_de(&t);
+	o_local(val_addr);
 	o_tmpswap();
 	o_assign(TYPE_BT(&t));
+	ts_de(0);
 	o_tmpdrop(1);
 	tok_expect(')');
 	tok_expect('{');
@@ -1526,14 +1564,15 @@ static void readswitch(void)
 			if (!tok_jmp(TOK_CASE)) {
 				caseexpr = 1;
 				readexpr();
+				ts_pop_de(NULL);
 				caseexpr = 0;
-				o_local(val_addr, TYPE_BT(&t));
+				o_local(val_addr);
+				o_deref(TYPE_BT(&t));
 				o_bop(O_EQ);
 				next = o_jz(0);
 				ref = 0;
 				tok_expect(':');
 				o_tmpdrop(1);
-				ts_pop(NULL);
 				continue;
 			}
 			if (!tok_jmp(TOK_DEFAULT)) {
@@ -1626,6 +1665,7 @@ static void readstmt(void)
 		tok_expect('(');
 		readexpr();
 		tok_expect(')');
+		ts_pop_de(NULL);
 		l1 = o_jz(0);
 		readstmt();
 		if (!tok_jmp(TOK_ELSE)) {
@@ -1646,6 +1686,7 @@ static void readstmt(void)
 		tok_expect('(');
 		readexpr();
 		tok_expect(')');
+		ts_pop_de(NULL);
 		l2 = o_jz(0);
 		readstmt();
 		o_jmp(l1);
@@ -1664,6 +1705,7 @@ static void readstmt(void)
 		tok_expect('(');
 		l2 = o_mklabel();
 		readexpr();
+		ts_pop_de(NULL);
 		o_jnz(l1);
 		tok_expect(')');
 		break_fill(o_mklabel(), break_beg);
@@ -1682,6 +1724,7 @@ static void readstmt(void)
 		l_check = o_mklabel();
 		if (tok_see() != ';') {
 			readestmt();
+			ts_pop_de(NULL);
 			j_fail = o_jz(0);
 			has_cond = 1;
 		}
@@ -1707,10 +1750,12 @@ static void readstmt(void)
 	}
 	if (!tok_jmp(TOK_RETURN)) {
 		int ret = tok_see() != ';';
-		if (ret)
+		if (ret) {
 			readexpr();
+			ts_pop_de(NULL);
+		}
 		tok_expect(';');
-		o_ret(ret_bt);
+		o_ret(ret);
 		return;
 	}
 	if (!tok_jmp(TOK_BREAK)) {

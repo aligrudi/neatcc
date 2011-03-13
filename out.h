@@ -1,7 +1,6 @@
-/* symbol section: code, data and bss */
-#define OUT_CS		0x0001
-#define OUT_DS		0x0002
-#define OUT_BSS		0x0004
+#define OUT_CS		0x0001		/* code segment symbol */
+#define OUT_DS		0x0002		/* data segment symbol */
+#define OUT_BSS		0x0004		/* bss segment symbol */
 
 #define OUT_GLOB	0x0010		/* global symbol */
 

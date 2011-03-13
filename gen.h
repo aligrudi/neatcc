@@ -5,7 +5,6 @@
 /* basic types */
 #define BT_SZMASK		0x00ff
 #define BT_SIGNED		0x0100
-#define BT_FLOAT		0x0200
 #define BT_SZ(bt)		((bt) & BT_SZMASK)
 
 #define O_ADD		0x00
@@ -15,6 +14,7 @@
 #define O_XOR		0x04
 #define O_SHL		0x10
 #define O_SHR		0x11
+#define O_ASR		0x12
 #define O_MUL		0x20
 #define O_DIV		0x21
 #define O_MOD		0x22
@@ -27,25 +27,20 @@
 #define O_NEG		0x40
 #define O_NOT		0x41
 #define O_LNOT		0x42
-#define O_INC		0x50
-#define O_DEC		0x51
-
-#define O_SET		0x100
 
 void o_bop(int op);
 void o_uop(int op);
 
-void o_num(long n, unsigned bt);
-void o_local(long addr, unsigned bt);
+void o_num(long n);
+void o_local(long addr);
+long o_arg(int i);
 void o_assign(unsigned bt);
 void o_deref(unsigned bt);
 void o_load(void);
-void o_addr(void);
-void o_symaddr(char *sym, unsigned bt);
-void o_call(int argc, unsigned *bt, unsigned ret_vs);
+void o_sym(char *sym);
+void o_call(int argc, int ret);
 
 long o_mklocal(int size);
-long o_arg(int i, unsigned bt);
 void o_rmlocal(long addr, int sz);
 void o_tmpdrop(int n);
 void o_tmpswap(void);
@@ -61,14 +56,14 @@ long o_jnz(long addr);
 long o_jmp(long addr);
 void o_filljmp(long addr);
 void o_filljmp2(long addr, long jmpdst);
-void o_memcpy(int sz);
-void o_memset(int x, int sz);
+void o_memcpy(void);
+void o_memset(void);
 
 void o_func_beg(char *name, int global);
 void o_func_end(void);
-void o_ret(unsigned bt);
-void o_write(int fd);
+void o_ret(int ret);
 
+void o_write(int fd);
 int o_nogen(void);
 void o_dogen(void);
 
