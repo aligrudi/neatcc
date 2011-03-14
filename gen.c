@@ -41,7 +41,7 @@ static long sp;
 static long func_beg;
 static long maxsp;
 
-#define TMP(i)		(&tmps[ntmp - 1 - (i)])
+#define TMP(i)		(((i) < ntmp) ? &tmps[ntmp - 1 - (i)] : NULL)
 
 static struct tmp {
 	long addr;

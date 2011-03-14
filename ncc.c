@@ -723,7 +723,8 @@ static void readcall(void)
 	tok_expect(')');
 	o_call(argc, fi ? TYPE_BT(&fi->ret) : 4 | BT_SIGNED);
 	if (fi) {
-		o_cast(TYPE_BT(&fi->ret));
+		if (TYPE_BT(&fi->ret))
+			o_cast(TYPE_BT(&fi->ret));
 		ts_push(&fi->ret);
 	} else {
 		ts_push_bt(4 | BT_SIGNED);
@@ -757,7 +758,6 @@ static void readpost(void)
 			continue;
 		}
 		if (!tok_jmp(TOK2("->"))) {
-			struct type *t = &ts[nts - 1];
 			ts_de(1);
 			readfield();
 			continue;
