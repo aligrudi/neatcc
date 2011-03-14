@@ -282,12 +282,12 @@ static void i_mov(int op, int rd, int rn)
  * S: singed
  * H: halfword
  */
-#define LDR(l, rd, rn, b, i)		\
-	((14 << 28) | (1 << 26) | (1 << 24) | ((b) << 22) | \
-		((l) << 20) | ((rn) << 16) | ((rd) << 12))
-#define LDRH(l, rd, rn, s, h, i)	\
-	((14 << 28) | ((i) << 22) | ((rn) << 16) | ((rd) << 12) | \
-		((l) << 20) | ((s) << 6) | ((h) << 5) | (9 << 4) | (1 << 24))
+#define LDR(l, rd, rn, b, u, p, w)		\
+	((14 << 28) | (1 << 26) | ((p) << 24) | ((b) << 22) | ((u) << 23) | \
+	((w) << 21) | ((l) << 20) | ((rn) << 16) | ((rd) << 12))
+#define LDRH(l, rd, rn, s, h, u, i)	\
+	((14 << 28) | (1 << 24) | ((u) << 23) | ((i) << 22) | ((l) << 20) | \
+	((rn) << 16) | ((rd) << 12) | ((s) << 6) | ((h) << 5) | (9 << 4))
 
 static void i_ldr(int l, int rd, int rn, int off, int bt)
 {
@@ -306,9 +306,9 @@ static void i_ldr(int l, int rd, int rn, int off, int bt)
 		off -= add_decimm(imm);
 	}
 	if (!half)
-		oi(LDR(l, rd, rn, b, 0) | ((!neg) << 23) | off);
+		oi(LDR(l, rd, rn, b, !neg, 1, 0) | off);
 	else
-		oi(LDRH(l, rd, rn, s, h, 1) | ((!neg) << 23) |
+		oi(LDRH(l, rd, rn, s, h, !neg, 1) |
 			((off & 0xf0) << 4) | (off & 0x0f));
 }
 
@@ -390,23 +390,20 @@ static void i_b_fill(long *dst, int diff)
 static void i_memcpy(int rd, int rs, int rn)
 {
 	oi(ADD(I_TST, 0, rn, 1, 0, 14) | rn);
-	oi(BL(0, 0, 28));
-	oi(LDR(1, REG_TMP, rs, 1, 0));
-	oi(LDR(0, REG_TMP, rd, 1, 0));
-	oi(ADD(I_ADD, rs, rs, 0, 1, 14) | 1);
-	oi(ADD(I_ADD, rd, rd, 0, 1, 14) | 1);
+	oi(BL(0, 0, 20));
+	oi(LDR(1, REG_TMP, rs, 1, 1, 0, 0) | 1);
+	oi(LDR(0, REG_TMP, rd, 1, 1, 0, 0) | 1);
 	oi(ADD(I_SUB, rn, rn, 0, 1, 14) | 1);
-	oi(BL(14, 0, -28));
+	oi(BL(14, 0, -20));
 }
 
 static void i_memset(int rd, int rs, int rn)
 {
 	oi(ADD(I_TST, 0, rn, 1, 0, 14) | rn);
-	oi(BL(0, 0, 20));
-	oi(LDR(0, rs, rd, 0, 0) | rs);
-	oi(ADD(I_ADD, rd, rd, 0, 1, 14) | 1);
+	oi(BL(0, 0, 16));
+	oi(LDR(0, rs, rd, 1, 1, 0, 0) | 1);
 	oi(ADD(I_SUB, rn, rn, 0, 1, 14) | 1);
-	oi(BL(14, 0, -20));
+	oi(BL(14, 0, -16));
 }
 
 static void i_call_reg(int rd)
