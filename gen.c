@@ -21,9 +21,6 @@
 #define REG_DP		10	/* data pointer register */
 #define REG_RET		0	/* returned value register */
 
-#define REG_TMASK	0x100f	/* scratch register mask */
-#define REG_VMASK	0x2ff0	/* variable register mask */
-
 #define MIN(a, b)		((a) < (b) ? (a) : (b))
 #define ALIGN(x, a)		(((x) + (a) - 1) & ~((a) - 1))
 
@@ -182,8 +179,10 @@ static void i_num(int rd, long n)
 	if (p == add_decimm(enc)) {
 		oi(ADD(neg ? I_MVN : I_MOV, rd, 0, 0, 1, 14) | enc);
 	} else {
-		int off = pool_num(n);
-		i_ldr(1, rd, REG_DP, off, LONGSZ);
+		if (!nogen) {
+			int off = pool_num(n);
+			i_ldr(1, rd, REG_DP, off, LONGSZ);
+		}
 	}
 }
 
@@ -315,8 +314,10 @@ static void i_ldr(int l, int rd, int rn, int off, int bt)
 
 static void i_sym(int rd, char *sym, int off)
 {
-	int doff = pool_reloc(sym, off);
-	i_ldr(1, rd, REG_DP, doff, LONGSZ);
+	if (!nogen) {
+		int doff = pool_reloc(sym, off);
+		i_ldr(1, rd, REG_DP, doff, LONGSZ);
+	}
 }
 
 static void i_neg(int rd)
@@ -416,7 +417,8 @@ static void i_call_reg(int rd)
 
 static void i_call(char *sym)
 {
-	out_rel(sym, OUT_CS | OUT_REL24, cslen);
+	if (!nogen)
+		out_rel(sym, OUT_CS | OUT_REL24, cslen);
 	oi(BL(14, 1, 0));
 }
 
