@@ -74,10 +74,19 @@ static int argregs[] = {0, 1, 2, 3};
 static long ret[MAXRET];
 static int nret;
 
+/* output div/mod functions */
+static int putdiv = 0;
+
 /* for optimizing cmp + bcc */
 static long last_cmp = -1;
 static long last_set = -1;
 static long last_cond;
+
+static void os(void *s, int n)
+{
+	memcpy(cs + cslen, s, n);
+	cslen += n;
+}
 
 static void oi(long n)
 {
@@ -1008,16 +1017,39 @@ static int mul_2(int op)
 	return 1;
 }
 
+static void bin_div(int op)
+{
+	struct tmp *t2 = TMP(0);
+	struct tmp *t1 = TMP(1);
+	char *func;
+	int i;
+	putdiv = 1;
+	if ((op & 0xff) == O_DIV)
+		func = op & O_SIGNED ? "__divdi3" : "__udivdi3";
+	else
+		func = op & O_SIGNED ? "__moddi3" : "__umoddi3";
+	for (i = 0; i < ARRAY_SIZE(argregs); i++)
+		if (regs[argregs[i]] && regs[argregs[i]] - tmps < ntmp - 2)
+			tmp_mem(regs[argregs[i]]);
+	tmp_to(t1, argregs[0]);
+	tmp_to(t2, argregs[1]);
+	tmp_drop(2);
+	i_call(func);
+	tmp_push(REG_RET);
+}
+
 static void bin_mul(int op)
 {
 	int r1, r2;
 	if (!mul_2(op & 0xff))
 		return;
-	bin_regs(&r1, &r2);
-	if ((op & 0xff) == O_DIV || (op & 0xff) == O_MOD)
-		printf("div not implemented\n");
-	i_mul(r1, r1, r2);
-	tmp_push(r1);
+	if ((op & 0xff) == O_DIV || (op & 0xff) == O_MOD) {
+		bin_div(op);
+	} else {
+		bin_regs(&r1, &r2);
+		i_mul(r1, r1, r2);
+		tmp_push(r1);
+	}
 }
 
 static void bin_cmp(int op)
@@ -1205,7 +1237,37 @@ void o_datset(char *name, int off, unsigned bt)
 	tmp_drop(1);
 }
 
+/* compiled division functions; div.s contains the source */
+static int udivdi3[] = {
+	0xe3a02000, 0xe3a03000, 0xe1110001, 0x0a00000a,
+	0xe1b0c211, 0xe2822001, 0x5afffffc, 0xe3a0c001,
+	0xe2522001, 0x4a000004, 0xe1500211, 0x3afffffb,
+	0xe0400211, 0xe083321c, 0xeafffff8, 0xe1a01000,
+	0xe1a00003, 0xe1a0f00e,
+};
+static int umoddi3[] = {
+	0xe92d4000, 0xebffffeb, 0xe1a00001, 0xe8bd8000,
+};
+static int divdi3[] = {
+	0xe92d4010, 0xe1100000, 0x42600000, 0x43a04001,
+	0xe1110001, 0x42600000, 0x42444001, 0xebffffe1,
+	0xe1140004, 0x12400000, 0xe8bd8010,
+};
+static int moddi3[] = {
+	0xe92d4000, 0xebfffff2, 0xe1a00001, 0xe8bd8000,
+};
+
 void o_write(int fd)
 {
+	if (putdiv) {
+		out_sym("__udivdi3", OUT_CS, cslen, 0);
+		os(udivdi3, sizeof(udivdi3));
+		out_sym("__umoddi3", OUT_CS, cslen, 0);
+		os(umoddi3, sizeof(umoddi3));
+		out_sym("__divdi3", OUT_CS, cslen, 0);
+		os(divdi3, sizeof(divdi3));
+		out_sym("__moddi3", OUT_CS, cslen, 0);
+		os(moddi3, sizeof(moddi3));
+	}
 	out_write(fd, cs, cslen, ds, dslen);
 }
