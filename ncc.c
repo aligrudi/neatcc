@@ -325,9 +325,14 @@ static unsigned bt_op(unsigned bt1, unsigned bt2)
 static void ts_binop(int op)
 {
 	struct type t1, t2;
+	int bt;
 	ts_pop_de2(&t1, &t2);
-	o_bop(op);
-	ts_push_bt(bt_op(TYPE_BT(&t1), TYPE_BT(&t2)));
+	if (op == O_DIV || op == O_MOD)
+		bt = TYPE_BT(&t2);
+	else
+		bt = bt_op(TYPE_BT(&t1), TYPE_BT(&t2));
+	o_bop(op | (bt & BT_SIGNED ? O_SIGNED : 0));
+	ts_push_bt(bt);
 }
 
 static void ts_addop(int op)
@@ -1107,6 +1112,7 @@ static void readcexpr(void)
 	if (readcexpr_const()) {
 		l1 = o_jz(0);
 		reador();
+		ts_de(1);
 		o_forkpush();
 		l2 = o_jmp(0);
 		ts_pop(NULL);
