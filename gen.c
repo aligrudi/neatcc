@@ -372,7 +372,7 @@ static void i_b(long addr)
 
 static void i_b_if(long addr, int rn, int z)
 {
-	static int nots[] = {1, 0, -1, -1, -1, -1, -1, -1, -1, -1, 11, 10, 13, 12, -1};
+	static int nots[] = {1, 0, 3, 2, -1, -1, -1, -1, 9, 8, 11, 10, 13, 12, -1};
 	if (last_cmp + 8 != cslen || last_set != last_cmp) {
 		i_cmp(I_TST, rn, rn);
 		oi(BL(z ? 0 : 1, 0, addr - cslen));
@@ -824,7 +824,7 @@ static int c_uop(int op)
 
 static long cb(int op, long a, long b)
 {
-	switch (op) {
+	switch (op & 0xff) {
 	case O_ADD:
 		return a + b;
 	case O_SUB:
@@ -844,9 +844,10 @@ static long cb(int op, long a, long b)
 	case O_SHL:
 		return a << b;
 	case O_SHR:
-		return (unsigned long) a >> b;
-	case O_ASR:
-		return a >> b;
+		if (op & O_SIGNED)
+			return a >> b;
+		else
+			return (unsigned long) a >> b;
 	case O_LT:
 		return a < b;
 	case O_GT:
@@ -927,17 +928,18 @@ static void bin_add(int op)
 	static int rx[] = {I_ADD, I_SUB, I_AND, I_ORR, I_EOR};
 	int r1, r2;
 	bin_regs(&r1, &r2);
-	i_add(rx[op], r1, r1, r2);
+	i_add(rx[op & 0xff], r1, r1, r2);
 	tmp_push(r1);
 }
 
 static void bin_shx(int op)
 {
-	/* shl, shr */
-	int shx[] = {SM_LSL, SM_LSR, SM_ASR};
+	int sm = SM_LSL;
 	int r1, r2;
 	bin_regs(&r1, &r2);
-	i_shl(shx[op & 0x0f], r1, r1, r2);
+	if ((op & 0x0f) == 1)
+		sm = op & O_SIGNED ? SM_ASR : SM_LSR;
+	i_shl(sm, r1, r1, r2);
 	tmp_push(r1);
 }
 
@@ -1009,10 +1011,10 @@ static int mul_2(int op)
 static void bin_mul(int op)
 {
 	int r1, r2;
-	if (!mul_2(op))
+	if (!mul_2(op & 0xff))
 		return;
 	bin_regs(&r1, &r2);
-	if (op == O_DIV || op == O_MOD)
+	if ((op & 0xff) == O_DIV || (op & 0xff) == O_MOD)
 		printf("div not implemented\n");
 	i_mul(r1, r1, r2);
 	tmp_push(r1);
@@ -1021,11 +1023,12 @@ static void bin_mul(int op)
 static void bin_cmp(int op)
 {
 	/* lt, gt, le, ge, eq, neq */
-	static int cond[] = {11, 12, 13, 10, 0, 1};
+	static int ucond[] = {3, 8, 9, 2, 0, 1};
+	static int scond[] = {11, 12, 13, 10, 0, 1};
 	int r1, r2;
 	bin_regs(&r1, &r2);
 	i_cmp(I_CMP, r1, r2);
-	i_set(cond[op & 0x0f], r1);
+	i_set(op & O_SIGNED ? scond[op & 0x0f] : ucond[op & 0x0f], r1);
 	tmp_push(r1);
 }
 

@@ -7,6 +7,8 @@
 #define BT_SIGNED		0x0100
 #define BT_SZ(bt)		((bt) & BT_SZMASK)
 
+#define O_SIGNED	0x100
+
 #define O_ADD		0x00
 #define O_SUB		0x01
 #define O_AND		0x02
@@ -14,7 +16,6 @@
 #define O_XOR		0x04
 #define O_SHL		0x10
 #define O_SHR		0x11
-#define O_ASR		0x12
 #define O_MUL		0x20
 #define O_DIV		0x21
 #define O_MOD		0x22

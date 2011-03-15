@@ -897,12 +897,12 @@ static void readadd(void)
 	}
 }
 
-static void shift(int uop, int sop)
+static void shift(int op)
 {
 	struct type t;
 	readadd();
 	ts_pop_de2(NULL, &t);
-	o_bop(BT_SIGNED & TYPE_BT(&t) ? sop : uop);
+	o_bop(op | (BT_SIGNED & TYPE_BT(&t) ? O_SIGNED : 0));
 	ts_push_bt(TYPE_BT(&t));
 }
 
@@ -911,11 +911,11 @@ static void readshift(void)
 	readadd();
 	while (1) {
 		if (!tok_jmp(TOK2("<<"))) {
-			shift(O_SHL, O_SHL);
+			shift(O_SHL);
 			continue;
 		}
 		if (!tok_jmp(TOK2(">>"))) {
-			shift(O_SHR, O_ASR);
+			shift(O_SHR);
 			continue;
 		}
 		break;
@@ -924,9 +924,12 @@ static void readshift(void)
 
 static void cmp(int op)
 {
+	struct type t1, t2;
+	int bt;
 	readshift();
-	ts_pop_de2(NULL, NULL);
-	o_bop(op);
+	ts_pop_de2(&t1, &t2);
+	bt = bt_op(TYPE_BT(&t1), TYPE_BT(&t2));
+	o_bop(op | (bt & BT_SIGNED ? O_SIGNED : 0));
 	ts_push_bt(4 | BT_SIGNED);
 }
 
