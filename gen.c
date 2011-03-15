@@ -1151,9 +1151,9 @@ void o_call(int argc, int rets)
 	struct tmp *t;
 	int i;
 	int aregs = MIN(ARRAY_SIZE(argregs), argc);
-	for (i = 0; i < ARRAY_SIZE(tmpregs); i++)
-		if (regs[tmpregs[i]] && regs[tmpregs[i]] - tmps < ntmp - argc)
-			tmp_mem(regs[tmpregs[i]]);
+	for (i = 0; i < ARRAY_SIZE(argregs); i++)
+		if (regs[argregs[i]] && regs[argregs[i]] - tmps < ntmp - argc)
+			tmp_mem(regs[argregs[i]]);
 	if (argc > aregs) {
 		sp_push(LONGSZ * (argc - aregs));
 		for (i = argc - 1; i >= aregs; --i) {
