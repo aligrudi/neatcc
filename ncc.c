@@ -1114,6 +1114,7 @@ static void readcexpr(void)
 		tok_expect(':');
 		o_filljmp(l1);
 		reador();
+		ts_de(1);
 		o_forkpush();
 		o_forkjoin();
 		o_filljmp(l2);
