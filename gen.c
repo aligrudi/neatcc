@@ -398,21 +398,19 @@ static void i_b_fill(long *dst, int diff)
 
 static void i_memcpy(int rd, int rs, int rn)
 {
-	oi(ADD(I_TST, 0, rn, 1, 0, 14) | rn);
-	oi(BL(0, 0, 20));
+	oi(ADD(I_SUB, rn, rn, 1, 1, 14) | 1);
+	oi(BL(4, 0, 16));
 	oi(LDR(1, REG_TMP, rs, 1, 1, 0, 0) | 1);
 	oi(LDR(0, REG_TMP, rd, 1, 1, 0, 0) | 1);
-	oi(ADD(I_SUB, rn, rn, 0, 1, 14) | 1);
-	oi(BL(14, 0, -20));
+	oi(BL(14, 0, -16));
 }
 
 static void i_memset(int rd, int rs, int rn)
 {
-	oi(ADD(I_TST, 0, rn, 1, 0, 14) | rn);
-	oi(BL(0, 0, 16));
+	oi(ADD(I_SUB, rn, rn, 1, 1, 14) | 1);
+	oi(BL(4, 0, 12));
 	oi(LDR(0, rs, rd, 1, 1, 0, 0) | 1);
-	oi(ADD(I_SUB, rn, rn, 0, 1, 14) | 1);
-	oi(BL(14, 0, -16));
+	oi(BL(14, 0, -12));
 }
 
 static void i_call_reg(int rd)
