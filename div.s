@@ -1,5 +1,5 @@
-; ARM software division implementation
-; These functions are assembled using neatas and are included in gen.c
+@ ARM software division implementation
+@ These functions are assembled using neatas and are included in gen.c
 .global __udivdi3
 __udivdi3:
 	mov	r2, #0
@@ -40,21 +40,26 @@ __umoddi3:
 
 .global __divdi3
 __divdi3:
-	stmfd	sp!, {r4, lr}
+	stmfd	sp!, {r4, r5, lr}
 
+	mov	r4, r0
+	mov	r5, r1
+
+	@ handle negative operands
 	tst	r0, r0
 	rsbmi	r0, r0, #0
-	movmi	r4, #1
-
 	tst	r1, r1
-	rsbmi	r0, r0, #0
-	submi	r4, r4, #1
+	rsbmi	r1, r1, #0
 
 	bl	__udivdi3
-	tst	r4, r4
-	subne	r0, r0, #0
 
-	ldmfd	sp!, {r4, pc}
+	@ result is negative
+	teq	r4, r5
+	rsbmi	r0, r0, #0
+	tst	r4, r4
+	rsbmi	r1, r1, #0
+
+	ldmfd	sp!, {r4, r5, pc}
 
 .global __moddi3
 __moddi3:

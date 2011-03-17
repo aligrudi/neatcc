@@ -977,7 +977,7 @@ static int mul_2(int op)
 	p = log2a(n);
 	if (n && p == -1)
 		return 1;
-	if (op == O_MUL) {
+	if ((op & 0xff) == O_MUL) {
 		tmp_drop(1);
 		if (n == 1)
 			return 0;
@@ -997,7 +997,7 @@ static int mul_2(int op)
 			return 0;
 		r2 = TMP_REG(t2);
 		tmp_to(t2, r2);
-		i_shl_imm(SM_LSR, r2, p);
+		i_shl_imm(op & O_SIGNED ? SM_ASR : SM_LSR, r2, p);
 		return 0;
 	}
 	if (op == O_MOD) {
@@ -1039,7 +1039,7 @@ static void bin_div(int op)
 static void bin_mul(int op)
 {
 	int r1, r2;
-	if (!mul_2(op & 0xff))
+	if (!mul_2(op))
 		return;
 	if ((op & 0xff) == O_DIV || (op & 0xff) == O_MOD) {
 		bin_div(op);
@@ -1247,12 +1247,13 @@ static int umoddi3[] = {
 	0xe92d4000, 0xebffffeb, 0xe1a00001, 0xe8bd8000,
 };
 static int divdi3[] = {
-	0xe92d4010, 0xe1100000, 0x42600000, 0x43a04001,
-	0xe1110001, 0x42600000, 0x42444001, 0xebffffe1,
-	0xe1140004, 0x12400000, 0xe8bd8010,
+	0xe92d4030, 0xe1a04000, 0xe1a05001, 0xe1100000,
+	0x42600000, 0xe1110001, 0x42611000, 0xebffffe1,
+	0xe1340005, 0x42600000, 0xe1140004, 0x42611000,
+	0xe8bd8030,
 };
 static int moddi3[] = {
-	0xe92d4000, 0xebfffff2, 0xe1a00001, 0xe8bd8000,
+	0xe92d4000, 0xebfffff0, 0xe1a00001, 0xe8bd8000,
 };
 
 void o_write(int fd)
