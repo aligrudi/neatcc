@@ -679,7 +679,7 @@ static void tmp_copy(struct tmp *t1)
 	if (!(t1->loc & (LOC_REG | LOC_MEM)))
 		return;
 	if (t1->loc == LOC_MEM) {
-		tmp_reg(t2, reg_get(~0), 0);
+		tmp_mv(t2, reg_get(~0));
 	} else if (t1->loc == LOC_REG) {
 		t2->addr = TMP_REG2(t2, t1->addr);
 		i_mov(I_MOV, t2->addr, t1->addr);
@@ -799,7 +799,7 @@ void o_assign(unsigned bt)
 		r2 = REG_FP;
 		off = t2->addr + t2->off;
 	} else {
-		tmp_mv(t2, r2);
+		tmp_to(t2, r2);
 	}
 	tmp_drop(2);
 	i_ldr(0, r1, r2, off, bt);
