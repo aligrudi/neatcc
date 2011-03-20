@@ -808,7 +808,7 @@ void o_assign(unsigned bt)
 
 static long cu(int op, long i)
 {
-	switch (op) {
+	switch (op & 0xff) {
 	case O_NEG:
 		return -i;
 	case O_NOT:
@@ -881,7 +881,7 @@ static int c_bop(int op)
 	if (syms + locals == 2 || syms + nums + locals != 2)
 		return 1;
 	if (nums == 1)
-		if ((op != O_ADD && op != O_SUB) || (op == O_SUB && TMP_NUM(t2)))
+		if ((op & 0xff) != O_ADD && ((op & 0xff) != O_SUB || TMP_NUM(t2)))
 			return 1;
 	if (nums == 1) {
 		long o1 = TMP_NUM(t1) ? t1->addr : t1->off;
@@ -905,7 +905,7 @@ void o_uop(int op)
 	if (!c_uop(op))
 		return;
 	tmp_to(TMP(0), r1);
-	switch (op) {
+	switch (op & 0xff) {
 	case O_NEG:
 		i_neg(r1);
 		break;
@@ -935,7 +935,7 @@ static void bin_add(int op)
 	static int rx[] = {I_ADD, I_SUB, I_AND, I_ORR, I_EOR};
 	int r1, r2;
 	bin_regs(&r1, &r2);
-	i_add(rx[op & 0xff], r1, r1, r2);
+	i_add(rx[op & 0x0f], r1, r1, r2);
 	tmp_push(r1);
 }
 
@@ -969,7 +969,7 @@ static int mul_2(int op)
 	long n;
 	int r2;
 	int p;
-	if (op == O_MUL && t2->loc == LOC_NUM && !t2->bt)
+	if ((op & 0xff) == O_MUL && t2->loc == LOC_NUM && !t2->bt)
 		o_tmpswap();
 	if (t1->loc != LOC_NUM || t1->bt)
 		return 1;
