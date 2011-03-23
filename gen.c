@@ -36,7 +36,7 @@ static char ds[SECSIZE];	/* data segment */
 static int dslen;
 static long bsslen;		/* bss segment size */
 
-static int nogen;
+static int nogen;		/* don't generate code */
 static long sp;
 static long func_beg;
 static long maxsp;
@@ -1195,14 +1195,14 @@ void o_call(int argc, int rets)
 		tmp_push(REG_RET);
 }
 
-int o_nogen(void)
+void o_nogen(void)
 {
-	return nogen++;
+	nogen++;
 }
 
 void o_dogen(void)
 {
-	nogen = 0;
+	nogen--;
 }
 
 void dat_bss(char *name, int size, int global)

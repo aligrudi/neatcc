@@ -65,7 +65,7 @@ void o_func_end(void);
 void o_ret(int ret);
 
 void o_write(int fd);
-int o_nogen(void);
+void o_nogen(void);
 void o_dogen(void);
 
 void dat_bss(char *name, int size, int global);

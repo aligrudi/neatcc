@@ -845,10 +845,9 @@ static void readpre(void)
 		struct type t;
 		int op = !tok_jmp('(');
 		if (readtype(&t)) {
-			int nogen = !o_nogen();
+			o_nogen();
 			readexpr();
-			if (nogen)
-				o_dogen();
+			o_dogen();
 			ts_pop(&t);
 			o_tmpdrop(1);
 		}
@@ -1076,25 +1075,22 @@ static void reador(void)
 static int readcexpr_const(void)
 {
 	long c;
-	int nogen;
 	if (o_popnum(&c))
 		return -1;
 	if (!c)
-		nogen = !o_nogen();
+		o_nogen();
 	reador();
 	ts_pop(NULL);
 	tok_expect(':');
 	if (c) {
-		nogen = !o_nogen();
+		o_nogen();
 	} else {
-		if (nogen)
-			o_dogen();
+		o_dogen();
 		o_tmpdrop(1);
 	}
 	reador();
 	if (c) {
-		if (nogen)
-			o_dogen();
+		o_dogen();
 		o_tmpdrop(1);
 	}
 	return 0;
