@@ -96,33 +96,48 @@ static void oi(long n)
 	cslen += 4;
 }
 
-#define NDATS		1024
+#define MAXNUMS		1024
 
 /* data pool */
-static long num_offs[NDATS];		/* data immediate value */
-static char num_names[NDATS][NAMELEN];	/* relocation data symbol name */
-static int ndats;
+static long num_offs[MAXNUMS];			/* data immediate value */
+static char num_names[MAXNUMS][NAMELEN];	/* relocation data symbol name */
+static int nums;
+
+static int pool_find(char *name, int off)
+{
+	int i;
+	for (i = 0; i < nums; i++)
+		if (!strcmp(name, num_names[i]) && off == num_offs[i])
+			return i;
+	return -1;
+}
 
 static int pool_num(long num)
 {
-	int idx = ndats++;
-	num_offs[idx] = num;
-	num_names[idx][0] = '\0';
+	int idx = pool_find("", num);
+	if (idx < 0) {
+		idx = nums++;
+		num_offs[idx] = num;
+		num_names[idx][0] = '\0';
+	}
 	return idx << 2;
 }
 
 static int pool_reloc(char *name, long off)
 {
-	int idx = ndats++;
-	num_offs[idx] = off;
-	strcpy(num_names[idx], name);
+	int idx = pool_find(name, off);
+	if (idx < 0) {
+		idx = nums++;
+		num_offs[idx] = off;
+		strcpy(num_names[idx], name);
+	}
 	return idx << 2;
 }
 
 static void pool_write(void)
 {
 	int i;
-	for (i = 0; i < ndats; i++) {
+	for (i = 0; i < nums; i++) {
 		if (num_names[i])
 			out_rel(num_names[i], OUT_CS, cslen);
 		oi(num_offs[i]);
@@ -429,7 +444,7 @@ static void i_call(char *sym)
 static void i_prolog(void)
 {
 	func_beg = cslen;
-	ndats = 0;
+	nums = 0;
 	oi(0xe1a0c00d);		/* mov   r12, sp */
 	oi(0xe92d000f);		/* stmfd sp!, {r0-r3} */
 	oi(0xe92d5ff0);		/* stmfd sp!, {r0-r11, r12, lr} */
