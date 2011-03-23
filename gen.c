@@ -780,6 +780,10 @@ void o_ret(int rets)
 void o_func_end(void)
 {
 	int i;
+	if (nret && ret[nret - 1] == cslen - 4) {
+		cslen -= 4;
+		nret--;
+	}
 	for (i = 0; i < nret; i++)
 		o_filljmp(ret[i]);
 	i_epilog();
