@@ -319,8 +319,8 @@ static void i_ldr(int l, int rd, int rn, int off, int bt)
 		off = -off;
 	while (off >= maximm) {
 		int imm = add_encimm(off);
-		oi(ADD(neg ? I_SUB : I_ADD, rd, rn, 0, 1, 14) | imm);
-		rn = rd;
+		oi(ADD(neg ? I_SUB : I_ADD, REG_TMP, rn, 0, 1, 14) | imm);
+		rn = REG_TMP;
 		off -= add_decimm(imm);
 	}
 	if (!half)
