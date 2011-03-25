@@ -24,12 +24,6 @@
 #define MIN(a, b)		((a) < (b) ? (a) : (b))
 #define ALIGN(x, a)		(((x) + (a) - 1) & ~((a) - 1))
 
-#define TMP_REG(t)		((t)->loc == LOC_REG ? (t)->addr : reg_get(~0))
-#define TMP_REG2(t, r)		((t)->loc == LOC_REG && (t)->addr != (r) ? \
-					(t)->addr : reg_get(~(1 << (r))))
-#define TMP_REG3(t, r1, r2)	((t)->loc == LOC_REG && (t)->addr != (r1) && (t)->addr != (r2) ? \
-					(t)->addr : reg_get(~((1 << (r1)) | (1 << (r2)))))
-
 static char cs[SECSIZE];	/* code segment */
 static int cslen;
 static char ds[SECSIZE];	/* data segment */
@@ -687,6 +681,13 @@ static int reg_get(int mask)
 	return 0;
 }
 
+static int reg_fortmp(struct tmp *t, int notmask)
+{
+       if (t->loc == LOC_REG && !(notmask & (1 << t->addr)))
+               return t->addr;
+       return reg_get(~notmask);
+}
+
 static void tmp_copy(struct tmp *t1)
 {
 	struct tmp *t2 = tmp_new();
@@ -696,7 +697,7 @@ static void tmp_copy(struct tmp *t1)
 	if (t1->loc == LOC_MEM) {
 		tmp_mv(t2, reg_get(~0));
 	} else if (t1->loc == LOC_REG) {
-		t2->addr = TMP_REG2(t2, t1->addr);
+		t2->addr = reg_fortmp(t2, 1 << t1->addr);
 		i_mov(I_MOV, t2->addr, t1->addr);
 		regs[t2->addr] = t2;
 	}
@@ -719,7 +720,7 @@ void o_cast(unsigned bt)
 		return;
 	}
 	if (BT_SZ(bt) != LONGSZ) {
-		int reg = TMP_REG(t);
+		int reg = reg_fortmp(t, 0);
 		tmp_to(t, reg);
 		if (bt & BT_SIGNED)
 			i_sx(reg, BT_SZ(bt) * 8);
@@ -744,14 +745,14 @@ void o_deref(unsigned bt)
 {
 	struct tmp *t = TMP(0);
 	if (t->bt)
-		tmp_to(t, TMP_REG(t));
+		tmp_to(t, reg_fortmp(t, 0));
 	t->bt = bt;
 }
 
 void o_load(void)
 {
 	struct tmp *t = TMP(0);
-	tmp_to(t, TMP_REG(t));
+	tmp_to(t, reg_fortmp(t, 0));
 }
 
 #define TMP_NUM(t)	((t)->loc == LOC_NUM && !(t)->bt)
@@ -808,8 +809,8 @@ void o_assign(unsigned bt)
 {
 	struct tmp *t1 = TMP(0);
 	struct tmp *t2 = TMP(1);
-	int r1 = TMP_REG(t1);
-	int r2 = TMP_REG2(t2, r1);
+	int r1 = reg_fortmp(t1, 0);
+	int r2 = reg_fortmp(t2, 1 << r1);
 	int off = 0;
 	tmp_to(t1, r1);
 	if (t2->bt)
@@ -920,7 +921,7 @@ static int c_bop(int op)
 
 void o_uop(int op)
 {
-	int r1 = TMP_REG(TMP(0));
+	int r1 = reg_fortmp(TMP(0), 0);
 	if (!c_uop(op))
 		return;
 	tmp_to(TMP(0), r1);
@@ -941,9 +942,9 @@ static void bin_regs(int *r1, int *r2)
 {
 	struct tmp *t2 = TMP(0);
 	struct tmp *t1 = TMP(1);
-	*r2 = TMP_REG(t2);
+	*r2 = reg_fortmp(t2, 0);
 	tmp_to(t2, *r2);
-	*r1 = TMP_REG2(t1, *r2);
+	*r1 = reg_fortmp(t1, 1 << *r2);
 	tmp_pop(*r2);
 	tmp_pop(*r1);
 }
@@ -1005,7 +1006,7 @@ static int mul_2(int op)
 			o_num(0);
 			return 0;
 		}
-		r2 = TMP_REG(t2);
+		r2 = reg_fortmp(t2, 0);
 		tmp_to(t2, r2);
 		i_shl_imm(SM_LSL, r2, p);
 		return 0;
@@ -1014,7 +1015,7 @@ static int mul_2(int op)
 		tmp_drop(1);
 		if (n == 1)
 			return 0;
-		r2 = TMP_REG(t2);
+		r2 = reg_fortmp(t2, 0);
 		tmp_to(t2, r2);
 		i_shl_imm(op & O_SIGNED ? SM_ASR : SM_LSR, r2, p);
 		return 0;
@@ -1026,7 +1027,7 @@ static int mul_2(int op)
 			o_num(0);
 			return 0;
 		}
-		r2 = TMP_REG(t2);
+		r2 = reg_fortmp(t2, 0);
 		tmp_to(t2, r2);
 		i_zx(r2, p);
 		return 0;
@@ -1100,9 +1101,9 @@ static void load_regs2(int *r0, int *r1, int *r2)
 	struct tmp *t0 = TMP(0);
 	struct tmp *t1 = TMP(1);
 	struct tmp *t2 = TMP(2);
-	*r0 = TMP_REG(t0);
-	*r1 = TMP_REG2(t1, *r0);
-	*r2 = TMP_REG3(t2, *r0, *r1);
+	*r0 = reg_fortmp(t0, 0);
+	*r1 = reg_fortmp(t1, 1 << *r0);
+	*r2 = reg_fortmp(t2, (1 << *r0) | (1 << *r1));
 	tmp_to(t0, *r0);
 	tmp_to(t1, *r1);
 	tmp_to(t2, *r2);
@@ -1131,7 +1132,7 @@ long o_mklabel(void)
 
 static long jxz(long addr, int z)
 {
-	int r = TMP_REG(TMP(0));
+	int r = reg_fortmp(TMP(0), 0);
 	tmp_pop(r);
 	i_b_if(addr, r, z);
 	return cslen - 4;
@@ -1174,7 +1175,7 @@ void o_call(int argc, int rets)
 	if (argc > aregs) {
 		sp_push(LONGSZ * (argc - aregs));
 		for (i = argc - 1; i >= aregs; --i) {
-			int reg = TMP_REG(TMP(0));
+			int reg = reg_fortmp(TMP(0), 0);
 			tmp_pop(reg);
 			i_ldr(0, reg, REG_SP, (i - aregs) * LONGSZ, LONGSZ);
 		}
