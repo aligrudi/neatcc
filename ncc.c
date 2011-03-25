@@ -421,8 +421,7 @@ static void enum_create(void)
 		char name[NAMELEN];
 		tok_expect(TOK_NAME);
 		strcpy(name, tok_id());
-		if (tok_see() == '=') {
-			tok_get();
+		if (!tok_jmp('=')) {
 			readexpr();
 			ts_pop(NULL);
 			if (o_popnum(&n))
