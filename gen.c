@@ -711,11 +711,7 @@ void o_tmpcopy(void)
 void o_cast(unsigned bt)
 {
 	struct tmp *t = TMP(0);
-	if (t->bt) {
-		t->bt = bt;
-		return;
-	}
-	if (t->loc == LOC_NUM) {
+	if (!t->bt && t->loc == LOC_NUM) {
 		num_cast(t, bt);
 		return;
 	}
