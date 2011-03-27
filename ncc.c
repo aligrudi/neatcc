@@ -288,7 +288,7 @@ static void ts_pop_de(struct type *t)
 		t = &de;
 	ts_pop(t);
 	array2ptr(t);
-	if (t->addr && !(t->flags & T_FUNC))
+	if (t->addr && (t->ptr || !(t->flags & T_FUNC)))
 		o_deref(TYPE_BT(t));
 	t->addr = 0;
 }
