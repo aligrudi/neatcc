@@ -545,7 +545,7 @@ static char *tmp_str(char *buf, int len)
 	static int id;
 	void *dat;
 	sprintf(name, "__neatcc.s%d", id++);
-	dat = dat_dat(name, len, 0);
+	dat = o_mkdat(name, len, 0);
 	memcpy(dat, buf, len);
 	return name;
 }
@@ -1342,9 +1342,9 @@ static void globaldef(void *data, struct name *name, unsigned flags)
 	sz = type_totsz(t);
 	if (!(flags & F_EXTERN) && (!(t->flags & T_FUNC) || t->ptr)) {
 		if (flags & F_INIT)
-			name->addr = (long) dat_dat(elfname, sz, F_GLOBAL(flags));
+			name->addr = (long) o_mkdat(elfname, sz, F_GLOBAL(flags));
 		else
-			dat_bss(elfname, sz, F_GLOBAL(flags));
+			o_mkbss(elfname, sz, F_GLOBAL(flags));
 	}
 	global_add(name);
 	if (flags & F_INIT)

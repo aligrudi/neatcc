@@ -1199,7 +1199,7 @@ void o_dogen(void)
 	nogen--;
 }
 
-void dat_bss(char *name, int size, int global)
+void o_mkbss(char *name, int size, int global)
 {
 	out_sym(name, OUT_BSS | (global ? OUT_GLOB : 0), bsslen, size);
 	bsslen += ALIGN(size, LONGSZ);
@@ -1211,7 +1211,7 @@ static int dat_offs[MAXDATS];
 static int ndats;
 
 void err(char *msg);
-void *dat_dat(char *name, int size, int global)
+void *o_mkdat(char *name, int size, int global)
 {
 	void *addr = ds + dslen;
 	int idx = ndats++;

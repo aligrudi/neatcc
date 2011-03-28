@@ -65,8 +65,8 @@ void o_fork(void);
 void o_forkpush(void);
 void o_forkjoin(void);
 /* data/bss sections */
-void dat_bss(char *name, int size, int global);
-void *dat_dat(char *name, int size, int global);
+void o_mkbss(char *name, int size, int global);
+void *o_mkdat(char *name, int size, int global);
 void o_datset(char *name, int off, unsigned bt);
 /* functions */
 void o_func_beg(char *name, int global);
