@@ -1415,7 +1415,7 @@ static void funcdef(char *name, struct type *type, struct name *args,
 	o_func_beg(name, F_GLOBAL(flags));
 	global_add(&global);
 	for (i = 0; i < nargs; i++) {
-		args[i].addr = o_arg(i);
+		args[i].addr = o_arg2loc(i);
 		local_add(&args[i]);
 	}
 }

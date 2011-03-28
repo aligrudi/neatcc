@@ -793,7 +793,7 @@ void o_rmlocal(long addr, int sz)
 	sp = addr - sz;
 }
 
-long o_arg(int i)
+long o_arg2loc(int i)
 {
 	return -(10 + i) << 2;
 }
