@@ -397,6 +397,7 @@ static void i_b_if(long addr, int rn, int z)
 		return;
 	}
 	cslen = last_cmp;
+	last_set = -1;
 	oi(BL(z ? nots[last_cond] : last_cond, 0, addr - cslen));
 }
 
