@@ -345,7 +345,7 @@ static void i_neg(int rd)
 
 static void i_not(int rd)
 {
-	oi(ADD(I_MVN, rd, 0, rd, 1, 14));
+	oi(ADD(I_MVN, rd, 0, 0, 0, 14) | rd);
 }
 
 static void i_lnot(int rd)
