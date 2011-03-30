@@ -315,10 +315,12 @@ static void macro_define(void)
 		while (cur < len && buf[cur] != ')') {
 			readarg(d->args[d->nargs++]);
 			jumpws();
-			if (buf[cur++] != ',')
+			if (buf[cur] != ',')
 				break;
+			cur++;
 			jumpws();
 		}
+		cur++;
 		d->isfunc = 1;
 	}
 	read_tilleol(d->def);
