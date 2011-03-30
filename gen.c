@@ -71,11 +71,6 @@ static int nret;
 /* output div/mod functions */
 static int putdiv = 0;
 
-/* for optimizing cmp + bcc */
-static long last_cmp = -1;
-static long last_set = -1;
-static long last_cond;
-
 static void os(void *s, int n)
 {
 	memcpy(cs + cslen, s, n);
@@ -240,13 +235,10 @@ static void i_mul(int rd, int rn, int rm)
 static void i_cmp(int op, int rn, int rm)
 {
 	oi(ADD(op, 0, rn, 1, 0, 14) | rm);
-	last_cmp = cslen;
 }
 
 static void i_set(int cond, int rd)
 {
-	last_set = cslen;
-	last_cond = cond;
 	oi(ADD(I_MOV, rd, 0, 0, 1, 14));
 	oi(ADD(I_MOV, rd, 0, 0, 1, cond) | 1);
 }
@@ -390,15 +382,8 @@ static void i_b(long addr)
 
 static void i_b_if(long addr, int rn, int z)
 {
-	static int nots[] = {1, 0, 3, 2, -1, -1, -1, -1, 9, 8, 11, 10, 13, 12, -1};
-	if (last_cmp + 8 != cslen || last_set != last_cmp) {
-		i_cmp(I_TST, rn, rn);
-		oi(BL(z ? 0 : 1, 0, addr - cslen));
-		return;
-	}
-	cslen = last_cmp;
-	last_set = -1;
-	oi(BL(z ? nots[last_cond] : last_cond, 0, addr - cslen));
+	i_cmp(I_TST, rn, rn);
+	oi(BL(z ? 0 : 1, 0, addr - cslen));
 }
 
 static void i_b_fill(long *dst, int diff)
