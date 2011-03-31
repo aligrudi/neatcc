@@ -150,11 +150,6 @@ static void pool_write(void)
 	(((cond) << 28) | ((i) << 25) | ((s) << 20) | \
 		((op) << 21) | ((rn) << 16) | ((rd) << 12))
 
-static void i_add(int op, int rd, int rn, int rm)
-{
-	oi(ADD(op, rd, rn, 0, 0, 14) | rm);
-}
-
 static int add_encimm(unsigned n)
 {
 	int i = 0;
@@ -182,6 +177,16 @@ static int add_rndimm(unsigned n)
 	return ((num + 1) & 0xff) | (rot << 8);
 }
 
+static void i_add(int op, int rd, int rn, int rm)
+{
+	oi(ADD(op, rd, rn, 0, 0, 14) | rm);
+}
+
+static void i_add_imm(int op, int rd, int rn, long n)
+{
+	oi(ADD(op, rd, rn, 0, 1, 14) | add_encimm(n));
+}
+
 static void i_ldr(int l, int rd, int rn, int off, int bt);
 
 static void i_num(int rd, long n)
@@ -197,11 +202,6 @@ static void i_num(int rd, long n)
 			i_ldr(1, rd, REG_DP, off, LONGSZ);
 		}
 	}
-}
-
-static void i_add_imm(int op, int rd, int rn, long n)
-{
-	oi(ADD(op, rd, rn, 0, 1, 14) | add_encimm(n));
 }
 
 static void i_add_anyimm(int rd, int rn, long n)
@@ -240,6 +240,11 @@ static void i_mul(int rd, int rn, int rm)
 static void i_cmp(int op, int rn, int rm)
 {
 	oi(ADD(op, 0, rn, 1, 0, 14) | rm);
+}
+
+static void i_cmp_imm(int op, int rn, long n)
+{
+	oi(ADD(op, 0, rn, 1, 1, 14) | add_encimm(n));
 }
 
 static void i_set(int cond, int rd)
@@ -1086,8 +1091,13 @@ static void bin_cmp(int op)
 	static int ucond[] = {3, 8, 9, 2, 0, 1};
 	static int scond[] = {11, 12, 13, 10, 0, 1};
 	int r1, r2;
-	bin_regs(&r1, &r2);
-	i_cmp(I_CMP, r1, r2);
+	long n;
+	if (!bop_imm(&r1, &n, 0)) {
+		i_cmp_imm(I_CMP, r1, n);
+	} else {
+		bin_regs(&r1, &r2);
+		i_cmp(I_CMP, r1, r2);
+	}
 	i_set(op & O_SIGNED ? scond[op & 0x0f] : ucond[op & 0x0f], r1);
 	tmp_push(r1);
 }
