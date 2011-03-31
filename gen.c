@@ -158,7 +158,7 @@ static int add_encimm(unsigned n)
 	return (n >> (i << 1)) | (((16 - i) & 0x0f) << 8);
 }
 
-static int add_decimm(unsigned n)
+static unsigned add_decimm(int n)
 {
 	int rot = (16 - ((n >> 8) & 0x0f)) & 0x0f;
 	return (n & 0xff) << (rot << 1);
@@ -191,16 +191,19 @@ static void i_ldr(int l, int rd, int rn, int off, int bt);
 
 static void i_num(int rd, long n)
 {
-	int neg = n < 0;
-	int p = neg ? -n - 1 : n;
-	int enc = add_encimm(p);
-	if (p == add_decimm(enc)) {
-		oi(ADD(neg ? I_MVN : I_MOV, rd, 0, 0, 1, 14) | enc);
-	} else {
-		if (!nogen) {
-			int off = pool_num(n);
-			i_ldr(1, rd, REG_DP, off, LONGSZ);
-		}
+	int enc = add_encimm(n);
+	if (n == add_decimm(enc)) {
+		oi(ADD(I_MOV, rd, 0, 0, 1, 14) | enc);
+		return;
+	}
+	enc = add_encimm(-n - 1);
+	if (~n == add_decimm(enc)) {
+		oi(ADD(I_MVN, rd, 0, 0, 1, 14) | enc);
+		return;
+	}
+	if (!nogen) {
+		int off = pool_num(n);
+		i_ldr(1, rd, REG_DP, off, LONGSZ);
 	}
 }
 
@@ -944,7 +947,7 @@ static int bop_imm(int *r1, long *n, int swap)
 	if (!TMP_NUM(t1) && (!swap || !TMP_NUM(t2)))
 		return 1;
 	*n = TMP_NUM(t1) ? t1->addr : t2->addr;
-	if (*n < 0 || add_decimm(add_encimm(*n)) != *n)
+	if (add_decimm(add_encimm(*n)) != *n)
 		return 1;
 	if (!TMP_NUM(t1))
 		o_tmpswap();
