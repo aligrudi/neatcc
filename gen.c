@@ -1092,7 +1092,7 @@ static void bin_cmp(int op)
 	static int scond[] = {11, 12, 13, 10, 0, 1};
 	int r1, r2;
 	long n;
-	if (!bop_imm(&r1, &n, 0)) {
+	if (!bop_imm(&r1, &n, (op & 0xff) == O_EQ || (op & 0xff) == O_NEQ)) {
 		i_cmp_imm(I_CMP, r1, n);
 	} else {
 		bin_regs(&r1, &r2);
