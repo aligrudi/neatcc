@@ -199,7 +199,12 @@ static void i_num(int rd, long n)
 	}
 }
 
-static void i_add_imm(int op, int rd, int rn, int n)
+static void i_add_imm(int op, int rd, int rn, long n)
+{
+	oi(ADD(op, rd, rn, 0, 1, 14) | add_encimm(n));
+}
+
+static void i_add_anyimm(int rd, int rn, long n)
 {
 	int neg = n < 0;
 	int imm = add_encimm(neg ? -n : n);
@@ -252,9 +257,9 @@ static void i_shl(int sm, int rd, int rm, int rs)
 	oi(ADD(I_MOV, rd, 0, 0, 0, 14) | (rs << 8) | (sm << 5) | (1 << 4) | rm);
 }
 
-static void i_shl_imm(int sm, int rd, int n)
+static void i_shl_imm(int sm, int rd, int rn, long n)
 {
-	oi(ADD(I_MOV, rd, 0, 0, 0, 14) | (n << 7) | (sm << 5) | rd);
+	oi(ADD(I_MOV, rd, 0, 0, 0, 14) | (n << 7) | (sm << 5) | rn);
 }
 
 static void i_mov(int op, int rd, int rn)
@@ -353,15 +358,15 @@ static void i_zx(int rd, int bits)
 	if (bits <= 8) {
 		oi(ADD(I_AND, rd, rd, 0, 1, 14) | add_encimm((1 << bits) - 1));
 	} else {
-		i_shl_imm(SM_LSL, rd, 32 - bits);
-		i_shl_imm(SM_LSR, rd, 32 - bits);
+		i_shl_imm(SM_LSL, rd, rd, 32 - bits);
+		i_shl_imm(SM_LSR, rd, rd, 32 - bits);
 	}
 }
 
 static void i_sx(int rd, int bits)
 {
-	i_shl_imm(SM_LSL, rd, 32 - bits);
-	i_shl_imm(SM_ASR, rd, 32 - bits);
+	i_shl_imm(SM_LSL, rd, rd, 32 - bits);
+	i_shl_imm(SM_ASR, rd, rd, 32 - bits);
 }
 
 /*
@@ -508,7 +513,7 @@ static void tmp_reg(struct tmp *tmp, int dst, int deref)
 		if (deref)
 			i_ldr(1, dst, REG_FP, tmp->addr + tmp->off, bt);
 		else
-			i_add_imm(I_ADD, dst, REG_FP, tmp->addr + tmp->off);
+			i_add_anyimm(dst, REG_FP, tmp->addr + tmp->off);
 	}
 	if (tmp->loc == LOC_MEM) {
 		i_ldr(1, dst, REG_FP, tmp->addr, LONGSZ);
@@ -927,13 +932,35 @@ static void bin_regs(int *r1, int *r2)
 	tmp_pop(*r1);
 }
 
+static int bop_imm(int *r1, long *n, int swap)
+{
+	struct tmp *t1 = TMP(0);
+	struct tmp *t2 = TMP(1);
+	if (!TMP_NUM(t1) && (!swap || !TMP_NUM(t2)))
+		return 1;
+	*n = TMP_NUM(t1) ? t1->addr : t2->addr;
+	if (*n < 0 || add_decimm(add_encimm(*n)) != *n)
+		return 1;
+	if (!TMP_NUM(t1))
+		o_tmpswap();
+	*r1 = reg_fortmp(t2, 0);
+	tmp_drop(1);
+	tmp_pop(*r1);
+	return 0;
+}
+
 static void bin_add(int op)
 {
 	/* opcode for O_ADD, O_SUB, O_AND, O_OR, O_XOR */
 	static int rx[] = {I_ADD, I_SUB, I_AND, I_ORR, I_EOR};
 	int r1, r2;
-	bin_regs(&r1, &r2);
-	i_add(rx[op & 0x0f], r1, r1, r2);
+	long n;
+	if (!bop_imm(&r1, &n, (op & 0xff) != O_SUB)) {
+		i_add_imm(rx[op & 0x0f], r1, r1, n);
+	} else {
+		bin_regs(&r1, &r2);
+		i_add(rx[op & 0x0f], r1, r1, r2);
+	}
 	tmp_push(r1);
 }
 
@@ -941,10 +968,15 @@ static void bin_shx(int op)
 {
 	int sm = SM_LSL;
 	int r1, r2;
-	bin_regs(&r1, &r2);
+	long n;
 	if ((op & 0x0f) == 1)
 		sm = op & O_SIGNED ? SM_ASR : SM_LSR;
-	i_shl(sm, r1, r1, r2);
+	if (!bop_imm(&r1, &n, 0)) {
+		i_shl_imm(sm, r1, r1, n);
+	} else {
+		bin_regs(&r1, &r2);
+		i_shl(sm, r1, r1, r2);
+	}
 	tmp_push(r1);
 }
 
@@ -986,7 +1018,7 @@ static int mul_2(int op)
 		}
 		r2 = reg_fortmp(t2, 0);
 		tmp_to(t2, r2);
-		i_shl_imm(SM_LSL, r2, p);
+		i_shl_imm(SM_LSL, r2, r2, p);
 		return 0;
 	}
 	if (op == O_DIV) {
@@ -995,7 +1027,7 @@ static int mul_2(int op)
 			return 0;
 		r2 = reg_fortmp(t2, 0);
 		tmp_to(t2, r2);
-		i_shl_imm(op & O_SIGNED ? SM_ASR : SM_LSR, r2, p);
+		i_shl_imm(op & O_SIGNED ? SM_ASR : SM_LSR, r2, r2, p);
 		return 0;
 	}
 	if (op == O_MOD) {
