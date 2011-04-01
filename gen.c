@@ -356,8 +356,7 @@ static void i_not(int rd)
 static void i_lnot(int rd)
 {
 	i_cmp(I_TST, rd, rd);
-	oi(ADD(I_MOV, rd, 0, 0, 1, 14));
-	oi(ADD(I_MOV, rd, 0, 0, 1, 0) | 1);
+	i_set(0, rd);
 }
 
 /* rd = rd & ((1 << bits) - 1) */
