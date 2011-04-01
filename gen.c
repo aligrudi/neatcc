@@ -724,7 +724,7 @@ void o_cast(unsigned bt)
 	}
 }
 
-void o_func_beg(char *name, int global)
+void o_func_beg(char *name, int argc, int global, int vararg)
 {
 	out_sym(name, (global ? OUT_GLOB : 0) | OUT_CS, cslen, 0);
 	i_prolog();

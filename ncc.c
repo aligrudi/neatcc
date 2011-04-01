@@ -3,7 +3,7 @@
  *
  * Copyright (C) 2010-2011 Ali Gholami Rudi
  *
- * This file is released under GNU GPL version 2.
+ * This program is released under GNU GPL version 2.
  */
 #include <fcntl.h>
 #include <unistd.h>
@@ -692,6 +692,7 @@ static struct funcinfo {
 	struct type args[MAXFIELDS];
 	struct type ret;
 	int nargs;
+	int varg;
 } funcs[MAXFUNCS];
 static int nfuncs;
 
@@ -1405,14 +1406,14 @@ static void localdef(void *data, struct name *name, unsigned flags)
 }
 
 static void funcdef(char *name, struct type *type, struct name *args,
-			int nargs, unsigned flags)
+			int nargs, int varg, unsigned flags)
 {
 	struct name global = {""};
 	int i;
 	strcpy(global.name, name);
 	strcpy(func_name, name);
 	memcpy(&global.type, type, sizeof(*type));
-	o_func_beg(name, F_GLOBAL(flags));
+	o_func_beg(name, nargs, F_GLOBAL(flags), varg);
 	global_add(&global);
 	for (i = 0; i < nargs; i++) {
 		args[i].addr = o_arg2loc(i);
@@ -1420,13 +1421,16 @@ static void funcdef(char *name, struct type *type, struct name *args,
 	}
 }
 
-static int readargs(struct name *args)
+static int readargs(struct name *args, int *varg)
 {
 	int nargs = 0;
 	tok_expect('(');
+	*varg = 0;
 	while (tok_see() != ')') {
-		if (!tok_jmp(TOK3("...")))
+		if (!tok_jmp(TOK3("..."))) {
+			*varg = 1;
 			break;
+		}
 		readname(&args[nargs].type, args[nargs].name, NULL, 0);
 		array2ptr(&args[nargs].type);
 		nargs++;
@@ -1491,7 +1495,8 @@ static int readname(struct type *main, char *name,
 		tok_expect(')');
 	if (tok_see() == '(') {
 		struct name args[MAXARGS] = {{""}};
-		int nargs = readargs(args);
+		int varg = 0;
+		int nargs = readargs(args, &varg);
 		int fdef = !func;
 		if (!func) {
 			ret = type;
@@ -1502,7 +1507,7 @@ static int readname(struct type *main, char *name,
 		func->bt = LONGSZ;
 		func->id = func_create(ret, args, nargs);
 		if (fdef && tok_see() == '{') {
-			funcdef(name, func, args, nargs, flags);
+			funcdef(name, func, args, nargs, varg, flags);
 			return 1;
 		}
 	}

@@ -3,9 +3,9 @@
 #define LONGSZ		4
 
 /* basic types */
-#define BT_SZMASK		0x00ff
-#define BT_SIGNED		0x0100
-#define BT_SZ(bt)		((bt) & BT_SZMASK)
+#define BT_SZMASK	0x00ff
+#define BT_SIGNED	0x0100
+#define BT_SZ(bt)	((bt) & BT_SZMASK)
 
 #define O_SIGNED	0x100
 /* binary operations for o_bop() */
@@ -69,7 +69,7 @@ void o_mkbss(char *name, int size, int global);
 void *o_mkdat(char *name, int size, int global);
 void o_datset(char *name, int off, unsigned bt);
 /* functions */
-void o_func_beg(char *name, int global);
+void o_func_beg(char *name, int argc, int global, int vararg);
 void o_func_end(void);
 /* output */
 void o_write(int fd);
