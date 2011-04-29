@@ -49,11 +49,7 @@ static int ntmp;
 
 static int tmpsp;
 
-#define SM_LSL		0
-#define SM_LSR		1
-#define SM_ASR		2
-
-/* arch-specific */
+/* arch-specific functions */
 static void i_ldr(int l, int rd, int rn, int off, int bt);
 static void i_add(int op, int rd, int rn, int rm);
 static void i_add_imm(int op, int rd, int rn, long n);
@@ -63,9 +59,9 @@ static void i_mul(int rd, int rn, int rm);
 static void i_cmp(int op, int rn, int rm);
 static void i_cmp_imm(int op, int rn, long n);
 static int i_decodeable(long imm);
-static void i_set(int cond, int rd);
-static void i_shl(int sm, int rd, int rm, int rs);
-static void i_shl_imm(int sm, int rd, int rn, long n);
+static void i_set(int op, int rd);
+static void i_shl(int op, int rd, int rm, int rs);
+static void i_shl_imm(int op, int rd, int rn, long n);
 static void i_mov(int rd, int rn);
 static void i_ldr(int l, int rd, int rn, int off, int bt);
 static void i_sym(int rd, char *sym, int off);
@@ -617,31 +613,26 @@ static int bop_imm(int *r1, long *n, int swap)
 
 static void bin_add(int op)
 {
-	/* opcode for O_ADD, O_SUB, O_AND, O_OR, O_XOR */
-	static int rx[] = {I_ADD, I_SUB, I_AND, I_ORR, I_EOR};
 	int r1, r2;
 	long n;
 	if (!bop_imm(&r1, &n, (op & 0xff) != O_SUB)) {
-		i_add_imm(rx[op & 0x0f], r1, r1, n);
+		i_add_imm(op, r1, r1, n);
 	} else {
 		bin_regs(&r1, &r2);
-		i_add(rx[op & 0x0f], r1, r1, r2);
+		i_add(op, r1, r1, r2);
 	}
 	tmp_push(r1);
 }
 
 static void bin_shx(int op)
 {
-	int sm = SM_LSL;
 	int r1, r2;
 	long n;
-	if ((op & 0x0f) == 1)
-		sm = op & O_SIGNED ? SM_ASR : SM_LSR;
 	if (!bop_imm(&r1, &n, 0)) {
-		i_shl_imm(sm, r1, r1, n);
+		i_shl_imm(op, r1, r1, n);
 	} else {
 		bin_regs(&r1, &r2);
-		i_shl(sm, r1, r1, r2);
+		i_shl(op, r1, r1, r2);
 	}
 	tmp_push(r1);
 }
@@ -684,7 +675,7 @@ static int mul_2(int op)
 		}
 		r2 = reg_fortmp(t2, 0);
 		tmp_to(t2, r2);
-		i_shl_imm(SM_LSL, r2, r2, p);
+		i_shl_imm(O_SHL, r2, r2, p);
 		return 0;
 	}
 	if (op == O_DIV) {
@@ -693,7 +684,7 @@ static int mul_2(int op)
 			return 0;
 		r2 = reg_fortmp(t2, 0);
 		tmp_to(t2, r2);
-		i_shl_imm(op & O_SIGNED ? SM_ASR : SM_LSR, r2, r2, p);
+		i_shl_imm((op & O_SIGNED) | O_SHR, r2, r2, p);
 		return 0;
 	}
 	if (op == O_MOD) {
@@ -748,9 +739,6 @@ static void bin_mul(int op)
 
 static void bin_cmp(int op)
 {
-	/* lt, gt, le, ge, eq, neq */
-	static int ucond[] = {3, 8, 9, 2, 0, 1};
-	static int scond[] = {11, 12, 13, 10, 0, 1};
 	int r1, r2;
 	long n;
 	if (!bop_imm(&r1, &n, (op & 0xff) == O_EQ || (op & 0xff) == O_NEQ)) {
@@ -759,7 +747,7 @@ static void bin_cmp(int op)
 		bin_regs(&r1, &r2);
 		i_cmp(I_CMP, r1, r2);
 	}
-	i_set(op & O_SIGNED ? scond[op & 0x0f] : ucond[op & 0x0f], r1);
+	i_set(op, r1);
 	tmp_push(r1);
 }
 
@@ -972,6 +960,8 @@ void o_write(int fd)
 	out_write(fd, cs, cslen, ds, dslen);
 }
 
+/* arch specific functions */
+
 #define MAXNUMS		1024
 
 /* data pool */
@@ -1064,9 +1054,16 @@ static int add_rndimm(unsigned n)
 	return ((num + 1) & 0xff) | (rot << 8);
 }
 
+static int opcode_add(int op)
+{
+	/* opcode for O_ADD, O_SUB, O_AND, O_OR, O_XOR */
+	static int rx[] = {I_ADD, I_SUB, I_AND, I_ORR, I_EOR};
+	return rx[op & 0x0f];
+}
+
 static void i_add(int op, int rd, int rn, int rm)
 {
-	oi(ADD(op, rd, rn, 0, 0, 14) | rm);
+	oi(ADD(opcode_add(op), rd, rn, 0, 0, 14) | rm);
 }
 
 static int i_decodeable(long imm)
@@ -1076,7 +1073,7 @@ static int i_decodeable(long imm)
 
 static void i_add_imm(int op, int rd, int rn, long n)
 {
-	oi(ADD(op, rd, rn, 0, 1, 14) | add_encimm(n));
+	oi(ADD(opcode_add(op), rd, rn, 0, 1, 14) | add_encimm(n));
 }
 
 static void i_num(int rd, long n)
@@ -1105,7 +1102,7 @@ static void i_add_anyimm(int rd, int rn, long n)
 		oi(ADD(neg ? I_SUB : I_ADD, rd, rn, 0, 1, 14) | imm);
 	} else {
 		i_num(rd, n);
-		i_add(I_ADD, rd, rd, rn);
+		i_add(O_ADD, rd, rd, rn);
 	}
 }
 
@@ -1130,6 +1127,14 @@ static void i_mul(int rd, int rn, int rm)
 	oi(MUL(rd, rn, rm));
 }
 
+static int opcode_set(int op)
+{
+	/* lt, gt, le, ge, eq, neq */
+	static int ucond[] = {3, 8, 9, 2, 0, 1};
+	static int scond[] = {11, 12, 13, 10, 0, 1};
+	return op & O_SIGNED ? scond[op & 0x0f] : ucond[op & 0x0f];
+}
+
 static void i_cmp(int op, int rn, int rm)
 {
 	oi(ADD(op, 0, rn, 1, 0, 14) | rm);
@@ -1143,16 +1148,29 @@ static void i_cmp_imm(int op, int rn, long n)
 static void i_set(int cond, int rd)
 {
 	oi(ADD(I_MOV, rd, 0, 0, 1, 14));
-	oi(ADD(I_MOV, rd, 0, 0, 1, cond) | 1);
+	oi(ADD(I_MOV, rd, 0, 0, 1, opcode_set(cond)) | 1);
 }
 
-static void i_shl(int sm, int rd, int rm, int rs)
+#define SM_LSL		0
+#define SM_LSR		1
+#define SM_ASR		2
+
+static int opcode_shl(int op)
 {
+	if (op & 0x0f)
+		return op & O_SIGNED ? SM_ASR : SM_LSR;
+	return SM_LSL;
+}
+
+static void i_shl(int op, int rd, int rm, int rs)
+{
+	int sm = opcode_shl(op);
 	oi(ADD(I_MOV, rd, 0, 0, 0, 14) | (rs << 8) | (sm << 5) | (1 << 4) | rm);
 }
 
-static void i_shl_imm(int sm, int rd, int rn, long n)
+static void i_shl_imm(int op, int rd, int rn, long n)
 {
+	int sm = opcode_shl(op);
 	oi(ADD(I_MOV, rd, 0, 0, 0, 14) | (n << 7) | (sm << 5) | rn);
 }
 
@@ -1242,7 +1260,7 @@ static void i_not(int rd)
 static void i_lnot(int rd)
 {
 	i_cmp(I_TST, rd, rd);
-	i_set(0, rd);
+	i_set(O_EQ, rd);
 }
 
 /* rd = rd & ((1 << bits) - 1) */
@@ -1251,15 +1269,15 @@ static void i_zx(int rd, int bits)
 	if (bits <= 8) {
 		oi(ADD(I_AND, rd, rd, 0, 1, 14) | add_encimm((1 << bits) - 1));
 	} else {
-		i_shl_imm(SM_LSL, rd, rd, 32 - bits);
-		i_shl_imm(SM_LSR, rd, rd, 32 - bits);
+		i_shl_imm(O_SHL, rd, rd, 32 - bits);
+		i_shl_imm(O_SHR, rd, rd, 32 - bits);
 	}
 }
 
 static void i_sx(int rd, int bits)
 {
-	i_shl_imm(SM_LSL, rd, rd, 32 - bits);
-	i_shl_imm(SM_ASR, rd, rd, 32 - bits);
+	i_shl_imm(O_SHL, rd, rd, 32 - bits);
+	i_shl_imm(O_SIGNED | O_SHR, rd, rd, 32 - bits);
 }
 
 /*
