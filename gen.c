@@ -20,6 +20,7 @@
 #define REG_FP		11	/* frame pointer register */
 #define REG_DP		10	/* data pointer register */
 #define REG_RET		0	/* returned value register */
+#define FORK_REG	0	/* result of conditional branches */
 
 #define MIN(a, b)		((a) < (b) ? (a) : (b))
 #define ALIGN(x, a)		(((x) + (a) - 1) & ~((a) - 1))
@@ -47,6 +48,41 @@ static struct tmp {
 static int ntmp;
 
 static int tmpsp;
+
+#define SM_LSL		0
+#define SM_LSR		1
+#define SM_ASR		2
+
+/* arch-specific */
+static void i_ldr(int l, int rd, int rn, int off, int bt);
+static void i_add(int op, int rd, int rn, int rm);
+static void i_add_imm(int op, int rd, int rn, long n);
+static void i_num(int rd, long n);
+static void i_add_anyimm(int rd, int rn, long n);
+static void i_mul(int rd, int rn, int rm);
+static void i_cmp(int op, int rn, int rm);
+static void i_cmp_imm(int op, int rn, long n);
+static int i_decodeable(long imm);
+static void i_set(int cond, int rd);
+static void i_shl(int sm, int rd, int rm, int rs);
+static void i_shl_imm(int sm, int rd, int rn, long n);
+static void i_mov(int rd, int rn);
+static void i_ldr(int l, int rd, int rn, int off, int bt);
+static void i_sym(int rd, char *sym, int off);
+static void i_neg(int rd);
+static void i_not(int rd);
+static void i_lnot(int rd);
+static void i_zx(int rd, int bits);
+static void i_sx(int rd, int bits);
+static void i_b(long addr);
+static void i_b_if(long addr, int rn, int z);
+static void i_b_fill(long *dst, int diff);
+static void i_memcpy(int rd, int rs, int rn);
+static void i_memset(int rd, int rs, int rn);
+static void i_call_reg(int rd);
+static void i_call(char *sym);
+static void i_prolog(void);
+static void i_epilog(void);
 
 static struct tmp *regs[NREGS];
 static int tmpregs[] = {4, 5, 6, 7, 8, 9, 0, 1, 2, 3};
@@ -83,381 +119,6 @@ static void oi(long n)
 		return;
 	*(int *) (cs + cslen) = n;
 	cslen += 4;
-}
-
-#define MAXNUMS		1024
-
-/* data pool */
-static long num_offs[MAXNUMS];			/* data immediate value */
-static char num_names[MAXNUMS][NAMELEN];	/* relocation data symbol name */
-static int nums;
-
-static int pool_find(char *name, int off)
-{
-	int i;
-	for (i = 0; i < nums; i++)
-		if (!strcmp(name, num_names[i]) && off == num_offs[i])
-			return i;
-	return -1;
-}
-
-static int pool_num(long num)
-{
-	int idx = pool_find("", num);
-	if (idx < 0) {
-		idx = nums++;
-		num_offs[idx] = num;
-		num_names[idx][0] = '\0';
-	}
-	return idx << 2;
-}
-
-static int pool_reloc(char *name, long off)
-{
-	int idx = pool_find(name, off);
-	if (idx < 0) {
-		idx = nums++;
-		num_offs[idx] = off;
-		strcpy(num_names[idx], name);
-	}
-	return idx << 2;
-}
-
-static void pool_write(void)
-{
-	int i;
-	for (i = 0; i < nums; i++) {
-		if (num_names[i])
-			out_rel(num_names[i], OUT_CS, cslen);
-		oi(num_offs[i]);
-	}
-}
-
-/*
- * data processing:
- * +---------------------------------------+
- * |COND|00|I| op |S| Rn | Rd |  operand2  |
- * +---------------------------------------+
- *
- * S: set condition code
- * Rn: first operand
- * Rd: destination operand
- *
- * I=0 operand2=| shift  | Rm |
- * I=1 operand2=|rota|  imm   |
- */
-#define ADD(op, rd, rn, s, i, cond)	\
-	(((cond) << 28) | ((i) << 25) | ((s) << 20) | \
-		((op) << 21) | ((rn) << 16) | ((rd) << 12))
-
-static int add_encimm(unsigned n)
-{
-	int i = 0;
-	while (i < 12 && (n >> ((4 + i) << 1)))
-		i++;
-	return (n >> (i << 1)) | (((16 - i) & 0x0f) << 8);
-}
-
-static unsigned add_decimm(int n)
-{
-	int rot = (16 - ((n >> 8) & 0x0f)) & 0x0f;
-	return (n & 0xff) << (rot << 1);
-}
-
-static int add_rndimm(unsigned n)
-{
-	int rot = (n >> 8) & 0x0f;
-	int num = n & 0xff;
-	if (rot == 0)
-		return n;
-	if (num == 0xff) {
-		num = 0;
-		rot = (rot + 12) & 0x0f;
-	}
-	return ((num + 1) & 0xff) | (rot << 8);
-}
-
-static void i_add(int op, int rd, int rn, int rm)
-{
-	oi(ADD(op, rd, rn, 0, 0, 14) | rm);
-}
-
-static void i_add_imm(int op, int rd, int rn, long n)
-{
-	oi(ADD(op, rd, rn, 0, 1, 14) | add_encimm(n));
-}
-
-static void i_ldr(int l, int rd, int rn, int off, int bt);
-
-static void i_num(int rd, long n)
-{
-	int enc = add_encimm(n);
-	if (n == add_decimm(enc)) {
-		oi(ADD(I_MOV, rd, 0, 0, 1, 14) | enc);
-		return;
-	}
-	enc = add_encimm(-n - 1);
-	if (~n == add_decimm(enc)) {
-		oi(ADD(I_MVN, rd, 0, 0, 1, 14) | enc);
-		return;
-	}
-	if (!nogen) {
-		int off = pool_num(n);
-		i_ldr(1, rd, REG_DP, off, LONGSZ);
-	}
-}
-
-static void i_add_anyimm(int rd, int rn, long n)
-{
-	int neg = n < 0;
-	int imm = add_encimm(neg ? -n : n);
-	if (imm == add_decimm(neg ? -n : n)) {
-		oi(ADD(neg ? I_SUB : I_ADD, rd, rn, 0, 1, 14) | imm);
-	} else {
-		i_num(rd, n);
-		i_add(I_ADD, rd, rd, rn);
-	}
-}
-
-/*
- * multiply
- * +----------------------------------------+
- * |COND|000000|A|S| Rd | Rn | Rs |1001| Rm |
- * +----------------------------------------+
- *
- * Rd: destination
- * A: accumulate
- * C: set condition codes
- *
- * I=0 operand2=| shift  | Rm |
- * I=1 operand2=|rota|  imm   |
- */
-#define MUL(rd, rn, rs)		\
-	((14 << 28) | ((rd) << 16) | ((0) << 12) | ((rn) << 8) | ((9) << 4) | (rm))
-
-static void i_mul(int rd, int rn, int rm)
-{
-	oi(MUL(rd, rn, rm));
-}
-
-static void i_cmp(int op, int rn, int rm)
-{
-	oi(ADD(op, 0, rn, 1, 0, 14) | rm);
-}
-
-static void i_cmp_imm(int op, int rn, long n)
-{
-	oi(ADD(op, 0, rn, 1, 1, 14) | add_encimm(n));
-}
-
-static void i_set(int cond, int rd)
-{
-	oi(ADD(I_MOV, rd, 0, 0, 1, 14));
-	oi(ADD(I_MOV, rd, 0, 0, 1, cond) | 1);
-}
-
-#define SM_LSL		0
-#define SM_LSR		1
-#define SM_ASR		2
-
-static void i_shl(int sm, int rd, int rm, int rs)
-{
-	oi(ADD(I_MOV, rd, 0, 0, 0, 14) | (rs << 8) | (sm << 5) | (1 << 4) | rm);
-}
-
-static void i_shl_imm(int sm, int rd, int rn, long n)
-{
-	oi(ADD(I_MOV, rd, 0, 0, 0, 14) | (n << 7) | (sm << 5) | rn);
-}
-
-static void i_mov(int op, int rd, int rn)
-{
-	oi(ADD(op, rd, 0, 0, 0, 14) | rn);
-}
-
-/*
- * single data transfer:
- * +------------------------------------------+
- * |COND|01|I|P|U|B|W|L| Rn | Rd |   offset   |
- * +------------------------------------------+
- *
- * I: immediate/offset
- * P: post/pre indexing
- * U: down/up
- * B: byte/word
- * W: writeback
- * L: store/load
- * Rn: base register
- * Rd: source/destination register
- *
- * I=0 offset=| immediate |
- * I=1 offset=| shift  | Rm |
- *
- * halfword and signed data transfer
- * +----------------------------------------------+
- * |COND|000|P|U|0|W|L| Rn | Rd |0000|1|S|H|1| Rm |
- * +----------------------------------------------+
- *
- * +----------------------------------------------+
- * |COND|000|P|U|1|W|L| Rn | Rd |off1|1|S|H|1|off2|
- * +----------------------------------------------+
- *
- * S: singed
- * H: halfword
- */
-#define LDR(l, rd, rn, b, u, p, w)		\
-	((14 << 28) | (1 << 26) | ((p) << 24) | ((b) << 22) | ((u) << 23) | \
-	((w) << 21) | ((l) << 20) | ((rn) << 16) | ((rd) << 12))
-#define LDRH(l, rd, rn, s, h, u, i)	\
-	((14 << 28) | (1 << 24) | ((u) << 23) | ((i) << 22) | ((l) << 20) | \
-	((rn) << 16) | ((rd) << 12) | ((s) << 6) | ((h) << 5) | (9 << 4))
-
-static void i_ldr(int l, int rd, int rn, int off, int bt)
-{
-	int b = BT_SZ(bt) == 1;
-	int h = BT_SZ(bt) == 2;
-	int s = l && (bt & BT_SIGNED);
-	int half = h || (b && s);
-	int maximm = half ? 0x100 : 0x1000;
-	int neg = off < 0;
-	if (neg)
-		off = -off;
-	while (off >= maximm) {
-		int imm = add_encimm(off);
-		oi(ADD(neg ? I_SUB : I_ADD, REG_TMP, rn, 0, 1, 14) | imm);
-		rn = REG_TMP;
-		off -= add_decimm(imm);
-	}
-	if (!half)
-		oi(LDR(l, rd, rn, b, !neg, 1, 0) | off);
-	else
-		oi(LDRH(l, rd, rn, s, h, !neg, 1) |
-			((off & 0xf0) << 4) | (off & 0x0f));
-}
-
-static void i_sym(int rd, char *sym, int off)
-{
-	if (!nogen) {
-		int doff = pool_reloc(sym, off);
-		i_ldr(1, rd, REG_DP, doff, LONGSZ);
-	}
-}
-
-static void i_neg(int rd)
-{
-	oi(ADD(I_RSB, rd, rd, 0, 1, 14));
-}
-
-static void i_not(int rd)
-{
-	oi(ADD(I_MVN, rd, 0, 0, 0, 14) | rd);
-}
-
-static void i_lnot(int rd)
-{
-	i_cmp(I_TST, rd, rd);
-	i_set(0, rd);
-}
-
-/* rd = rd & ((1 << bits) - 1) */
-static void i_zx(int rd, int bits)
-{
-	if (bits <= 8) {
-		oi(ADD(I_AND, rd, rd, 0, 1, 14) | add_encimm((1 << bits) - 1));
-	} else {
-		i_shl_imm(SM_LSL, rd, rd, 32 - bits);
-		i_shl_imm(SM_LSR, rd, rd, 32 - bits);
-	}
-}
-
-static void i_sx(int rd, int bits)
-{
-	i_shl_imm(SM_LSL, rd, rd, 32 - bits);
-	i_shl_imm(SM_ASR, rd, rd, 32 - bits);
-}
-
-/*
- * branch:
- * +-----------------------------------+
- * |COND|101|L|         offset         |
- * +-----------------------------------+
- *
- * L: link
- */
-#define BL(cond, l, o)	(((cond) << 28) | (5 << 25) | ((l) << 24) | \
-				((((o) - 8) >> 2) & 0x00ffffff))
-
-static void i_b(long addr)
-{
-	oi(BL(14, 0, addr - cslen));
-}
-
-static void i_b_if(long addr, int rn, int z)
-{
-	i_cmp(I_TST, rn, rn);
-	oi(BL(z ? 0 : 1, 0, addr - cslen));
-}
-
-static void i_b_fill(long *dst, int diff)
-{
-	*dst = (*dst & 0xff000000) | (((diff - 8) >> 2) & 0x00ffffff);
-}
-
-static void i_memcpy(int rd, int rs, int rn)
-{
-	oi(ADD(I_SUB, rn, rn, 1, 1, 14) | 1);
-	oi(BL(4, 0, 16));
-	oi(LDR(1, REG_TMP, rs, 1, 1, 0, 0) | 1);
-	oi(LDR(0, REG_TMP, rd, 1, 1, 0, 0) | 1);
-	oi(BL(14, 0, -16));
-}
-
-static void i_memset(int rd, int rs, int rn)
-{
-	oi(ADD(I_SUB, rn, rn, 1, 1, 14) | 1);
-	oi(BL(4, 0, 12));
-	oi(LDR(0, rs, rd, 1, 1, 0, 0) | 1);
-	oi(BL(14, 0, -12));
-}
-
-static void i_call_reg(int rd)
-{
-	i_mov(I_MOV, REG_LR, REG_PC);
-	i_mov(I_MOV, REG_PC, rd);
-}
-
-static void i_call(char *sym)
-{
-	if (!nogen)
-		out_rel(sym, OUT_CS | OUT_REL24, cslen);
-	oi(BL(14, 1, 0));
-}
-
-static void i_prolog(void)
-{
-	func_beg = cslen;
-	nums = 0;
-	oi(0xe1a0c00d);		/* mov   r12, sp */
-	oi(0xe92d000f);		/* stmfd sp!, {r0-r3} */
-	oi(0xe92d5ff0);		/* stmfd sp!, {r0-r11, r12, lr} */
-	oi(0xe1a0b00d);		/* mov   fp, sp */
-	oi(0xe24dd000);		/* sub   sp, sp, xx */
-	oi(0xe28fa000);		/* add   dp, pc, xx */
-}
-
-static void i_epilog(void)
-{
-	int dpoff;
-	oi(0xe89baff0);		/* ldmfd fp, {r4-r11, sp, pc} */
-	dpoff = add_decimm(add_rndimm(add_encimm(cslen - func_beg - 28)));
-	cslen = func_beg + dpoff + 28;
-	maxsp = ALIGN(maxsp, 8);
-	maxsp = add_decimm(add_rndimm(add_encimm(maxsp)));
-	/* fill stack sub: sp = sp - xx */
-	*(long *) (cs + func_beg + 16) |= add_encimm(maxsp);
-	/* fill data ptr addition: dp = pc + xx */
-	*(long *) (cs + func_beg + 20) |= add_encimm(dpoff);
-	pool_write();
 }
 
 static long sp_push(int size)
@@ -513,7 +174,7 @@ static void tmp_reg(struct tmp *tmp, int dst, int deref)
 		if (deref)
 			i_ldr(1, dst, tmp->addr, 0, bt);
 		else if (dst != tmp->addr)
-			i_mov(I_MOV, dst, tmp->addr);
+			i_mov(dst, tmp->addr);
 		regs[tmp->addr] = NULL;
 	}
 	if (tmp->loc == LOC_LOCAL) {
@@ -631,8 +292,6 @@ void o_tmpdrop(int n)
 	}
 }
 
-#define FORK_REG		0x00
-
 /* make sure tmps remain intact after a conditional expression */
 void o_fork(void)
 {
@@ -696,7 +355,7 @@ static void tmp_copy(struct tmp *t1)
 		tmp_mv(t2, reg_get(~0));
 	} else if (t1->loc == LOC_REG) {
 		t2->addr = reg_fortmp(t2, 1 << t1->addr);
-		i_mov(I_MOV, t2->addr, t1->addr);
+		i_mov(t2->addr, t1->addr);
 		regs[t2->addr] = t2;
 	}
 }
@@ -946,7 +605,7 @@ static int bop_imm(int *r1, long *n, int swap)
 	if (!TMP_NUM(t1) && (!swap || !TMP_NUM(t2)))
 		return 1;
 	*n = TMP_NUM(t1) ? t1->addr : t2->addr;
-	if (add_decimm(add_encimm(*n)) != *n)
+	if (!i_decodeable(*n))
 		return 1;
 	if (!TMP_NUM(t1))
 		o_tmpswap();
@@ -1311,4 +970,378 @@ void o_write(int fd)
 		os(moddi3, sizeof(moddi3));
 	}
 	out_write(fd, cs, cslen, ds, dslen);
+}
+
+#define MAXNUMS		1024
+
+/* data pool */
+static long num_offs[MAXNUMS];			/* data immediate value */
+static char num_names[MAXNUMS][NAMELEN];	/* relocation data symbol name */
+static int nums;
+
+static int pool_find(char *name, int off)
+{
+	int i;
+	for (i = 0; i < nums; i++)
+		if (!strcmp(name, num_names[i]) && off == num_offs[i])
+			return i;
+	return -1;
+}
+
+static int pool_num(long num)
+{
+	int idx = pool_find("", num);
+	if (idx < 0) {
+		idx = nums++;
+		num_offs[idx] = num;
+		num_names[idx][0] = '\0';
+	}
+	return idx << 2;
+}
+
+static int pool_reloc(char *name, long off)
+{
+	int idx = pool_find(name, off);
+	if (idx < 0) {
+		idx = nums++;
+		num_offs[idx] = off;
+		strcpy(num_names[idx], name);
+	}
+	return idx << 2;
+}
+
+static void pool_write(void)
+{
+	int i;
+	for (i = 0; i < nums; i++) {
+		if (num_names[i])
+			out_rel(num_names[i], OUT_CS, cslen);
+		oi(num_offs[i]);
+	}
+}
+
+/*
+ * data processing:
+ * +---------------------------------------+
+ * |COND|00|I| op |S| Rn | Rd |  operand2  |
+ * +---------------------------------------+
+ *
+ * S: set condition code
+ * Rn: first operand
+ * Rd: destination operand
+ *
+ * I=0 operand2=| shift  | Rm |
+ * I=1 operand2=|rota|  imm   |
+ */
+#define ADD(op, rd, rn, s, i, cond)	\
+	(((cond) << 28) | ((i) << 25) | ((s) << 20) | \
+		((op) << 21) | ((rn) << 16) | ((rd) << 12))
+
+static int add_encimm(unsigned n)
+{
+	int i = 0;
+	while (i < 12 && (n >> ((4 + i) << 1)))
+		i++;
+	return (n >> (i << 1)) | (((16 - i) & 0x0f) << 8);
+}
+
+static unsigned add_decimm(int n)
+{
+	int rot = (16 - ((n >> 8) & 0x0f)) & 0x0f;
+	return (n & 0xff) << (rot << 1);
+}
+
+static int add_rndimm(unsigned n)
+{
+	int rot = (n >> 8) & 0x0f;
+	int num = n & 0xff;
+	if (rot == 0)
+		return n;
+	if (num == 0xff) {
+		num = 0;
+		rot = (rot + 12) & 0x0f;
+	}
+	return ((num + 1) & 0xff) | (rot << 8);
+}
+
+static void i_add(int op, int rd, int rn, int rm)
+{
+	oi(ADD(op, rd, rn, 0, 0, 14) | rm);
+}
+
+static int i_decodeable(long imm)
+{
+	return add_decimm(add_encimm(imm)) == imm;
+}
+
+static void i_add_imm(int op, int rd, int rn, long n)
+{
+	oi(ADD(op, rd, rn, 0, 1, 14) | add_encimm(n));
+}
+
+static void i_num(int rd, long n)
+{
+	int enc = add_encimm(n);
+	if (n == add_decimm(enc)) {
+		oi(ADD(I_MOV, rd, 0, 0, 1, 14) | enc);
+		return;
+	}
+	enc = add_encimm(-n - 1);
+	if (~n == add_decimm(enc)) {
+		oi(ADD(I_MVN, rd, 0, 0, 1, 14) | enc);
+		return;
+	}
+	if (!nogen) {
+		int off = pool_num(n);
+		i_ldr(1, rd, REG_DP, off, LONGSZ);
+	}
+}
+
+static void i_add_anyimm(int rd, int rn, long n)
+{
+	int neg = n < 0;
+	int imm = add_encimm(neg ? -n : n);
+	if (imm == add_decimm(neg ? -n : n)) {
+		oi(ADD(neg ? I_SUB : I_ADD, rd, rn, 0, 1, 14) | imm);
+	} else {
+		i_num(rd, n);
+		i_add(I_ADD, rd, rd, rn);
+	}
+}
+
+/*
+ * multiply
+ * +----------------------------------------+
+ * |COND|000000|A|S| Rd | Rn | Rs |1001| Rm |
+ * +----------------------------------------+
+ *
+ * Rd: destination
+ * A: accumulate
+ * C: set condition codes
+ *
+ * I=0 operand2=| shift  | Rm |
+ * I=1 operand2=|rota|  imm   |
+ */
+#define MUL(rd, rn, rs)		\
+	((14 << 28) | ((rd) << 16) | ((0) << 12) | ((rn) << 8) | ((9) << 4) | (rm))
+
+static void i_mul(int rd, int rn, int rm)
+{
+	oi(MUL(rd, rn, rm));
+}
+
+static void i_cmp(int op, int rn, int rm)
+{
+	oi(ADD(op, 0, rn, 1, 0, 14) | rm);
+}
+
+static void i_cmp_imm(int op, int rn, long n)
+{
+	oi(ADD(op, 0, rn, 1, 1, 14) | add_encimm(n));
+}
+
+static void i_set(int cond, int rd)
+{
+	oi(ADD(I_MOV, rd, 0, 0, 1, 14));
+	oi(ADD(I_MOV, rd, 0, 0, 1, cond) | 1);
+}
+
+static void i_shl(int sm, int rd, int rm, int rs)
+{
+	oi(ADD(I_MOV, rd, 0, 0, 0, 14) | (rs << 8) | (sm << 5) | (1 << 4) | rm);
+}
+
+static void i_shl_imm(int sm, int rd, int rn, long n)
+{
+	oi(ADD(I_MOV, rd, 0, 0, 0, 14) | (n << 7) | (sm << 5) | rn);
+}
+
+static void i_mov(int rd, int rn)
+{
+	oi(ADD(I_MOV, rd, 0, 0, 0, 14) | rn);
+}
+
+/*
+ * single data transfer:
+ * +------------------------------------------+
+ * |COND|01|I|P|U|B|W|L| Rn | Rd |   offset   |
+ * +------------------------------------------+
+ *
+ * I: immediate/offset
+ * P: post/pre indexing
+ * U: down/up
+ * B: byte/word
+ * W: writeback
+ * L: store/load
+ * Rn: base register
+ * Rd: source/destination register
+ *
+ * I=0 offset=| immediate |
+ * I=1 offset=| shift  | Rm |
+ *
+ * halfword and signed data transfer
+ * +----------------------------------------------+
+ * |COND|000|P|U|0|W|L| Rn | Rd |0000|1|S|H|1| Rm |
+ * +----------------------------------------------+
+ *
+ * +----------------------------------------------+
+ * |COND|000|P|U|1|W|L| Rn | Rd |off1|1|S|H|1|off2|
+ * +----------------------------------------------+
+ *
+ * S: singed
+ * H: halfword
+ */
+#define LDR(l, rd, rn, b, u, p, w)		\
+	((14 << 28) | (1 << 26) | ((p) << 24) | ((b) << 22) | ((u) << 23) | \
+	((w) << 21) | ((l) << 20) | ((rn) << 16) | ((rd) << 12))
+#define LDRH(l, rd, rn, s, h, u, i)	\
+	((14 << 28) | (1 << 24) | ((u) << 23) | ((i) << 22) | ((l) << 20) | \
+	((rn) << 16) | ((rd) << 12) | ((s) << 6) | ((h) << 5) | (9 << 4))
+
+static void i_ldr(int l, int rd, int rn, int off, int bt)
+{
+	int b = BT_SZ(bt) == 1;
+	int h = BT_SZ(bt) == 2;
+	int s = l && (bt & BT_SIGNED);
+	int half = h || (b && s);
+	int maximm = half ? 0x100 : 0x1000;
+	int neg = off < 0;
+	if (neg)
+		off = -off;
+	while (off >= maximm) {
+		int imm = add_encimm(off);
+		oi(ADD(neg ? I_SUB : I_ADD, REG_TMP, rn, 0, 1, 14) | imm);
+		rn = REG_TMP;
+		off -= add_decimm(imm);
+	}
+	if (!half)
+		oi(LDR(l, rd, rn, b, !neg, 1, 0) | off);
+	else
+		oi(LDRH(l, rd, rn, s, h, !neg, 1) |
+			((off & 0xf0) << 4) | (off & 0x0f));
+}
+
+static void i_sym(int rd, char *sym, int off)
+{
+	if (!nogen) {
+		int doff = pool_reloc(sym, off);
+		i_ldr(1, rd, REG_DP, doff, LONGSZ);
+	}
+}
+
+static void i_neg(int rd)
+{
+	oi(ADD(I_RSB, rd, rd, 0, 1, 14));
+}
+
+static void i_not(int rd)
+{
+	oi(ADD(I_MVN, rd, 0, 0, 0, 14) | rd);
+}
+
+static void i_lnot(int rd)
+{
+	i_cmp(I_TST, rd, rd);
+	i_set(0, rd);
+}
+
+/* rd = rd & ((1 << bits) - 1) */
+static void i_zx(int rd, int bits)
+{
+	if (bits <= 8) {
+		oi(ADD(I_AND, rd, rd, 0, 1, 14) | add_encimm((1 << bits) - 1));
+	} else {
+		i_shl_imm(SM_LSL, rd, rd, 32 - bits);
+		i_shl_imm(SM_LSR, rd, rd, 32 - bits);
+	}
+}
+
+static void i_sx(int rd, int bits)
+{
+	i_shl_imm(SM_LSL, rd, rd, 32 - bits);
+	i_shl_imm(SM_ASR, rd, rd, 32 - bits);
+}
+
+/*
+ * branch:
+ * +-----------------------------------+
+ * |COND|101|L|         offset         |
+ * +-----------------------------------+
+ *
+ * L: link
+ */
+#define BL(cond, l, o)	(((cond) << 28) | (5 << 25) | ((l) << 24) | \
+				((((o) - 8) >> 2) & 0x00ffffff))
+
+static void i_b(long addr)
+{
+	oi(BL(14, 0, addr - cslen));
+}
+
+static void i_b_if(long addr, int rn, int z)
+{
+	i_cmp(I_TST, rn, rn);
+	oi(BL(z ? 0 : 1, 0, addr - cslen));
+}
+
+static void i_b_fill(long *dst, int diff)
+{
+	*dst = (*dst & 0xff000000) | (((diff - 8) >> 2) & 0x00ffffff);
+}
+
+static void i_memcpy(int rd, int rs, int rn)
+{
+	oi(ADD(I_SUB, rn, rn, 1, 1, 14) | 1);
+	oi(BL(4, 0, 16));
+	oi(LDR(1, REG_TMP, rs, 1, 1, 0, 0) | 1);
+	oi(LDR(0, REG_TMP, rd, 1, 1, 0, 0) | 1);
+	oi(BL(14, 0, -16));
+}
+
+static void i_memset(int rd, int rs, int rn)
+{
+	oi(ADD(I_SUB, rn, rn, 1, 1, 14) | 1);
+	oi(BL(4, 0, 12));
+	oi(LDR(0, rs, rd, 1, 1, 0, 0) | 1);
+	oi(BL(14, 0, -12));
+}
+
+static void i_call_reg(int rd)
+{
+	i_mov(REG_LR, REG_PC);
+	i_mov(REG_PC, rd);
+}
+
+static void i_call(char *sym)
+{
+	if (!nogen)
+		out_rel(sym, OUT_CS | OUT_REL24, cslen);
+	oi(BL(14, 1, 0));
+}
+
+static void i_prolog(void)
+{
+	func_beg = cslen;
+	nums = 0;
+	oi(0xe1a0c00d);		/* mov   r12, sp */
+	oi(0xe92d000f);		/* stmfd sp!, {r0-r3} */
+	oi(0xe92d5ff0);		/* stmfd sp!, {r0-r11, r12, lr} */
+	oi(0xe1a0b00d);		/* mov   fp, sp */
+	oi(0xe24dd000);		/* sub   sp, sp, xx */
+	oi(0xe28fa000);		/* add   dp, pc, xx */
+}
+
+static void i_epilog(void)
+{
+	int dpoff;
+	oi(0xe89baff0);		/* ldmfd fp, {r4-r11, sp, pc} */
+	dpoff = add_decimm(add_rndimm(add_encimm(cslen - func_beg - 28)));
+	cslen = func_beg + dpoff + 28;
+	maxsp = ALIGN(maxsp, 8);
+	maxsp = add_decimm(add_rndimm(add_encimm(maxsp)));
+	/* fill stack sub: sp = sp - xx */
+	*(long *) (cs + func_beg + 16) |= add_encimm(maxsp);
+	/* fill data ptr addition: dp = pc + xx */
+	*(long *) (cs + func_beg + 20) |= add_encimm(dpoff);
+	pool_write();
 }
