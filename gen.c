@@ -961,6 +961,13 @@ void o_write(int fd)
 #define I_MOV		0x0d
 #define I_MVN		0x0f
 
+/* for optimizing cmp + bcc */
+#define OPT_ISCMP()		(last_cmp + 12 == cslen && last_set + 4 == cslen)
+#define OPT_CCOND()		(*(unsigned int *) ((void *) cs + last_set) >> 28)
+
+static long last_cmp = -1;
+static long last_set = -1;
+
 #define MAXNUMS		1024
 
 /* data pool */
@@ -1141,17 +1148,20 @@ static void i_tst(int rn, int rm)
 
 static void i_cmp(int rn, int rm)
 {
+	last_cmp = cslen;
 	oi(ADD(I_CMP, 0, rn, 1, 0, 14) | rm);
 }
 
 static void i_cmp_imm(int rn, long n)
 {
+	last_cmp = cslen;
 	oi(ADD(I_CMP, 0, rn, 1, 1, 14) | add_encimm(n));
 }
 
 static void i_set(int cond, int rd)
 {
 	oi(ADD(I_MOV, rd, 0, 0, 1, 14));
+	last_set = cslen;
 	oi(ADD(I_MOV, rd, 0, 0, 1, opcode_set(cond)) | 1);
 }
 
@@ -1261,8 +1271,16 @@ static void i_not(int rd)
 	oi(ADD(I_MVN, rd, 0, 0, 0, 14) | rd);
 }
 
+static int cond_nots[] = {1, 0, 3, 2, -1, -1, -1, -1, 9, 8, 11, 10, 13, 12, -1};
+
 static void i_lnot(int rd)
 {
+	if (OPT_ISCMP()) {
+		unsigned int *lset = (void *) cs + last_set;
+		int cond = cond_nots[OPT_CCOND()];
+		*lset = (*lset & 0x0fffffff) | (cond << 28);
+		return;
+	}
 	i_tst(rd, rd);
 	i_set(O_EQ, rd);
 }
@@ -1302,6 +1320,13 @@ static void i_b(long addr)
 
 static void i_b_if(long addr, int rn, int z)
 {
+	if (OPT_ISCMP()) {
+		int cond = OPT_CCOND();
+		cslen = last_cmp + 4;
+		last_set = -1;
+		oi(BL(z ? cond_nots[cond] : cond, 0, addr - cslen));
+		return;
+	}
 	i_tst(rn, rn);
 	oi(BL(z ? 0 : 1, 0, addr - cslen));
 }
