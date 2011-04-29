@@ -20,7 +20,7 @@
 #define REG_FP		11	/* frame pointer register */
 #define REG_DP		10	/* data pointer register */
 #define REG_RET		0	/* returned value register */
-#define FORK_REG	0	/* result of conditional branches */
+#define REG_FORK	0	/* result of conditional branches */
 
 #define MIN(a, b)		((a) < (b) ? (a) : (b))
 #define ALIGN(x, a)		(((x) + (a) - 1) & ~((a) - 1))
@@ -298,12 +298,12 @@ void o_fork(void)
 
 void o_forkpush(void)
 {
-	tmp_pop(FORK_REG);
+	tmp_pop(REG_FORK);
 }
 
 void o_forkjoin(void)
 {
-	tmp_push(FORK_REG);
+	tmp_push(REG_FORK);
 }
 
 void o_tmpswap(void)
