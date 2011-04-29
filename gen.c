@@ -80,7 +80,7 @@ static void i_b_fill(long *dst, int diff);
 static void i_memcpy(int rd, int rs, int rn);
 static void i_memset(int rd, int rs, int rn);
 static void i_call_reg(int rd);
-static void i_call(char *sym);
+static void i_call(char *sym, int off);
 static void i_prolog(void);
 static void i_epilog(void);
 
@@ -728,7 +728,7 @@ static void bin_div(int op)
 	tmp_to(t1, argregs[0]);
 	tmp_to(t2, argregs[1]);
 	tmp_drop(2);
-	i_call(func);
+	i_call(func, 0);
 	tmp_push(REG_RET);
 }
 
@@ -866,7 +866,7 @@ void o_call(int argc, int rets)
 	tmp_drop(aregs);
 	t = TMP(0);
 	if (t->loc == LOC_SYM && !t->bt) {
-		i_call(t->sym);
+		i_call(t->sym, t->off);
 		tmp_drop(1);
 	} else {
 		int reg = t->loc == LOC_REG ? t->addr : REG_TMP;
@@ -1312,11 +1312,11 @@ static void i_call_reg(int rd)
 	i_mov(REG_PC, rd);
 }
 
-static void i_call(char *sym)
+static void i_call(char *sym, int off)
 {
 	if (!nogen)
 		out_rel(sym, OUT_CS | OUT_REL24, cslen);
-	oi(BL(14, 1, 0));
+	oi(BL(14, 1, off));
 }
 
 static void i_prolog(void)
