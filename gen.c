@@ -51,49 +51,37 @@ static int tmpsp;
 
 /* arch-specific functions */
 static void i_ldr(int l, int rd, int rn, int off, int bt);
-static void i_add(int op, int rd, int rn, int rm);
-static void i_add_imm(int op, int rd, int rn, long n);
-static void i_num(int rd, long n);
-static void i_add_anyimm(int rd, int rn, long n);
-static void i_mul(int rd, int rn, int rm);
-static void i_cmp(int op, int rn, int rm);
-static void i_cmp_imm(int op, int rn, long n);
-static int i_decodeable(long imm);
-static void i_set(int op, int rd);
-static void i_shl(int op, int rd, int rm, int rs);
-static void i_shl_imm(int op, int rd, int rn, long n);
 static void i_mov(int rd, int rn);
-static void i_ldr(int l, int rd, int rn, int off, int bt);
+static void i_add(int op, int rd, int rn, int rm);
+static void i_shl(int op, int rd, int rm, int rs);
+static void i_mul(int rd, int rn, int rm);
+static void i_cmp(int rn, int rm);
+static int i_decodeable(long imm);
+static void i_add_imm(int op, int rd, int rn, long n);
+static void i_shl_imm(int op, int rd, int rn, long n);
+static void i_cmp_imm(int rn, long n);
+static void i_add_anyimm(int rd, int rn, long n);
+static void i_num(int rd, long n);
 static void i_sym(int rd, char *sym, int off);
+static void i_set(int op, int rd);
 static void i_neg(int rd);
 static void i_not(int rd);
 static void i_lnot(int rd);
 static void i_zx(int rd, int bits);
 static void i_sx(int rd, int bits);
 static void i_b(long addr);
-static void i_b_if(long addr, int rn, int z);
 static void i_b_fill(long *dst, int diff);
+static void i_b_if(long addr, int rn, int z);
 static void i_memcpy(int rd, int rs, int rn);
 static void i_memset(int rd, int rs, int rn);
-static void i_call_reg(int rd);
 static void i_call(char *sym, int off);
+static void i_call_reg(int rd);
 static void i_prolog(void);
 static void i_epilog(void);
 
 static struct tmp *regs[NREGS];
 static int tmpregs[] = {4, 5, 6, 7, 8, 9, 0, 1, 2, 3};
 static int argregs[] = {0, 1, 2, 3};
-
-#define I_AND		0x00
-#define I_EOR		0x01
-#define I_SUB		0x02
-#define I_RSB		0x03
-#define I_ADD		0x04
-#define I_TST		0x08
-#define I_CMP		0x0a
-#define I_ORR		0x0c
-#define I_MOV		0x0d
-#define I_MVN		0x0f
 
 #define MAXRET			(1 << 8)
 
@@ -742,10 +730,10 @@ static void bin_cmp(int op)
 	int r1, r2;
 	long n;
 	if (!bop_imm(&r1, &n, (op & 0xff) == O_EQ || (op & 0xff) == O_NEQ)) {
-		i_cmp_imm(I_CMP, r1, n);
+		i_cmp_imm(r1, n);
 	} else {
 		bin_regs(&r1, &r2);
-		i_cmp(I_CMP, r1, r2);
+		i_cmp(r1, r2);
 	}
 	i_set(op, r1);
 	tmp_push(r1);
@@ -960,7 +948,18 @@ void o_write(int fd)
 	out_write(fd, cs, cslen, ds, dslen);
 }
 
-/* arch specific functions */
+/* ARM arch specific functions */
+
+#define I_AND		0x00
+#define I_EOR		0x01
+#define I_SUB		0x02
+#define I_RSB		0x03
+#define I_ADD		0x04
+#define I_TST		0x08
+#define I_CMP		0x0a
+#define I_ORR		0x0c
+#define I_MOV		0x0d
+#define I_MVN		0x0f
 
 #define MAXNUMS		1024
 
@@ -1135,14 +1134,19 @@ static int opcode_set(int op)
 	return op & O_SIGNED ? scond[op & 0x0f] : ucond[op & 0x0f];
 }
 
-static void i_cmp(int op, int rn, int rm)
+static void i_tst(int rn, int rm)
 {
-	oi(ADD(op, 0, rn, 1, 0, 14) | rm);
+	oi(ADD(I_TST, 0, rn, 1, 0, 14) | rm);
 }
 
-static void i_cmp_imm(int op, int rn, long n)
+static void i_cmp(int rn, int rm)
 {
-	oi(ADD(op, 0, rn, 1, 1, 14) | add_encimm(n));
+	oi(ADD(I_CMP, 0, rn, 1, 0, 14) | rm);
+}
+
+static void i_cmp_imm(int rn, long n)
+{
+	oi(ADD(I_CMP, 0, rn, 1, 1, 14) | add_encimm(n));
 }
 
 static void i_set(int cond, int rd)
@@ -1259,7 +1263,7 @@ static void i_not(int rd)
 
 static void i_lnot(int rd)
 {
-	i_cmp(I_TST, rd, rd);
+	i_tst(rd, rd);
 	i_set(O_EQ, rd);
 }
 
@@ -1298,7 +1302,7 @@ static void i_b(long addr)
 
 static void i_b_if(long addr, int rn, int z)
 {
-	i_cmp(I_TST, rn, rn);
+	i_tst(rn, rn);
 	oi(BL(z ? 0 : 1, 0, addr - cslen));
 }
 
