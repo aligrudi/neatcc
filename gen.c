@@ -1369,6 +1369,8 @@ static void i_call(char *sym, int off)
 static void i_prolog(void)
 {
 	func_beg = cslen;
+	last_cmp = -1;
+	last_set = -1;
 	nums = 0;
 	oi(0xe1a0c00d);		/* mov   r12, sp */
 	oi(0xe92d000f);		/* stmfd sp!, {r0-r3} */
