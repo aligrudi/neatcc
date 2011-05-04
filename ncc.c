@@ -1820,11 +1820,25 @@ static void parse(void)
 		readdecl();
 }
 
+static void compat_macros(void)
+{
+	cpp_define("const", "");
+	cpp_define("register", "");
+	cpp_define("volatile", "");
+	cpp_define("inline", "");
+	cpp_define("restrict", "");
+	cpp_define("__inline__", "");
+	cpp_define("__restrict__", "");
+	cpp_define("__attribute__(x)", "");
+	cpp_define("__builtin_va_list__", "long");
+}
+
 int main(int argc, char *argv[])
 {
 	char obj[128];
 	int ofd;
 	int i = 1;
+	compat_macros();
 	while (i < argc && argv[i][0] == '-') {
 		if (argv[i][1] == 'I')
 			cpp_addpath(argv[i][2] ? argv[i] + 2 : argv[++i]);
