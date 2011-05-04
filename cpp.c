@@ -139,9 +139,6 @@ static int include_file(char *path)
 
 int cpp_init(char *path)
 {
-	cpp_define("__STDC__", "");
-	cpp_define("__arm__", "");
-	cpp_define("__linux__", "");
 	return include_file(path);
 }
 
@@ -170,12 +167,10 @@ static int jumpcomment(void)
 		}
 	}
 	if (buf[cur] == '/' && buf[cur + 1] == '/') {
-		while (++cur < len) {
-			if (buf[cur] == '\n') {
-				cur++;
-				return 0;
-			}
-		}
+		while (++cur < len)
+			if (buf[cur] == '\n')
+				break;
+		return 0;
 	}
 	return 1;
 }

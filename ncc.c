@@ -1822,6 +1822,11 @@ static void parse(void)
 
 static void compat_macros(void)
 {
+	cpp_define("__STDC__", "");
+	cpp_define("__arm__", "");
+	cpp_define("__linux__", "");
+
+	/* ignored keywords */
 	cpp_define("const", "");
 	cpp_define("register", "");
 	cpp_define("volatile", "");
