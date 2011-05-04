@@ -46,7 +46,7 @@ static struct {
 
 static char *tok3[] = {
 	"<<=", ">>=", "...", "<<", ">>", "++", "--", "+=", "-=", "*=", "/=",
-	"%=", "|=", "&=", "^=", "&&", "||", "==", "!=", "<=", ">=", "->", "/*"
+	"%=", "|=", "&=", "^=", "&&", "||", "==", "!=", "<=", ">=", "->"
 };
 
 static int get_tok3(int num)
@@ -193,14 +193,21 @@ static int skipws(void)
 			cur++;
 		if (cur == len)
 			continue;
-		if (TOK2(buf + cur) != TOK2("/*"))
-			return 0;
-		while (++cur < len) {
-			if (buf[cur] == '*' && buf[cur + 1] == '/') {
-				cur += 2;
-				break;
-			}
+		if (buf[cur] == '/' && buf[cur + 1] == '/') {
+			while (cur < len && buf[cur] != '\n')
+				cur++;
+			continue;
 		}
+		if (buf[cur] == '/' && buf[cur + 1] == '*') {
+			while (++cur < len) {
+				if (buf[cur] == '*' && buf[cur + 1] == '/') {
+					cur += 2;
+					break;
+				}
+			}
+			continue;
+		}
+		break;
 	}
 	return 0;
 }

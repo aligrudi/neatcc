@@ -159,14 +159,25 @@ static void read_word(char *dst)
 	*dst = '\0';
 }
 
-static void jumpcomment(void)
+static int jumpcomment(void)
 {
-	while (++cur < len) {
-		if (buf[cur] == '*' && buf[cur + 1] == '/') {
-			cur += 2;
-			break;
+	if (buf[cur] == '/' && buf[cur + 1] == '*') {
+		while (++cur < len) {
+			if (buf[cur] == '*' && buf[cur + 1] == '/') {
+				cur += 2;
+				return 0;
+			}
 		}
 	}
+	if (buf[cur] == '/' && buf[cur + 1] == '/') {
+		while (++cur < len) {
+			if (buf[cur] == '\n') {
+				cur++;
+				return 0;
+			}
+		}
+	}
+	return 1;
 }
 
 static void read_tilleol(char *dst)
@@ -176,9 +187,7 @@ static void read_tilleol(char *dst)
 	while (cur < len && buf[cur] != '\n') {
 		if (buf[cur] == '\\' && buf[cur + 1] == '\n')
 			cur += 2;
-		else if (buf[cur] == '/' && buf[cur + 1] == '*')
-			jumpcomment();
-		else
+		else if (jumpcomment())
 			*dst++ = buf[cur++];
 	}
 	*dst = '\0';
@@ -220,22 +229,23 @@ static int include_find(char *name, int std)
 	return -1;
 }
 
-static void jumpstr(void)
+static int jumpstr(void)
 {
 	if (buf[cur] == '\'') {
 		while (cur < len && buf[++cur] != '\'')
 			if (buf[cur] == '\\')
 				cur++;
 		cur++;
-		return;
+		return 0;
 	}
 	if (buf[cur] == '"') {
 		while (cur < len && buf[++cur] != '"')
 			if (buf[cur] == '\\')
 				cur++;
 		cur++;
-		return;
+		return 0;
 	}
+	return 1;
 }
 
 static void readarg(char *s)
@@ -243,6 +253,8 @@ static void readarg(char *s)
 	int depth = 0;
 	int beg = cur;
 	while (cur < len && (depth || buf[cur] != ',' && buf[cur] != ')')) {
+		if (!jumpstr() || !jumpcomment())
+			continue;
 		switch (buf[cur]) {
 		case '(':
 		case '[':
@@ -256,15 +268,8 @@ static void readarg(char *s)
 			cur++;
 			depth--;
 			break;
-		case '\'':
-		case '"':
-			jumpstr();
-			break;
 		default:
-			if (buf[cur] == '/' && buf[cur + 1] == '*')
-				jumpcomment();
-			else
-				cur++;
+			cur++;
 		}
 	}
 	if (s) {
@@ -376,14 +381,10 @@ static void jumpifs(int jumpelse)
 				depth++;
 			continue;
 		}
-		if (buf[cur] == '/' && buf[cur + 1] == '*') {
-			jumpcomment();
+		if (!jumpcomment())
 			continue;
-		}
-		if (buf[cur] == '\'' || buf[cur] == '"') {
-			jumpstr();
+		if (!jumpstr())
 			continue;
-		}
 		cur++;
 	}
 }
@@ -561,14 +562,10 @@ int cpp_read(char *s)
 	while (cur < len) {
 		if (buf[cur] == '#')
 			break;
-		if (buf[cur] == '/' && buf[cur + 1] == '*') {
-			jumpcomment();
+		if (!jumpcomment())
 			continue;
-		}
-		if (buf[cur] == '\'' || buf[cur] == '"') {
-			jumpstr();
+		if (!jumpstr())
 			continue;
-		}
 		if (isalpha(buf[cur]) || buf[cur] == '_') {
 			char word[NAMELEN];
 			read_word(word);
