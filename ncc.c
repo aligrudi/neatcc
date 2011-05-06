@@ -1385,7 +1385,8 @@ static void localdef(void *data, struct name *name, unsigned flags)
 {
 	struct type *t = &name->type;
 	if (flags & (F_STATIC | F_EXTERN)) {
-		sprintf(name->elfname, "__neatcc.%s.%s", func_name, name->name);
+		if (flags & F_STATIC && (!(t->flags & T_FUNC) || t->ptr))
+			sprintf(name->elfname, "__neatcc.%s.%s", func_name, name->name);
 		globaldef(data, name, flags);
 		return;
 	}
