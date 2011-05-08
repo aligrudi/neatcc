@@ -1861,6 +1861,8 @@ int main(int argc, char *argv[])
 			}
 			cpp_define(name, def);
 		}
+		if (argv[i][1] == 'o')
+			strcpy(obj, argv[i][2] ? argv[i] + 2 : argv[++i]);
 		i++;
 	}
 	if (i == argc)
@@ -1868,8 +1870,10 @@ int main(int argc, char *argv[])
 	if (cpp_init(argv[i]))
 		die("neatcc: cannot open input file\n");
 	parse();
-	strcpy(obj, argv[i]);
-	obj[strlen(obj) - 1] = 'o';
+	if (!*obj) {
+		strcpy(obj, argv[i]);
+		obj[strlen(obj) - 1] = 'o';
+	}
 	ofd = open(obj, O_WRONLY | O_TRUNC | O_CREAT, 0600);
 	o_write(ofd);
 	close(ofd);
