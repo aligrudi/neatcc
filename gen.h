@@ -73,5 +73,3 @@ void o_func_beg(char *name, int argc, int global, int vararg);
 void o_func_end(void);
 /* output */
 void o_write(int fd);
-void o_nogen(void);
-void o_dogen(void);

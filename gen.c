@@ -31,7 +31,6 @@ static char ds[SECSIZE];	/* data segment */
 static int dslen;
 static long bsslen;		/* bss segment size */
 
-static int nogen;		/* don't generate code */
 static long sp;
 static long func_beg;
 static long maxsp;
@@ -99,8 +98,6 @@ static void os(void *s, int n)
 
 static void oi(long n)
 {
-	if (nogen)
-		return;
 	*(int *) (cs + cslen) = n;
 	cslen += 4;
 }
@@ -853,16 +850,6 @@ void o_call(int argc, int rets)
 		tmp_push(REG_RET);
 }
 
-void o_nogen(void)
-{
-	nogen++;
-}
-
-void o_dogen(void)
-{
-	nogen--;
-}
-
 void o_mkbss(char *name, int size, int global)
 {
 	out_sym(name, OUT_BSS | (global ? OUT_GLOB : 0), bsslen, size);
@@ -1094,10 +1081,7 @@ static void i_num(int rd, long n)
 		oi(ADD(I_MVN, rd, 0, 0, 1, 14) | enc);
 		return;
 	}
-	if (!nogen) {
-		int off = pool_num(n);
-		i_ldr(1, rd, REG_DP, off, LONGSZ);
-	}
+	i_ldr(1, rd, REG_DP, pool_num(n), LONGSZ);
 }
 
 static void i_add_anyimm(int rd, int rn, long n)
@@ -1255,10 +1239,8 @@ static void i_ldr(int l, int rd, int rn, int off, int bt)
 
 static void i_sym(int rd, char *sym, int off)
 {
-	if (!nogen) {
-		int doff = pool_reloc(sym, off);
-		i_ldr(1, rd, REG_DP, doff, LONGSZ);
-	}
+	int doff = pool_reloc(sym, off);
+	i_ldr(1, rd, REG_DP, doff, LONGSZ);
 }
 
 static void i_neg(int rd)
@@ -1361,8 +1343,7 @@ static void i_call_reg(int rd)
 
 static void i_call(char *sym, int off)
 {
-	if (!nogen)
-		out_rel(sym, OUT_CS | OUT_REL24, cslen);
+	out_rel(sym, OUT_CS | OUT_REL24, cslen);
 	oi(BL(14, 1, off));
 }
 

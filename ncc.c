@@ -16,6 +16,35 @@
 #include "tok.h"
 #include "out.h"
 
+static int nogen;		/* don't generate code */
+/* nogen macros */
+#define o_bop(op)		{if (!nogen) o_bop(op);}
+#define o_uop(op)		{if (!nogen) o_uop(op);}
+#define o_cast(bt)		{if (!nogen) o_cast(bt);}
+#define o_memcpy()		{if (!nogen) o_memcpy();}
+#define o_memset()		{if (!nogen) o_memset();}
+#define o_call(argc, ret)	{if (!nogen) o_call(argc, ret);}
+#define o_ret(ret)		{if (!nogen) o_ret(ret);}
+#define o_assign(bt)		{if (!nogen) o_assign(bt);}
+#define o_deref(bt)		{if (!nogen) o_deref(bt);}
+#define o_load()		{if (!nogen) o_load();}
+#define o_popnum(c)		(nogen ? 0 : o_popnum(c))
+#define o_num(n)		{if (!nogen) o_num(n);}
+#define o_local(addr)		{if (!nogen) o_local(addr);}
+#define o_sym(sym)		{if (!nogen) o_sym(sym);}
+#define o_tmpdrop(n)		{if (!nogen) o_tmpdrop(n);}
+#define o_tmpswap()		{if (!nogen) o_tmpswap();}
+#define o_tmpcopy()		{if (!nogen) o_tmpcopy();}
+#define o_mklabel()		(nogen ? 0 : o_mklabel())
+#define o_jz(addr)		(nogen ? 0 : o_jz(addr))
+#define o_jnz(addr)		(nogen ? 0 : o_jnz(addr))
+#define o_jmp(addr)		(nogen ? 0 : o_jmp(addr))
+#define o_filljmp(addr)		{if (!nogen) o_filljmp(addr);}
+#define o_filljmp2(addr, dst)	{if (!nogen) o_filljmp2(addr, dst);}
+#define o_fork()		{if (!nogen) o_fork();}
+#define o_forkpush()		{if (!nogen) o_forkpush();}
+#define o_forkjoin()		{if (!nogen) o_forkjoin();}
+
 #define MAXLOCALS	(1 << 10)
 #define MAXGLOBALS	(1 << 10)
 #define MAXARGS		(1 << 5)
@@ -845,11 +874,10 @@ static void readpre(void)
 		struct type t;
 		int op = !tok_jmp('(');
 		if (readtype(&t)) {
-			o_nogen();
+			nogen++;
 			readexpr();
-			o_dogen();
+			nogen--;
 			ts_pop(&t);
-			o_tmpdrop(1);
 		}
 		ts_push_bt(4);
 		o_num(type_totsz(&t));
@@ -1078,21 +1106,17 @@ static int readcexpr_const(void)
 	if (o_popnum(&c))
 		return -1;
 	if (!c)
-		o_nogen();
+		nogen++;
 	reador();
 	ts_pop(NULL);
 	tok_expect(':');
-	if (c) {
-		o_nogen();
-	} else {
-		o_dogen();
-		o_tmpdrop(1);
-	}
+	if (c)
+		nogen++;
+	else
+		nogen--;
 	reador();
-	if (c) {
-		o_dogen();
-		o_tmpdrop(1);
-	}
+	if (c)
+		nogen--;
 	return 0;
 }
 
@@ -1287,7 +1311,6 @@ static int initsize(void)
 		tok_jump(addr);
 		return n;
 	}
-	o_nogen();
 	tok_expect('{');
 	while (tok_jmp('}')) {
 		long idx = n;
@@ -1305,7 +1328,6 @@ static int initsize(void)
 				jumpbrace();
 		tok_jmp(',');
 	}
-	o_dogen();
 	tok_jump(addr);
 	return n;
 }
