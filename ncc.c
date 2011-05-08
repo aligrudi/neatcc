@@ -1384,9 +1384,12 @@ static char func_name[NAMELEN];
 static void localdef(void *data, struct name *name, unsigned flags)
 {
 	struct type *t = &name->type;
-	if (flags & (F_STATIC | F_EXTERN)) {
-		if (flags & F_STATIC && (!(t->flags & T_FUNC) || t->ptr))
-			sprintf(name->elfname, "__neatcc.%s.%s", func_name, name->name);
+	if ((flags & F_EXTERN) || (t->flags & T_FUNC) && !t->ptr) {
+		global_add(name);
+		return;
+	}
+	if (flags & F_STATIC) {
+		sprintf(name->elfname, "__neatcc.%s.%s", func_name, name->name);
 		globaldef(data, name, flags);
 		return;
 	}
