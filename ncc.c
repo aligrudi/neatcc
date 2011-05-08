@@ -1844,7 +1844,7 @@ static void compat_macros(void)
 
 int main(int argc, char *argv[])
 {
-	char obj[128];
+	char obj[128] = "";
 	int ofd;
 	int i = 1;
 	compat_macros();
