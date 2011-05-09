@@ -1574,12 +1574,11 @@ static void readswitch(void)
 {
 	int break_beg = nbreaks;
 	long val_addr = o_mklocal(LONGSZ);
-	long matched[MAXCASES];
-	int nmatched = 0;
 	struct type t;
-	long next;
-	int ref = 1;
-	int i;
+	int ncases = 0;		/* number of case labels */
+	long last_failed = -1;	/* address of last failed jmp */
+	long last_matched = -1;	/* address of last walk through jmp */
+	long default_addr = -1;	/* address of the default label */
 	tok_expect('(');
 	readexpr();
 	ts_pop_de(&t);
@@ -1591,39 +1590,36 @@ static void readswitch(void)
 	tok_expect(')');
 	tok_expect('{');
 	while (tok_jmp('}')) {
-		int n = 0;
-		while (tok_see() == TOK_CASE || tok_see() == TOK_DEFAULT) {
-			if (n++ > 0)
-				matched[nmatched++] = o_jmp(0);
-			if (!ref++)
-				o_filljmp(next);
-			if (!tok_jmp(TOK_CASE)) {
-				caseexpr = 1;
-				readexpr();
-				ts_pop_de(NULL);
-				caseexpr = 0;
-				o_local(val_addr);
-				o_deref(TYPE_BT(&t));
-				o_bop(O_EQ);
-				next = o_jz(0);
-				ref = 0;
-				tok_expect(':');
-				o_tmpdrop(1);
-				continue;
-			}
-			if (!tok_jmp(TOK_DEFAULT)) {
-				tok_expect(':');
-				continue;
-			}
+		if (tok_see() != TOK_CASE && tok_see() != TOK_DEFAULT) {
+			readstmt();
+			continue;
 		}
-		for (i = 0; i < nmatched; i++)
-			o_filljmp(matched[i]);
-		nmatched = 0;
-		readstmt();
+		if (ncases)
+			last_matched = o_jmp(0);
+		if (tok_get() == TOK_CASE) {
+			if (last_failed >= 0)
+				o_filljmp(last_failed);
+			caseexpr = 1;
+			readexpr();
+			ts_pop_de(NULL);
+			caseexpr = 0;
+			o_local(val_addr);
+			o_deref(TYPE_BT(&t));
+			o_bop(O_EQ);
+			last_failed = o_jz(0);
+			o_tmpdrop(1);
+		} else {
+			default_addr = o_mklabel();
+		}
+		tok_expect(':');
+		if (last_matched >= 0)
+			o_filljmp(last_matched);
+		ncases++;
 	}
 	o_rmlocal(val_addr, LONGSZ);
-	if (!ref++)
-		o_filljmp(next);
+	if (last_failed >= 0)
+		o_filljmp2(last_failed,
+			default_addr >= 0 ? default_addr : o_mklabel());
 	break_fill(o_mklabel(), break_beg);
 }
 
