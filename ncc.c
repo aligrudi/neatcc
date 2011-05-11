@@ -1742,6 +1742,7 @@ static void readstmt(void)
 		tok_expect(')');
 		break_fill(o_mklabel(), break_beg);
 		continue_fill(l2, continue_beg);
+		tok_expect(';');
 		return;
 	}
 	if (!tok_jmp(TOK_FOR)) {
