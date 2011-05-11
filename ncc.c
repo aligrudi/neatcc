@@ -452,7 +452,7 @@ static void enum_create(void)
 		strcpy(name, tok_id());
 		if (!tok_jmp('=')) {
 			readexpr();
-			ts_pop(NULL);
+			ts_pop_de(NULL);
 			if (o_popnum(&n))
 				err("const expr expected!\n");
 		}
@@ -1108,13 +1108,16 @@ static int readcexpr_const(void)
 	if (!c)
 		nogen++;
 	reador();
-	ts_pop(NULL);
+	/* both branches yield the same type; so ignore the first */
+	ts_pop_de(NULL);
 	tok_expect(':');
 	if (c)
 		nogen++;
 	else
 		nogen--;
 	reador();
+	/* making sure t->addr == 0 on both branches */
+	ts_de(1);
 	if (c)
 		nogen--;
 	return 0;
@@ -1132,14 +1135,15 @@ static void readcexpr(void)
 	if (readcexpr_const()) {
 		l1 = o_jz(0);
 		reador();
-		ts_de(1);
+		/* both branches yield the same type; so ignore the first */
+		ts_pop_de(NULL);
 		o_forkpush();
 		l2 = o_jmp(0);
-		ts_pop(NULL);
 
 		tok_expect(':');
 		o_filljmp(l1);
 		reador();
+		/* making sure t->addr == 0 on both branches */
 		ts_de(1);
 		o_forkpush();
 		o_forkjoin();
@@ -1278,8 +1282,8 @@ static void initexpr(struct type *t, int off, void *obj,
 			struct type *it = t_de;
 			if (!tok_jmp('[')) {
 				readexpr();
+				ts_pop_de(NULL);
 				o_popnum(&idx);
-				ts_pop(NULL);
 				tok_expect(']');
 				tok_expect('=');
 			}
@@ -1316,8 +1320,8 @@ static int initsize(void)
 		long idx = n;
 		if (!tok_jmp('[')) {
 			readexpr();
+			ts_pop_de(NULL);
 			o_popnum(&idx);
-			ts_pop(NULL);
 			tok_expect(']');
 			tok_expect('=');
 		}
@@ -1502,7 +1506,7 @@ static int readname(struct type *main, char *name,
 		long n = 0;
 		if (tok_jmp(']')) {
 			readexpr();
-			ts_pop(NULL);
+			ts_pop_de(NULL);
 			if (o_popnum(&n))
 				err("const expr expected\n");
 			tok_expect(']');
