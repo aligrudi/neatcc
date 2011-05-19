@@ -1103,6 +1103,8 @@ static void reador(void)
 	ts_push_bt(4 | BT_SIGNED);
 }
 
+static void readcexpr(void);
+
 static int readcexpr_const(void)
 {
 	long c;
@@ -1110,7 +1112,7 @@ static int readcexpr_const(void)
 		return -1;
 	if (!c)
 		nogen++;
-	reador();
+	readcexpr();
 	/* both branches yield the same type; so ignore the first */
 	ts_pop_de(NULL);
 	tok_expect(':');
@@ -1118,7 +1120,7 @@ static int readcexpr_const(void)
 		nogen++;
 	else
 		nogen--;
-	reador();
+	readcexpr();
 	/* making sure t->addr == 0 on both branches */
 	ts_de(1);
 	if (c)
@@ -1137,7 +1139,7 @@ static void readcexpr(void)
 	o_fork();
 	if (readcexpr_const()) {
 		l1 = o_jz(0);
-		reador();
+		readcexpr();
 		/* both branches yield the same type; so ignore the first */
 		ts_pop_de(NULL);
 		o_forkpush();
@@ -1145,7 +1147,7 @@ static void readcexpr(void)
 
 		tok_expect(':');
 		o_filljmp(l1);
-		reador();
+		readcexpr();
 		/* making sure t->addr == 0 on both branches */
 		ts_de(1);
 		o_forkpush();
