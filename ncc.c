@@ -875,7 +875,10 @@ static void readpre(void)
 		int op = !tok_jmp('(');
 		if (readtype(&t)) {
 			nogen++;
-			readexpr();
+			if (op)
+				readexpr();
+			else
+				readpre();
 			nogen--;
 			ts_pop(&t);
 		}
