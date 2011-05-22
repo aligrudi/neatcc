@@ -250,21 +250,17 @@ static void readarg(char *s)
 	while (cur < len && (depth || buf[cur] != ',' && buf[cur] != ')')) {
 		if (!jumpstr() || !jumpcomment())
 			continue;
-		switch (buf[cur]) {
+		switch (buf[cur++]) {
 		case '(':
 		case '[':
 		case '{':
-			cur++;
 			depth++;
 			break;
 		case ')':
 		case ']':
 		case '}':
-			cur++;
 			depth--;
 			break;
-		default:
-			cur++;
 		}
 	}
 	if (s) {
