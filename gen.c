@@ -321,9 +321,9 @@ static int reg_get(int mask)
 
 static int reg_fortmp(struct tmp *t, int notmask)
 {
-       if (t->loc == LOC_REG && !(notmask & (1 << t->addr)))
-               return t->addr;
-       return reg_get(~notmask);
+	if (t->loc == LOC_REG && !(notmask & (1 << t->addr)))
+		return t->addr;
+	return reg_get(~notmask);
 }
 
 static void tmp_copy(struct tmp *t1)
