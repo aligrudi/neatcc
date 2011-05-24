@@ -198,8 +198,8 @@ static char *putstr(char *d, char *s)
 
 #define MAXLOCS			(1 << 10)
 
-static char *locs[MAXLOCS] = {"/usr/include"};
-static int nlocs = 1;
+static char *locs[MAXLOCS] = {};
+static int nlocs = 0;
 
 void cpp_addpath(char *s)
 {
