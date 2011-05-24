@@ -1265,7 +1265,7 @@ static void initexpr(struct type *t, int off, void *obj,
 	if (!t->ptr && t->flags & T_STRUCT) {
 		struct structinfo *si = &structs[t->id];
 		int i;
-		for (i = 0; i < si->nfields; i++) {
+		for (i = 0; i < si->nfields && tok_see() != '}'; i++) {
 			struct name *field = &si->fields[i];
 			if (!tok_jmp('.')) {
 				tok_expect(TOK_NAME);
@@ -1273,13 +1273,13 @@ static void initexpr(struct type *t, int off, void *obj,
 				tok_expect('=');
 			}
 			initexpr(&field->type, off + field->addr, obj, set);
-			if (tok_jmp(',') || tok_see() == '}')
+			if (tok_jmp(','))
 				break;
 		}
 	} else if (t->flags & T_ARRAY) {
 		struct type *t_de = &arrays[t->id].type;
 		int i;
-		for (i = 0; ; i++) {
+		for (i = 0; tok_see() != '}'; i++) {
 			long idx = i;
 			struct type *it = t_de;
 			if (!tok_jmp('[')) {
@@ -1292,7 +1292,7 @@ static void initexpr(struct type *t, int off, void *obj,
 			if (tok_see() != '{')
 				it = innertype(t_de);
 			initexpr(it, off + type_totsz(it) * idx, obj, set);
-			if (tok_jmp(',') || tok_see() == '}')
+			if (tok_jmp(','))
 				break;
 		}
 	}
