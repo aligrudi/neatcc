@@ -20,22 +20,5 @@ USAGE
 =====
 
 neatcc has been tested with neatlibc and dietlibc.  It can compile
-itself and neat* toolchain.  I use this script to run neatcc:
-
-# !/bin/sh
-NEAT="/path/to/neatlibc"
-CC="/path/to/neatcc/ncc"
-LD="/path/to/ld/ld"
-
-# these can be ignored
-CPPFLAGS="-Dfloat=long -Ddouble=long"
-
-for x in $*
-do
-	if [ x$x == "x-c" ]
-	then
-		exec ${CC} ${CPPFLAGS} -I${NEAT} $*
-	fi
-done
-
-exec ${LD} $* ${NEAT}/start.o ${NEAT}/libc.a
+itself and neat* toolchain.  The included neatcc script could be
+used to invoke ncc with neatlibc library.
