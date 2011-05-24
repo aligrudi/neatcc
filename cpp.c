@@ -181,15 +181,39 @@ static int jumpcomment(void)
 	return 1;
 }
 
+static int jumpstr(void)
+{
+	if (buf[cur] == '\'') {
+		while (cur < len && buf[++cur] != '\'')
+			if (buf[cur] == '\\')
+				cur++;
+		cur++;
+		return 0;
+	}
+	if (buf[cur] == '"') {
+		while (cur < len && buf[++cur] != '"')
+			if (buf[cur] == '\\')
+				cur++;
+		cur++;
+		return 0;
+	}
+	return 1;
+}
+
 static void read_tilleol(char *dst)
 {
 	while (cur < len && isspace(buf[cur]) && buf[cur] != '\n')
 		cur++;
 	while (cur < len && buf[cur] != '\n') {
-		if (buf[cur] == '\\' && buf[cur + 1] == '\n')
+		int last = cur;
+		if (buf[cur] == '\\' && buf[cur + 1] == '\n') {
 			cur += 2;
-		else if (jumpcomment())
+		} else if (jumpcomment()) {
 			*dst++ = buf[cur++];
+		} else if (jumpstr()) {
+			memcpy(dst, buf + last, cur - last);
+			dst += cur - last;
+		}
 	}
 	*dst = '\0';
 }
@@ -228,25 +252,6 @@ static int include_find(char *name, int std)
 			return 0;
 	}
 	return -1;
-}
-
-static int jumpstr(void)
-{
-	if (buf[cur] == '\'') {
-		while (cur < len && buf[++cur] != '\'')
-			if (buf[cur] == '\\')
-				cur++;
-		cur++;
-		return 0;
-	}
-	if (buf[cur] == '"') {
-		while (cur < len && buf[++cur] != '"')
-			if (buf[cur] == '\\')
-				cur++;
-		cur++;
-		return 0;
-	}
-	return 1;
 }
 
 static void readarg(char *s)
