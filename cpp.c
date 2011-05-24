@@ -1,5 +1,6 @@
 #include <ctype.h>
 #include <fcntl.h>
+#include <stdarg.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -52,8 +53,13 @@ static struct buf {
 } bufs[MAXBUFS];
 static int nbufs;
 
-void die(char *msg)
+void die(char *fmt, ...)
 {
+	va_list ap;
+	char msg[512];
+	va_start(ap, fmt);
+	vsprintf(msg, fmt, ap);
+	va_end(ap);
 	write(2, msg, strlen(msg));
 	exit(1);
 }
@@ -427,7 +433,7 @@ static int cpp_cmd(void)
 		file[e - s] = '\0';
 		cur += e - s + 2;
 		if (include_find(file, *e == '>') == -1)
-			die("cannot include file\n");
+			die("cannot include <%s>\n", file);
 		return 0;
 	}
 	return 1;
@@ -880,8 +886,9 @@ static int buf_loc(char *s, int off)
 	return n;
 }
 
-int cpp_loc(char *s, long addr)
+char *cpp_loc(long addr)
 {
+	static char loc[256];
 	int line = -1;
 	int i;
 	for (i = nbufs - 1; i > 0; i--)
@@ -891,6 +898,6 @@ int cpp_loc(char *s, long addr)
 		line = buf_loc(buf, (cur - hunk_len) + (addr - hunk_off));
 	else
 		line = buf_loc(bufs[i].buf, bufs[i].cur);
-	sprintf(s, "%s:%d: ", bufs[i].path, line);
-	return strlen(s);
+	sprintf(loc, "%s:%d", bufs[i].path, line);
+	return loc;
 }

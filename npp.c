@@ -91,10 +91,10 @@ int main(int argc, char *argv[])
 		return 0;
 	}
 	if (cpp_init(argv[i++]))
-		die("npp: cannot open input file\n");
+		die("npp: cannot open <%s>\n", argv[i - 1]);
 	ofd = open(argv[i++], O_WRONLY | O_TRUNC | O_CREAT, 0600);
 	if (ofd < 0)
-		die("npp: cannot open output file\n");
+		die("npp: cannot open <%s>\n", argv[i - 1]);
 	s1 = malloc(OBUFSZ);
 	s2 = malloc(OBUFSZ);
 	if (!s1 || !s2)

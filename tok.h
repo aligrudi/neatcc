@@ -50,7 +50,7 @@ void tok_jump(long addr);
 int cpp_init(char *path);
 void cpp_addpath(char *s);
 void cpp_define(char *name, char *def);
-int cpp_loc(char *s, long offset);
+char *cpp_loc(long addr);
 int cpp_read(char *s);
 
-void die(char *msg);
+void die(char *msg, ...);

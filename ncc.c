@@ -101,10 +101,7 @@ static void ts_pop(struct type *type)
 
 void err(char *msg)
 {
-	char err[1 << 7];
-	int len = cpp_loc(err, tok_addr());
-	strcpy(err + len, msg);
-	die(err);
+	die("%s: %s", cpp_loc(tok_addr()), msg);
 }
 
 struct name {
@@ -823,7 +820,7 @@ static void readpre(void)
 		readpre();
 		ts_pop(&type);
 		if (!type.addr)
-			die("cannot use the address\n");
+			err("cannot use the address\n");
 		type.ptr++;
 		type.addr = 0;
 		ts_push(&type);
@@ -1896,7 +1893,7 @@ int main(int argc, char *argv[])
 	if (i == argc)
 		die("neatcc: no file given\n");
 	if (cpp_init(argv[i]))
-		die("neatcc: cannot open input file\n");
+		die("neatcc: cannot open <%s>\n", argv[i]);
 	parse();
 	if (!*obj) {
 		strcpy(obj, argv[i]);
