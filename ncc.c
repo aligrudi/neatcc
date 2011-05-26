@@ -123,10 +123,19 @@ static void local_add(struct name *name)
 	memcpy(&locals[nlocals++], name, sizeof(*name));
 }
 
+static int local_find(char *name)
+{
+	int i;
+	for (i = nlocals - 1; i >= 0; --i)
+		if (!strcmp(locals[i].name, name))
+			return i;
+	return -1;
+}
+
 static int global_find(char *name)
 {
 	int i;
-	for (i = 0; i < nglobals; i++)
+	for (i = nglobals - 1; i >= 0; i--)
 		if (!strcmp(name, globals[i].name))
 			return i;
 	return -1;
@@ -134,11 +143,9 @@ static int global_find(char *name)
 
 static void global_add(struct name *name)
 {
-	int found = global_find(name->name);
-	int i = found == -1 ? nglobals++ : found;
 	if (nglobals >= MAXGLOBALS)
 		err("nomem: MAXGLOBALS reached!\n");
-	memcpy(&globals[i], name, sizeof(*name));
+	memcpy(&globals[nglobals++], name, sizeof(*name));
 }
 
 #define MAXENUMS		(1 << 10)
@@ -607,20 +614,16 @@ static void readprimary(void)
 		/* don't search for labels here */
 		if (!ncexpr && !caseexpr && tok_see() == ':')
 			return;
-		for (i = nlocals - 1; i >= 0; --i) {
-			struct type *t = &locals[i].type;
-			if (!strcmp(locals[i].name, name)) {
-				o_local(locals[i].addr);
-				ts_push_addr(t);
-				return;
-			}
+		if ((n = local_find(name)) != -1) {
+			struct name *l = &locals[n];
+			o_local(l->addr);
+			ts_push_addr(&l->type);
+			return;
 		}
 		if ((n = global_find(name)) != -1) {
 			struct name *g = &globals[n];
-			struct type *t = &g->type;
-			char *elfname = *g->elfname ? g->elfname : g->name;
-			o_sym(elfname);
-			ts_push_addr(t);
+			o_sym(*g->elfname ? g->elfname : g->name);
+			ts_push_addr(&g->type);
 			return;
 		}
 		if (!enum_find(&n, name)) {
