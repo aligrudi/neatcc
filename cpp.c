@@ -208,12 +208,16 @@ static void read_tilleol(char *dst)
 		int last = cur;
 		if (buf[cur] == '\\' && buf[cur + 1] == '\n') {
 			cur += 2;
-		} else if (jumpcomment()) {
-			*dst++ = buf[cur++];
-		} else if (jumpstr()) {
+			continue;
+		}
+		if (!jumpstr()) {
 			memcpy(dst, buf + last, cur - last);
 			dst += cur - last;
+			continue;
 		}
+		if (!jumpcomment())
+			continue;
+		*dst++ = buf[cur++];
 	}
 	*dst = '\0';
 }
