@@ -585,7 +585,6 @@ static char *tmp_str(char *buf, int len)
 
 static void readprimary(void)
 {
-	int i;
 	if (!tok_jmp(TOK_NUM)) {
 		long n;
 		int bt = tok_num(&n);
@@ -1618,6 +1617,8 @@ static void readswitch(void)
 			last_failed = o_jz(0);
 			o_tmpdrop(1);
 		} else {
+			if (!ncases)
+				last_failed = o_jmp(0);
 			default_addr = o_mklabel();
 		}
 		tok_expect(':');
