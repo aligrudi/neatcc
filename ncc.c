@@ -289,6 +289,7 @@ static void continue_fill(long addr, int till)
 	ncontinues = till;
 }
 
+/* return t's size */
 static int type_totsz(struct type *t)
 {
 	if (t->ptr)
@@ -298,6 +299,7 @@ static int type_totsz(struct type *t)
 	return t->flags & T_STRUCT ? structs[t->id].size : BT_SZ(t->bt);
 }
 
+/* return t's dereferenced size */
 static unsigned type_szde(struct type *t)
 {
 	struct type de = *t;
@@ -306,26 +308,24 @@ static unsigned type_szde(struct type *t)
 	return type_totsz(&de);
 }
 
+/* dereference stack top if t->addr (ie. address is pushed to gen.c) */
 static void ts_de(int deref)
 {
 	struct type *t = &ts[nts - 1];
-	if (deref && t->addr && (!(t->flags & T_ARRAY) || (t->ptr)))
+	array2ptr(t);
+	if (deref && t->addr && (t->ptr || !(t->flags & T_FUNC)))
 		o_deref(TYPE_BT(t));
 	t->addr = 0;
 }
 
+/* pop stack pop to *t and dereference if t->addr */
 static void ts_pop_de(struct type *t)
 {
-	struct type de;
-	if (!t)
-		t = &de;
+	ts_de(1);
 	ts_pop(t);
-	array2ptr(t);
-	if (t->addr && (t->ptr || !(t->flags & T_FUNC)))
-		o_deref(TYPE_BT(t));
-	t->addr = 0;
 }
 
+/* pop the top 2 stack values and dereference them if t->addr */
 static void ts_pop_de2(struct type *t1, struct type *t2)
 {
 	ts_pop_de(t1);
