@@ -37,8 +37,8 @@ char *tab_get(struct tab *t, char *s)
 
 void tab_del(struct tab *t, char *s)
 {
-	int h = hash(s);
-	int prev = -1;
+	int h = t->head[hash(s)];
+	int prev = 0;
 	while (h && t->data[h]) {
 		if (!strcmp(s, t->data[h])) {
 			if (prev)
