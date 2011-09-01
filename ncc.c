@@ -1281,6 +1281,12 @@ static void initexpr(struct type *t, int off, void *obj,
 	} else if (t->flags & T_ARRAY) {
 		struct type *t_de = &arrays[t->id].type;
 		int i;
+		/* handling extra braces as in: char s[] = {"sth"} */
+		if (TYPE_SZ(t_de) == 1 && tok_see() == TOK_STR) {
+			set(obj, off, t);
+			tok_expect('}');
+			return;
+		}
 		for (i = 0; tok_see() != '}'; i++) {
 			long idx = i;
 			struct type *it = t_de;
@@ -1291,7 +1297,8 @@ static void initexpr(struct type *t, int off, void *obj,
 				tok_expect(']');
 				tok_expect('=');
 			}
-			if (tok_see() != '{')
+			if (tok_see() != '{' && (tok_see() != TOK_STR ||
+						!(it->flags & T_ARRAY)))
 				it = innertype(t_de);
 			initexpr(it, off + type_totsz(it) * idx, obj, set);
 			if (tok_jmp(','))
