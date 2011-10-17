@@ -199,6 +199,7 @@ void out_write(int fd, char *cs, int cslen, char *ds, int dslen)
 	text_shdr->sh_offset = offset;
 	text_shdr->sh_size = cslen;
 	text_shdr->sh_entsize = 1;
+	text_shdr->sh_addralign = OUT_ALIGNMENT;
 	offset += text_shdr->sh_size;
 
 	rela_shdr->sh_type = SHT_REL;
@@ -222,7 +223,7 @@ void out_write(int fd, char *cs, int cslen, char *ds, int dslen)
 	dat_shdr->sh_offset = offset;
 	dat_shdr->sh_size = dslen;
 	dat_shdr->sh_entsize = 1;
-	dat_shdr->sh_addralign = 4;
+	dat_shdr->sh_addralign = OUT_ALIGNMENT;
 	offset += dat_shdr->sh_size;
 
 	datrela_shdr->sh_type = SHT_REL;
@@ -238,7 +239,7 @@ void out_write(int fd, char *cs, int cslen, char *ds, int dslen)
 	bss_shdr->sh_offset = offset;
 	bss_shdr->sh_size = bss_len();
 	bss_shdr->sh_entsize = 1;
-	bss_shdr->sh_addralign = 4;
+	bss_shdr->sh_addralign = OUT_ALIGNMENT;
 
 	symstr_shdr->sh_type = SHT_STRTAB;
 	symstr_shdr->sh_offset = offset;

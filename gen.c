@@ -853,7 +853,7 @@ void o_call(int argc, int rets)
 void o_mkbss(char *name, int size, int global)
 {
 	out_sym(name, OUT_BSS | (global ? OUT_GLOB : 0), bsslen, size);
-	bsslen += ALIGN(size, LONGSZ);
+	bsslen += ALIGN(size, OUT_ALIGNMENT);
 }
 
 #define MAXDATS		(1 << 10)
@@ -871,7 +871,7 @@ void *o_mkdat(char *name, int size, int global)
 	strcpy(dat_names[idx], name);
 	dat_offs[idx] = dslen;
 	out_sym(name, OUT_DS | (global ? OUT_GLOB : 0), dslen, size);
-	dslen += ALIGN(size, LONGSZ);
+	dslen += ALIGN(size, OUT_ALIGNMENT);
 	return addr;
 }
 

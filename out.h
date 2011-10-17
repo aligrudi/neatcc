@@ -7,6 +7,8 @@
 #define OUT_REL		0x0100		/* relative relocation */
 #define OUT_REL24	0x0200		/* 24-bit relative relocation */
 
+#define OUT_ALIGNMENT	16		/* amount of section alignment */
+
 void out_init(int flags);
 
 void out_sym(char *name, int flags, int off, int len);
