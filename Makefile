@@ -1,6 +1,6 @@
 # for arm build
-ARCH = -DNEATCC_ARM
-GEN = arm.o
+#ARCH = -DNEATCC_ARM
+#GEN = arm.o
 
 # for x86 build
 ARCH = -DNEATCC_X86
