@@ -121,11 +121,13 @@ void out_sym(char *name, int flags, int off, int len)
 
 static int rel_type(int flags)
 {
+#ifdef NEATCC_ARM
 	if (flags & OUT_REL24)
 		return R_ARM_PC24;
-	if (flags & OUT_REL)
-		return R_ARM_REL32;
-	return R_ARM_ABS32;
+	return flags & OUT_REL ? R_ARM_REL32 : R_ARM_ABS32;
+#else
+	return flags & OUT_REL ? R_386_PC32 : R_386_32;
+#endif
 }
 
 static void out_csrel(int idx, int off, int flags)
@@ -184,8 +186,12 @@ void out_write(int fd, char *cs, int cslen, char *ds, int dslen)
 	ehdr.e_ident[5] = ELFDATA2LSB;
 	ehdr.e_ident[6] = EV_CURRENT;
 	ehdr.e_type = ET_REL;
+#ifdef NEATCC_ARM
 	ehdr.e_machine = EM_ARM;
 	ehdr.e_flags = EF_ARM_EABI_VER4;
+#else
+	ehdr.e_machine = EM_386;
+#endif
 	ehdr.e_version = EV_CURRENT;
 	ehdr.e_ehsize = sizeof(ehdr);
 	ehdr.e_shentsize = sizeof(shdr[0]);

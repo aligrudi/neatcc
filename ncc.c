@@ -1863,8 +1863,11 @@ static void parse(void)
 static void compat_macros(void)
 {
 	cpp_define("__STDC__", "");
+#ifdef NEATCC_ARM
 	cpp_define("__arm__", "");
+#else
 	cpp_define("__linux__", "");
+#endif
 
 	/* ignored keywords */
 	cpp_define("const", "");

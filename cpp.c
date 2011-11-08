@@ -557,7 +557,7 @@ int cpp_read(char *s)
 		struct buf *cbuf = &bufs[nbufs - 1];
 		if (nbufs < 2)
 			return -1;
-		if (cbuf->type & BUF_FILE)
+		if (cbuf->type == BUF_FILE)
 			free(buf);
 		buf_pop();
 	}
