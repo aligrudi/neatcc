@@ -1,6 +1,6 @@
 #define SECSIZE		(1 << 18)
 #define MAXTMP		(1 << 12)
-#define LONGSZ		4
+#define LONGSZ		8
 
 /* basic types */
 #define BT_SZMASK	0x00ff

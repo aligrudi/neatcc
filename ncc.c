@@ -1543,7 +1543,7 @@ static void compat_macros(void)
 #ifdef NEATCC_ARM
 	cpp_define("__arm__", "");
 #else
-	cpp_define("__i386__", "");
+	cpp_define("__x86_64__", "");
 #endif
 
 	/* ignored keywords */

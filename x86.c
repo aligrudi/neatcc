@@ -27,14 +27,21 @@
 #define R_RBP		0x05
 #define R_RSI		0x06
 #define R_RDI		0x07
-
-#define N_REGS		8
-#define N_ARGS		0
+/* x86_64 registers */
+#define R_R8		0x08
+#define R_R9		0x09
+#define R_R10		0x0a
+#define R_R11		0x0b
+#define R_R12		0x0c
+#define R_R13		0x0d
+#define R_R14		0x0e
+#define R_R15		0x0f
+#define N_REGS		16
+#define N_ARGS		ARRAY_SIZE(argregs)
 #define N_TMPS		ARRAY_SIZE(tmpregs)
-#define R_TMPS		0x00cf
-#define R_ARGS		0x0000
-#define R_SAVED		0x00c8
-#define R_BYTEREGS	(1 << R_RAX | 1 << R_RDX | 1 << R_RCX)
+#define R_TMPS		0xffcf
+#define R_ARGS		0x03c6
+#define R_SAVED		0xf008
 
 #define MIN(a, b)		((a) < (b) ? (a) : (b))
 #define ALIGN(x, a)		(((x) + (a) - 1) & ~((a) - 1))
@@ -49,7 +56,10 @@ static long bsslen;		/* bss segment size */
 static long sp;			/* stack pointer offset from R_RBP */
 static long sp_max;		/* maximum stack pointer offset */
 static long sp_tmp;		/* sp for the first tmp on the stack */
+static long func_beg;		/* function address in CS */
 static long func_fpsub;		/* stack pointer sub address in CS */
+static int func_argc;		/* # of args */
+static int func_vararg;		/* vararg function */
 
 #define TMP(i)		(((i) < ntmp) ? &tmps[ntmp - 1 - (i)] : NULL)
 
@@ -92,7 +102,9 @@ static void i_prolog(void);
 static void i_epilog(void);
 
 static struct tmp *regs[N_REGS];
-static int tmpregs[] = {R_RAX, R_RSI, R_RDI, R_RBX, R_RDX, R_RCX};
+static int tmpregs[] = {R_RAX, R_RDI, R_RSI, R_RDX, R_RCX, R_R8, R_R9,
+			R_R10, R_R11};
+static int argregs[] = {R_RDI, R_RSI, R_RDX, R_RCX, R_R8, R_R9};
 
 /* labels and jmps */
 #define MAXJMPS		(1 << 14)
@@ -402,7 +414,7 @@ void o_cast(unsigned bt)
 		return;
 	}
 	if (BT_SZ(bt) != LONGSZ) {
-		int reg = reg_fortmp(t, BT_SZ(bt) > 1 ? 0 : ~R_BYTEREGS);
+		int reg = reg_fortmp(t, 0);
 		tmp_to(t, reg);
 		if (bt & BT_SIGNED)
 			i_sx(reg, BT_SZ(bt) * 8);
@@ -414,8 +426,10 @@ void o_cast(unsigned bt)
 void o_func_beg(char *name, int argc, int global, int vararg)
 {
 	out_sym(name, (global ? OUT_GLOB : 0) | OUT_CS, cslen, 0);
+	func_argc = argc;
+	func_vararg = vararg;
 	i_prolog();
-	sp = 3 * LONGSZ;
+	sp = 0;
 	sp_max = sp;
 	ntmp = 0;
 	sp_tmp = -1;
@@ -487,7 +501,7 @@ void o_assign(unsigned bt)
 {
 	struct tmp *t1 = TMP(0);
 	struct tmp *t2 = TMP(1);
-	int r1 = reg_fortmp(t1, BT_SZ(bt) > 1 ? 0 : ~R_BYTEREGS);
+	int r1 = reg_fortmp(t1, 0);
 	int r2 = reg_fortmp(t2, 1 << r1);
 	int off = 0;
 	tmp_to(t1, r1);
@@ -852,15 +866,21 @@ void o_call(int argc, int rets)
 {
 	struct tmp *t;
 	int i;
+	int aregs = MIN(N_ARGS, argc);
 	for (i = 0; i < N_TMPS; i++)
 		if (regs[tmpregs[i]] && regs[tmpregs[i]] - tmps < ntmp - argc)
 			tmp_mem(regs[tmpregs[i]]);
-	sp_push(LONGSZ * argc);
-	for (i = argc - 1; i >= 0; --i) {
-		int reg = reg_fortmp(TMP(0), 0);
-		tmp_pop(reg);
-		i_ldr(0, reg, REG_SP, i * LONGSZ, LONGSZ);
+	if (argc > aregs) {
+		sp_push(LONGSZ * (argc - aregs));
+		for (i = argc - 1; i >= aregs; --i) {
+			int reg = reg_fortmp(TMP(0), 0);
+			tmp_pop(reg);
+			i_ldr(0, reg, REG_SP, (i - aregs) * LONGSZ, LONGSZ);
+		}
 	}
+	for (i = aregs - 1; i >= 0; --i)
+		tmp_to(TMP(aregs - i - 1), argregs[i]);
+	tmp_drop(aregs);
 	t = TMP(0);
 	if (t->loc == LOC_SYM && !t->bt) {
 		i_call(t->sym, t->off);
@@ -933,6 +953,7 @@ void o_write(int fd)
 #define I_MOVI		0xc7
 #define I_MOVIR		0xb8
 #define I_MOVR		0x8b
+#define I_MOVSXD	0x63
 #define I_SHX		0xd3
 #define I_CMP		0x3b
 #define I_TST		0x85
@@ -950,9 +971,10 @@ void o_write(int fd)
 #define O2(op)			(((op) >> 8) & 0xff)
 #define O1(op)			((op) & 0xff)
 #define MODRM(m, r1, r2)	((m) << 6 | (r1) << 3 | (r2))
+#define REX(r1, r2)		(0x48 | (((r1) & 8) >> 1) | (((r2) & 8) >> 3))
 
 /* for optimizing cmp + jmp */
-#define OPT_ISCMP()		(last_set + 6 == cslen)
+#define OPT_ISCMP()		(last_set + 7 == cslen)
 #define OPT_CCOND()		(cs[last_set + 1])
 
 static long last_set = -1;
@@ -960,8 +982,19 @@ static long last_set = -1;
 static void op_x(int op, int r1, int r2, int bt)
 {
 	int sz = BT_SZ(bt);
+	int rex = 0;
+	if (sz == 8)
+		rex |= 8;
+	if (sz == 1)
+		rex |= 0x40;
+	if (r1 & 0x8)
+		rex |= 4;
+	if (r2 & 0x8)
+		rex |= 1;
 	if (sz == 2)
 		oi(0x66, 1);
+	if (rex)
+		oi(rex | 0x40, 1);
 	if (op & 0x10000)
 		oi(O2(op), 1);
 	oi(sz == 1 ? O1(op) & ~0x1 : O1(op), 1);
@@ -990,11 +1023,13 @@ static void op_rr(int op, int src, int dst, int bt)
 	oi(MODRM(3, src & 0x07, dst & 0x07), 1);
 }
 
-#define movrx_bt(bt)		(LONGSZ)
+#define movrx_bt(bt)		(((bt) == 4) ? 4 : LONGSZ)
 
 static int movrx_op(int bt, int mov)
 {
 	int sz = BT_SZ(bt);
+	if (sz == 4)
+		return bt & BT_SIGNED ? I_MOVSXD : mov;
 	if (sz == 2)
 		return OP2(0x0f, bt & BT_SIGNED ? 0xbf : 0xb7);
 	if (sz == 1)
@@ -1041,10 +1076,10 @@ static void i_add_imm(int op, int rd, int rn, long n)
 {
 	/* opcode for O_ADD, O_SUB, O_AND, O_OR, O_XOR */
 	static int rx[] = {0xc0, 0xe8, 0xe0, 0xc8, 0xf0};
-	unsigned char s[3] = {0x83, rx[op & 0x0f] | rd, n & 0xff};
+	unsigned char s[4] = {REX(0, rd), 0x83, rx[op & 0x0f] | (rd & 7), n & 0xff};
 	if (rn != rd)
 		die("this is cisc!\n");
-	os((void *) s, 3);
+	os((void *) s, 4);
 }
 
 static int i_decodeable(long imm)
@@ -1056,9 +1091,17 @@ static void i_num(int rd, long n)
 {
 	if (!n) {
 		op_rr(I_XOR, rd, rd, 4);
+		return;
+	}
+	if (n < 0 && -n <= 0xffffffff) {
+		op_rr(I_MOVI, 0, rd, LONGSZ);
+		oi(n, 4);
 	} else {
-		op_x(I_MOVIR + (rd & 7), 0, rd, LONGSZ);
-		oi(n, LONGSZ);
+		int len = 8;
+		if (n > 0 && n <= 0xffffffff)
+			len = 4;
+		op_x(I_MOVIR + (rd & 7), 0, rd, len);
+		oi(n, len);
 	}
 }
 
@@ -1097,8 +1140,8 @@ static void i_cmp(int rn, int rm)
 
 static void i_cmp_imm(int rn, long n)
 {
-	unsigned char s[3] = {0x83, 0xf8 | rn, n & 0xff};
-	os(s, 3);
+	unsigned char s[4] = {REX(0, rn), 0x83, 0xf8 | rn, n & 0xff};
+	os(s, 4);
 }
 
 static void i_set(int op, int rd)
@@ -1113,7 +1156,7 @@ static void i_set(int op, int rd)
 	set[1] = cond;
 	last_set = cslen;
 	os(set, 3);			/* setl al */
-	os("\x0f\xb6\xc0", 3);		/* movzbl eax, al */
+	os("\x48\x0f\xb6\xc0", 4);	/* movzx rax, al */
 }
 
 static void i_shl(int op, int rd, int rm, int rs)
@@ -1129,10 +1172,10 @@ static void i_shl(int op, int rd, int rm, int rs)
 static void i_shl_imm(int op, int rd, int rn, long n)
 {
 	int sm = (op & 0x1) ? (op & O_SIGNED ? 0xf8 : 0xe8) : 0xe0 ;
-	char s[3] = {0xc1, sm | rn, n & 0xff};
+	char s[4] = {REX(0, rn), 0xc1, sm | (rn & 7), n & 0xff};
 	if (rd != rn)
 		die("this is cisc!\n");
-	os(s, 3);
+	os(s, 4);
 }
 
 static void i_mov(int rd, int rn, int bt)
@@ -1152,7 +1195,7 @@ static void i_sym(int rd, char *sym, int off)
 {
 	op_x(I_MOVIR + (rd & 7), 0, rd, LONGSZ);
 	out_rel(sym, OUT_CS, cslen);
-	oi(off, LONGSZ);
+	oi(off, 8);
 }
 
 static void i_neg(int rd)
@@ -1170,9 +1213,10 @@ static void i_lnot(int rd)
 	if (OPT_ISCMP()) {
 		cs[last_set + 1] ^= 0x01;
 	} else {
-		char cmp[] = "\x83\xf8\x00";
-		cmp[1] |= rd;
-		os(cmp, 3);		/* cmp eax, 0 */
+		char cmp[] = "\x00\x83\xf8\x00";
+		cmp[0] = REX(0, rd);
+		cmp[2] |= rd & 7;
+		os(cmp, 4);		/* cmp rax, 0 */
 		i_set(O_EQ, rd);
 	}
 }
@@ -1221,25 +1265,49 @@ static void i_call(char *sym, int off)
 	oi(-4 + off, 4);
 }
 
+static void i_push(int reg)
+{
+	op_x(I_PUSH | (reg & 0x7), 0, reg, 4);
+}
+
+static void i_pop(int reg)
+{
+	op_x(I_POP | (reg & 0x7), 0, reg, 4);
+}
+
+static void i_saveargs(void)
+{
+	int i;
+	int saved = func_vararg ? N_ARGS : MIN(N_ARGS, func_argc);
+	os("\x58", 1);		/* pop rax */
+	for (i = saved - 1; i >= 0; i--)
+		i_push(argregs[i]);
+	os("\x50", 1);		/* push rax */
+}
+
 static void i_prolog(void)
 {
 	last_set = -1;
+	i_saveargs();
 	os("\x55", 1);			/* push rbp */
-	os("\x89\xe5", 2);		/* mov rbp, rsp */
-	os("\x53\x56\x57", 3);		/* push rbx; push rsi; push rdi */
-	os("\x81\xec", 2);		/* sub rsp, $xxx */
+	os("\x48\x89\xe5", 3);		/* mov rbp, rsp */
+	os("\x48\x81\xec", 3);		/* sub rsp, $xxx */
 	func_fpsub = cslen;
 	oi(0, 4);
 }
 
 static void i_epilog(void)
 {
-	int diff = ALIGN(sp_max - 3 * LONGSZ, LONGSZ);
+	int saved = func_vararg ? N_ARGS : MIN(N_ARGS, func_argc);
+	int diff = ALIGN(sp_max, 16) + (saved & 1 ? 8 : 0);
 	if (diff) {
-		os("\x81\xc4", 2);		/* add $xxx, %esp */
-		oi(diff, 4);
 		putint(cs + func_fpsub, diff, 4);
 	}
-	os("\x5f\x5e\x5b", 3);		/* pop edi; pop esi; pop ebx */
-	os("\xc9\xc3", 2);		/* leave; ret; */
+	os("\xc9", 1);			/* leave */
+	if (saved) {
+		os("\xc2", 1);		/* ret n */
+		oi(saved * LONGSZ, 2);
+	} else {
+		os("\xc3", 1);		/* ret */
+	}
 }

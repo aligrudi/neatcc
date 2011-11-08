@@ -16,16 +16,16 @@
 #define SEC_BSS			7
 #define NSECS			8
 
-static Elf32_Ehdr ehdr;
-static Elf32_Shdr shdr[NSECS];
-static Elf32_Sym syms[MAXSYMS];
+static Elf64_Ehdr ehdr;
+static Elf64_Shdr shdr[NSECS];
+static Elf64_Sym syms[MAXSYMS];
 static int nsyms = 1;
 static char symstr[MAXSYMS * 8];
 static int nsymstr = 1;
 
-static Elf32_Rel datrela[MAXRELA];
+static Elf64_Rela datrela[MAXRELA];
 static int ndatrela;
-static Elf32_Rel rela[MAXRELA];
+static Elf64_Rela rela[MAXRELA];
 static int nrela;
 
 static int symstr_add(char *name)
@@ -45,27 +45,27 @@ static int sym_find(char *name)
 	return -1;
 }
 
-static Elf32_Sym *put_sym(char *name)
+static Elf64_Sym *put_sym(char *name)
 {
 	int found = sym_find(name);
-	Elf32_Sym *sym = found != -1 ? &syms[found] : &syms[nsyms++];
+	Elf64_Sym *sym = found != -1 ? &syms[found] : &syms[nsyms++];
 	if (found >= 0)
 		return sym;
 	sym->st_name = symstr_add(name);
 	sym->st_shndx = SHN_UNDEF;
-	sym->st_info = ELF32_ST_INFO(STB_GLOBAL, STT_FUNC);
+	sym->st_info = ELF64_ST_INFO(STB_GLOBAL, STT_FUNC);
 	return sym;
 }
 
-#define SYMLOCAL(i)		(ELF32_ST_BIND(syms[i].st_info) == STB_LOCAL)
+#define SYMLOCAL(i)		(ELF64_ST_BIND(syms[i].st_info) == STB_LOCAL)
 
-static void mvrela(int *mv, Elf32_Rel *rela, int nrela)
+static void mvrela(int *mv, Elf64_Rela *rela, int nrela)
 {
 	int i;
 	for (i = 0; i < nrela; i++) {
-		int sym = ELF32_R_SYM(rela[i].r_info);
-		int type = ELF32_R_TYPE(rela[i].r_info);
-		rela[i].r_info = ELF32_R_INFO(mv[sym], type);
+		int sym = ELF64_R_SYM(rela[i].r_info);
+		int type = ELF64_R_TYPE(rela[i].r_info);
+		rela[i].r_info = ELF64_R_INFO(mv[sym], type);
 	}
 }
 
@@ -79,7 +79,7 @@ static int syms_sort(void)
 	i = 1;
 	j = nsyms - 1;
 	while (1) {
-		Elf32_Sym t;
+		Elf64_Sym t;
 		while (i < j && SYMLOCAL(i))
 			i++;
 		while (j >= i && !SYMLOCAL(j))
@@ -104,7 +104,7 @@ void out_init(int flags)
 
 void out_sym(char *name, int flags, int off, int len)
 {
-	Elf32_Sym *sym = put_sym(name);
+	Elf64_Sym *sym = put_sym(name);
 	int type = (flags & OUT_CS) ? STT_FUNC : STT_OBJECT;
 	int bind = (flags & OUT_GLOB) ? STB_GLOBAL : STB_LOCAL;
 	if (flags & OUT_CS)
@@ -113,39 +113,33 @@ void out_sym(char *name, int flags, int off, int len)
 		sym->st_shndx = SEC_DAT;
 	if (flags & OUT_BSS)
 		sym->st_shndx = SEC_BSS;
-	sym->st_info = ELF32_ST_INFO(bind, type);
+	sym->st_info = ELF64_ST_INFO(bind, type);
 	sym->st_value = off;
 	sym->st_size = len;
 }
 
 static int rel_type(int flags)
 {
-#ifdef NEATCC_ARM
-	if (flags & OUT_REL24)
-		return R_ARM_PC24;
-	return flags & OUT_REL ? R_ARM_REL32 : R_ARM_ABS32;
-#else
-	return flags & OUT_REL ? R_386_PC32 : R_386_32;
-#endif
+	return flags & OUT_REL ? R_X86_64_PC32 : R_X86_64_64;
 }
 
 static void out_csrel(int idx, int off, int flags)
 {
-	Elf32_Rel *r = &rela[nrela++];
+	Elf64_Rela *r = &rela[nrela++];
 	r->r_offset = off;
-	r->r_info = ELF32_R_INFO(idx, rel_type(flags));
+	r->r_info = ELF64_R_INFO(idx, rel_type(flags));
 }
 
 static void out_dsrel(int idx, int off, int flags)
 {
-	Elf32_Rel *r = &datrela[ndatrela++];
+	Elf64_Rela *r = &datrela[ndatrela++];
 	r->r_offset = off;
-	r->r_info = ELF32_R_INFO(idx, rel_type(flags));
+	r->r_info = ELF64_R_INFO(idx, rel_type(flags));
 }
 
 void out_rel(char *name, int flags, int off)
 {
-	Elf32_Sym *sym = put_sym(name);
+	Elf64_Sym *sym = put_sym(name);
 	int idx = sym - syms;
 	if (flags & OUT_DS)
 		out_dsrel(idx, off, flags);
@@ -168,13 +162,13 @@ static int bss_len(void)
 
 void out_write(int fd, char *cs, int cslen, char *ds, int dslen)
 {
-	Elf32_Shdr *text_shdr = &shdr[SEC_TEXT];
-	Elf32_Shdr *rela_shdr = &shdr[SEC_RELA];
-	Elf32_Shdr *symstr_shdr = &shdr[SEC_SYMSTR];
-	Elf32_Shdr *syms_shdr = &shdr[SEC_SYMS];
-	Elf32_Shdr *dat_shdr = &shdr[SEC_DAT];
-	Elf32_Shdr *datrela_shdr = &shdr[SEC_DATRELA];
-	Elf32_Shdr *bss_shdr = &shdr[SEC_BSS];
+	Elf64_Shdr *text_shdr = &shdr[SEC_TEXT];
+	Elf64_Shdr *rela_shdr = &shdr[SEC_RELA];
+	Elf64_Shdr *symstr_shdr = &shdr[SEC_SYMSTR];
+	Elf64_Shdr *syms_shdr = &shdr[SEC_SYMS];
+	Elf64_Shdr *dat_shdr = &shdr[SEC_DAT];
+	Elf64_Shdr *datrela_shdr = &shdr[SEC_DATRELA];
+	Elf64_Shdr *bss_shdr = &shdr[SEC_BSS];
 	unsigned long offset = sizeof(ehdr);
 
 	/* workaround for the idiotic gnuld; use neatld instead! */
@@ -187,16 +181,11 @@ void out_write(int fd, char *cs, int cslen, char *ds, int dslen)
 	ehdr.e_ident[1] = 'E';
 	ehdr.e_ident[2] = 'L';
 	ehdr.e_ident[3] = 'F';
-	ehdr.e_ident[4] = ELFCLASS32;
+	ehdr.e_ident[4] = ELFCLASS64;
 	ehdr.e_ident[5] = ELFDATA2LSB;
 	ehdr.e_ident[6] = EV_CURRENT;
 	ehdr.e_type = ET_REL;
-#ifdef NEATCC_ARM
-	ehdr.e_machine = EM_ARM;
-	ehdr.e_flags = EF_ARM_EABI_VER4;
-#else
-	ehdr.e_machine = EM_386;
-#endif
+	ehdr.e_machine = EM_X86_64;
 	ehdr.e_version = EV_CURRENT;
 	ehdr.e_ehsize = sizeof(ehdr);
 	ehdr.e_shentsize = sizeof(shdr[0]);
@@ -213,7 +202,7 @@ void out_write(int fd, char *cs, int cslen, char *ds, int dslen)
 	text_shdr->sh_addralign = OUT_ALIGNMENT;
 	offset += text_shdr->sh_size;
 
-	rela_shdr->sh_type = SHT_REL;
+	rela_shdr->sh_type = SHT_RELA;
 	rela_shdr->sh_link = SEC_SYMS;
 	rela_shdr->sh_info = SEC_TEXT;
 	rela_shdr->sh_offset = offset;
@@ -237,7 +226,7 @@ void out_write(int fd, char *cs, int cslen, char *ds, int dslen)
 	dat_shdr->sh_addralign = OUT_ALIGNMENT;
 	offset += dat_shdr->sh_size;
 
-	datrela_shdr->sh_type = SHT_REL;
+	datrela_shdr->sh_type = SHT_RELA;
 	datrela_shdr->sh_offset = offset;
 	datrela_shdr->sh_size = ndatrela * sizeof(datrela[0]);
 	datrela_shdr->sh_entsize = sizeof(datrela[0]);
