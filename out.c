@@ -28,12 +28,12 @@ static int ndatrela;
 static Elf32_Rel rela[MAXRELA];
 static int nrela;
 
-static char *putstr(char *s, char *r)
+static int symstr_add(char *name)
 {
-	while (*r)
-		*s++ = *r++;
-	*s++ = '\0';
-	return s;
+	int len = strlen(name) + 1;
+	strcpy(symstr + nsymstr, name);
+	nsymstr += len;
+	return nsymstr - len;
 }
 
 static int sym_find(char *name)
@@ -51,8 +51,7 @@ static Elf32_Sym *put_sym(char *name)
 	Elf32_Sym *sym = found != -1 ? &syms[found] : &syms[nsyms++];
 	if (found >= 0)
 		return sym;
-	sym->st_name = nsymstr;
-	nsymstr = putstr(symstr + nsymstr, name) - symstr;
+	sym->st_name = symstr_add(name);
 	sym->st_shndx = SHN_UNDEF;
 	sym->st_info = ELF32_ST_INFO(STB_GLOBAL, STT_FUNC);
 	return sym;
@@ -177,6 +176,12 @@ void out_write(int fd, char *cs, int cslen, char *ds, int dslen)
 	Elf32_Shdr *datrela_shdr = &shdr[SEC_DATRELA];
 	Elf32_Shdr *bss_shdr = &shdr[SEC_BSS];
 	unsigned long offset = sizeof(ehdr);
+
+	/* workaround for the idiotic gnuld; use neatld instead! */
+	text_shdr->sh_name = symstr_add(".cs");
+	rela_shdr->sh_name = symstr_add(".rela.cs");
+	dat_shdr->sh_name = symstr_add(".ds");
+	datrela_shdr->sh_name = symstr_add(".rela.ds");
 
 	ehdr.e_ident[0] = 0x7f;
 	ehdr.e_ident[1] = 'E';
