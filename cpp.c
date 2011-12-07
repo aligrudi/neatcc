@@ -643,6 +643,7 @@ static int eval_tok(void)
 			*s++ = ebuf[ecur++];
 		while (tolower(ebuf[ecur]) == 'u' || tolower(ebuf[ecur]) == 'l')
 			ecur++;
+		*s = '\0';
 		return TOK_NUM;
 	}
 	for (i = 0; i < ARRAY_SIZE(tok2); i++)
