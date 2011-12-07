@@ -649,7 +649,12 @@ static void readprimary(void)
 				o_cast(TYPE_BT(&t));
 		} else {
 			readexpr();
-			tok_expect(')');
+			while (tok_jmp(')')) {
+				tok_expect(',');
+				ts_pop(NULL);
+				o_tmpdrop(1);
+				readexpr();
+			}
 		}
 		return;
 	}
