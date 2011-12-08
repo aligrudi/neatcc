@@ -179,9 +179,9 @@ void out_write(int fd, char *cs, int cslen, char *ds, int dslen)
 
 	/* workaround for the idiotic gnuld; use neatld instead! */
 	text_shdr->sh_name = symstr_add(".cs");
-	rela_shdr->sh_name = symstr_add(".rela.cs");
+	rela_shdr->sh_name = symstr_add(".rel.cs");
 	dat_shdr->sh_name = symstr_add(".ds");
-	datrela_shdr->sh_name = symstr_add(".rela.ds");
+	datrela_shdr->sh_name = symstr_add(".rel.ds");
 
 	ehdr.e_ident[0] = 0x7f;
 	ehdr.e_ident[1] = 'E';
