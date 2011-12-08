@@ -49,16 +49,20 @@ static int nogen;		/* don't generate code */
 #define MAXGLOBALS	(1 << 10)
 #define MAXARGS		(1 << 5)
 
+#define ALIGN(x, a)		(((x) + (a) - 1) & ~((a) - 1))
+#define MIN(a, b)		((a) < (b) ? (a) : (b))
+
 #define TYPE_BT(t)		((t)->ptr ? LONGSZ : (t)->bt)
 #define TYPE_SZ(t)		((t)->ptr ? LONGSZ : (t)->bt & BT_SZMASK)
 
+/* type->flag values */
 #define T_ARRAY		0x01
 #define T_STRUCT	0x02
 #define T_FUNC		0x04
 
-#define F_INIT		0x01
-#define F_STATIC	0x02
-#define F_EXTERN	0x04
+/* variable definition flags */
+#define F_STATIC	0x01
+#define F_EXTERN	0x02
 
 struct type {
 	unsigned bt;
@@ -399,8 +403,18 @@ static void ts_addop(int op)
 	}
 }
 
-#define ALIGN(x, a)		(((x) + (a) - 1) & ~((a) - 1))
-#define MIN(a, b)		((a) < (b) ? (a) : (b))
+/* function prototypes for parsing function and variable declarations */
+static int readname(struct type *main, char *name, struct type *base);
+static int readtype(struct type *type);
+static int readdefs(void (*def)(void *data, struct name *name, unsigned flags),
+			void *data);
+static int readdefs_int(void (*def)(void *data, struct name *name, unsigned flags),
+			void *data);
+
+/* function prototypes for parsing initializer expressions */
+static int initsize(void);
+static void initexpr(struct type *t, int off, void *obj,
+		void (*set)(void *obj, int off, struct type *t));
 
 static int type_alignment(struct type *t)
 {
@@ -429,8 +443,6 @@ static void structdef(void *data, struct name *name, unsigned flags)
 	}
 	memcpy(&si->fields[si->nfields++], name, sizeof(*name));
 }
-
-static int readdefs(void (*def)(void *, struct name *, unsigned f), void *data);
 
 static int struct_create(char *name, int isunion)
 {
@@ -462,107 +474,6 @@ static void enum_create(void)
 		}
 		enum_add(name, n++);
 		tok_jmp(',');
-	}
-}
-
-static int basetype(struct type *type, unsigned *flags)
-{
-	int sign = 1;
-	int size = 4;
-	int done = 0;
-	int i = 0;
-	int isunion;
-	char name[NAMELEN] = "";
-	*flags = 0;
-	type->flags = 0;
-	type->ptr = 0;
-	type->addr = 0;
-	while (!done) {
-		switch (tok_see()) {
-		case TOK_STATIC:
-			*flags |= F_STATIC;
-			break;
-		case TOK_EXTERN:
-			*flags |= F_EXTERN;
-			break;
-		case TOK_VOID:
-			sign = 0;
-			size = 0;
-			done = 1;
-			break;
-		case TOK_INT:
-			done = 1;
-			break;
-		case TOK_CHAR:
-			size = 1;
-			done = 1;
-			break;
-		case TOK_SHORT:
-			size = 2;
-			break;
-		case TOK_LONG:
-			size = LONGSZ;
-			break;
-		case TOK_SIGNED:
-			break;
-		case TOK_UNSIGNED:
-			sign = 0;
-			break;
-		case TOK_UNION:
-		case TOK_STRUCT:
-			isunion = tok_get() == TOK_UNION;
-			if (!tok_jmp(TOK_NAME))
-				strcpy(name, tok_id());
-			if (tok_see() == '{')
-				type->id = struct_create(name, isunion);
-			else
-				type->id = struct_find(name, isunion);
-			type->flags |= T_STRUCT;
-			type->bt = LONGSZ;
-			return 0;
-		case TOK_ENUM:
-			tok_get();
-			tok_jmp(TOK_NAME);
-			if (tok_see() == '{')
-				enum_create();
-			type->bt = 4 | BT_SIGNED;
-			return 0;
-		default:
-			if (tok_see() == TOK_NAME) {
-				int id = typedef_find(tok_id());
-				if (id != -1) {
-					tok_get();
-					memcpy(type, &typedefs[id].type,
-						sizeof(*type));
-					return 0;
-				}
-			}
-			if (!i)
-				return 1;
-			done = 1;
-			continue;
-		}
-		i++;
-		tok_get();
-	}
-	type->bt = size | (sign ? BT_SIGNED : 0);
-	return 0;
-}
-
-static int readname(struct type *main, char *name,
-			struct type *base, unsigned flags);
-
-static int readtype(struct type *type)
-{
-	return readname(type, NULL, NULL, 0);
-}
-
-static void readptrs(struct type *type)
-{
-	while (!tok_jmp('*')) {
-		type->ptr++;
-		if (!type->bt)
-			type->bt = 1;
 	}
 }
 
@@ -666,7 +577,7 @@ static void arrayderef(void)
 	int sz;
 	ts_pop_de(NULL);
 	ts_pop(&t);
-	if (!(t.flags & T_ARRAY) && t.addr) {
+	if (!(t.flags & T_ARRAY && !t.ptr) && t.addr) {
 		o_tmpswap();
 		o_deref(TYPE_BT(&t));
 		o_tmpswap();
@@ -722,14 +633,18 @@ static void readfield(void)
 #define MAXFUNCS		(1 << 10)
 
 static struct funcinfo {
-	struct type args[MAXFIELDS];
+	struct type args[MAXARGS];
 	struct type ret;
 	int nargs;
 	int varg;
+	/* function and argument names; useful only when defining */
+	char argnames[MAXARGS][NAMELEN];
+	char name[NAMELEN];
 } funcs[MAXFUNCS];
 static int nfuncs;
 
-static int func_create(struct type *ret, struct name *args, int nargs)
+static int func_create(struct type *ret, char *name, char argnames[][NAMELEN],
+			struct type *args, int nargs, int varg)
 {
 	struct funcinfo *fi = &funcs[nfuncs++];
 	int i;
@@ -737,8 +652,12 @@ static int func_create(struct type *ret, struct name *args, int nargs)
 		err("nomem: MAXFUNCS reached!\n");
 	memcpy(&fi->ret, ret, sizeof(*ret));
 	for (i = 0; i < nargs; i++)
-		memcpy(&fi->args[i], &args[i].type, sizeof(*ret));
+		memcpy(&fi->args[i], &args[i], sizeof(*ret));
 	fi->nargs = nargs;
+	fi->varg = varg;
+	strcpy(fi->name, name);
+	for (i = 0; i < nargs; i++)
+		strcpy(fi->argnames[i], argnames[i]);
 	return fi - funcs;
 }
 
@@ -1246,112 +1165,6 @@ static void readestmt(void)
 	} while (!tok_jmp(','));
 }
 
-static void o_localoff(long addr, int off)
-{
-	o_local(addr);
-	if (off) {
-		o_num(off);
-		o_bop(O_ADD);
-	}
-}
-
-static struct type *innertype(struct type *t)
-{
-	if (t->flags & T_ARRAY && !t->ptr)
-		return innertype(&arrays[t->id].type);
-	return t;
-}
-
-static void initexpr(struct type *t, int off, void *obj,
-		void (*set)(void *obj, int off, struct type *t))
-{
-	if (tok_jmp('{')) {
-		set(obj, off, t);
-		return;
-	}
-	if (!t->ptr && t->flags & T_STRUCT) {
-		struct structinfo *si = &structs[t->id];
-		int i;
-		for (i = 0; i < si->nfields && tok_see() != '}'; i++) {
-			struct name *field = &si->fields[i];
-			if (!tok_jmp('.')) {
-				tok_expect(TOK_NAME);
-				field = struct_field(t->id, tok_id());
-				tok_expect('=');
-			}
-			initexpr(&field->type, off + field->addr, obj, set);
-			if (tok_jmp(','))
-				break;
-		}
-	} else if (t->flags & T_ARRAY) {
-		struct type *t_de = &arrays[t->id].type;
-		int i;
-		/* handling extra braces as in: char s[] = {"sth"} */
-		if (TYPE_SZ(t_de) == 1 && tok_see() == TOK_STR) {
-			set(obj, off, t);
-			tok_expect('}');
-			return;
-		}
-		for (i = 0; tok_see() != '}'; i++) {
-			long idx = i;
-			struct type *it = t_de;
-			if (!tok_jmp('[')) {
-				readexpr();
-				ts_pop_de(NULL);
-				o_popnum(&idx);
-				tok_expect(']');
-				tok_expect('=');
-			}
-			if (tok_see() != '{' && (tok_see() != TOK_STR ||
-						!(it->flags & T_ARRAY)))
-				it = innertype(t_de);
-			initexpr(it, off + type_totsz(it) * idx, obj, set);
-			if (tok_jmp(','))
-				break;
-		}
-	}
-	tok_expect('}');
-}
-
-static void jumpbrace(void)
-{
-	int depth = 0;
-	while (tok_see() != '}' || depth--)
-		if (tok_get() == '{')
-			depth++;
-	tok_expect('}');
-}
-
-static int initsize(void)
-{
-	long addr = tok_addr();
-	int n = 0;
-	if (!tok_jmp(TOK_STR)) {
-		n = tok_str(NULL);
-		tok_jump(addr);
-		return n;
-	}
-	tok_expect('{');
-	while (tok_jmp('}')) {
-		long idx = n;
-		if (!tok_jmp('[')) {
-			readexpr();
-			ts_pop_de(NULL);
-			o_popnum(&idx);
-			tok_expect(']');
-			tok_expect('=');
-		}
-		if (n < idx + 1)
-			n = idx + 1;
-		while (tok_see() != '}' && tok_see() != ',')
-			if (tok_get() == '{')
-				jumpbrace();
-		tok_jmp(',');
-	}
-	tok_jump(addr);
-	return n;
-}
-
 #define F_GLOBAL(flags)		(!((flags) & F_STATIC))
 
 static void globalinit(void *obj, int off, struct type *t)
@@ -1374,6 +1187,8 @@ static void globalinit(void *obj, int off, struct type *t)
 	ts_pop(NULL);
 }
 
+static void readfunc(struct name *name, int flags);
+
 static void globaldef(void *data, struct name *name, unsigned flags)
 {
 	struct type *t = &name->type;
@@ -1384,14 +1199,26 @@ static void globaldef(void *data, struct name *name, unsigned flags)
 			arrays[t->id].n = initsize();
 	sz = type_totsz(t);
 	if (!(flags & F_EXTERN) && (!(t->flags & T_FUNC) || t->ptr)) {
-		if (flags & F_INIT)
+		if (tok_see() == '=')
 			name->addr = (long) o_mkdat(elfname, sz, F_GLOBAL(flags));
 		else
 			o_mkbss(elfname, sz, F_GLOBAL(flags));
 	}
 	global_add(name);
-	if (flags & F_INIT)
+	if (!tok_jmp('='))
 		initexpr(t, 0, name, globalinit);
+	if (tok_see() == '{' && name->type.flags & T_FUNC)
+		readfunc(name, flags);
+}
+
+/* generate the address of local + off */
+static void o_localoff(long addr, int off)
+{
+	o_local(addr);
+	if (off) {
+		o_num(off);
+		o_bop(O_ADD);
+	}
 }
 
 static void localinit(void *obj, int off, struct type *t)
@@ -1439,7 +1266,7 @@ static void localdef(void *data, struct name *name, unsigned flags)
 		arrays[t->id].n = initsize();
 	name->addr = o_mklocal(type_totsz(&name->type));
 	local_add(name);
-	if (flags & F_INIT) {
+	if (!tok_jmp('=')) {
 		if (t->flags & (T_ARRAY | T_STRUCT) && !t->ptr) {
 			o_local(name->addr);
 			o_num(0);
@@ -1451,134 +1278,14 @@ static void localdef(void *data, struct name *name, unsigned flags)
 	}
 }
 
-static void funcdef(char *name, struct type *type, struct name *args,
-			int nargs, int varg, unsigned flags)
+/* read K&R function arguments */
+void krdef(void *data, struct name *name, unsigned flags)
 {
-	struct name global = {""};
+	struct funcinfo *fi = data;
 	int i;
-	strcpy(global.name, name);
-	strcpy(func_name, name);
-	memcpy(&global.type, type, sizeof(*type));
-	o_func_beg(name, nargs, F_GLOBAL(flags), varg);
-	global_add(&global);
-	for (i = 0; i < nargs; i++) {
-		args[i].addr = o_arg2loc(i);
-		local_add(&args[i]);
-	}
-}
-
-static int readargs(struct name *args, int *varg)
-{
-	int nargs = 0;
-	tok_expect('(');
-	*varg = 0;
-	while (tok_see() != ')') {
-		if (!tok_jmp(TOK3("..."))) {
-			*varg = 1;
-			break;
-		}
-		readname(&args[nargs].type, args[nargs].name, NULL, 0);
-		array2ptr(&args[nargs].type);
-		nargs++;
-		if (tok_jmp(','))
-			break;
-	}
-	tok_expect(')');
-	if (nargs == 1 && !TYPE_BT(&args[0].type))
-		return 0;
-	return nargs;
-}
-
-static int readname(struct type *main, char *name,
-			struct type *base, unsigned flags)
-{
-	struct type tpool[3];
-	int npool = 0;
-	struct type *type = &tpool[npool++];
-	struct type *func = NULL;
-	struct type *ret = NULL;
-	int arsz[10];
-	int nar = 0;
-	int i;
-	memset(tpool, 0, sizeof(tpool));
-	if (name)
-		*name = '\0';
-	if (!base) {
-		if (basetype(type, &flags))
-			return 1;
-	} else {
-		memcpy(type, base, sizeof(*base));
-	}
-	readptrs(type);
-	if (!tok_jmp('(')) {
-		ret = type;
-		type = &tpool[npool++];
-		func = type;
-		readptrs(type);
-	}
-	if (!tok_jmp(TOK_NAME) && name)
-		strcpy(name, tok_id());
-	while (!tok_jmp('[')) {
-		long n = 0;
-		if (tok_jmp(']')) {
-			readexpr();
-			ts_pop_de(NULL);
-			if (o_popnum(&n))
-				err("const expr expected\n");
-			tok_expect(']');
-		}
-		arsz[nar++] = n;
-	}
-	for (i = nar - 1; i >= 0; i--) {
-		type->id = array_add(type, arsz[i]);
-		if (func && i == nar - 1)
-			func = &arrays[type->id].type;
-		type->flags = T_ARRAY;
-		type->bt = LONGSZ;
-		type->ptr = 0;
-	}
-	if (func)
-		tok_expect(')');
-	if (tok_see() == '(') {
-		struct name args[MAXARGS] = {{""}};
-		int varg = 0;
-		int nargs = readargs(args, &varg);
-		int fdef = !func;
-		if (!func) {
-			ret = type;
-			type = &tpool[npool++];
-			func = type;
-		}
-		func->flags = T_FUNC;
-		func->bt = LONGSZ;
-		func->id = func_create(ret, args, nargs);
-		if (fdef && tok_see() == '{') {
-			funcdef(name, func, args, nargs, varg, flags);
-			return 1;
-		}
-	}
-	memcpy(main, type, sizeof(*type));
-	return 0;
-}
-
-static int readdefs(void (*def)(void *data, struct name *name, unsigned flags),
-			void *data)
-{
-	struct type base;
-	unsigned base_flags;
-	if (basetype(&base, &base_flags))
-		return 1;
-	while (tok_see() != ';' && tok_see() != '{') {
-		struct name name = {{""}};
-		unsigned flags = base_flags;
-		if (readname(&name.type, name.name, &base, flags))
-			break;
-		if (!tok_jmp('='))
-			flags |= F_INIT;
-		def(data, &name, flags);
-		tok_jmp(',');
-	}
-	return 0;
+	for (i = 0; i < fi->nargs; i++)
+		if (!strcmp(fi->argnames[i], name->name))
+			memcpy(&fi->args[i], &name->type, sizeof(name->type));
 }
 
 static void typedefdef(void *data, struct name *name, unsigned flags)
@@ -1838,6 +1545,26 @@ static void readstmt(void)
 	tok_expect(';');
 }
 
+static void readfunc(struct name *name, int flags)
+{
+	struct funcinfo *fi = &funcs[name->type.id];
+	int i;
+	strcpy(func_name, fi->name);
+	o_func_beg(func_name, fi->nargs, F_GLOBAL(flags), fi->varg);
+	for (i = 0; i < fi->nargs; i++) {
+		struct name arg = {"", "", fi->args[i], o_arg2loc(i)};
+		strcpy(arg.name, fi->argnames[i]);
+		local_add(&arg);
+	}
+	readstmt();
+	goto_fill();
+	o_func_end();
+	func_name[0] = '\0';
+	nlocals = 0;
+	ngotos = 0;
+	nlabels = 0;
+}
+
 static void readdecl(void)
 {
 	if (!tok_jmp(TOK_TYPEDEF)) {
@@ -1845,18 +1572,8 @@ static void readdecl(void)
 		tok_expect(';');
 		return;
 	}
-	readdefs(globaldef, NULL);
-	if (tok_see() == '{') {
-		readstmt();
-		goto_fill();
-		o_func_end();
-		func_name[0] = '\0';
-		nlocals = 0;
-		ngotos = 0;
-		nlabels = 0;
-		return;
-	}
-	tok_expect(';');
+	readdefs_int(globaldef, NULL);
+	tok_jmp(';');
 }
 
 static void parse(void)
@@ -1923,4 +1640,394 @@ int main(int argc, char *argv[])
 	o_write(ofd);
 	close(ofd);
 	return 0;
+}
+
+
+/* parsing function and variable declarations */
+
+/* read the base type of a variable */
+static int basetype(struct type *type, unsigned *flags)
+{
+	int sign = 1;
+	int size = 4;
+	int done = 0;
+	int i = 0;
+	int isunion;
+	char name[NAMELEN] = "";
+	*flags = 0;
+	type->flags = 0;
+	type->ptr = 0;
+	type->addr = 0;
+	while (!done) {
+		switch (tok_see()) {
+		case TOK_STATIC:
+			*flags |= F_STATIC;
+			break;
+		case TOK_EXTERN:
+			*flags |= F_EXTERN;
+			break;
+		case TOK_VOID:
+			sign = 0;
+			size = 0;
+			done = 1;
+			break;
+		case TOK_INT:
+			done = 1;
+			break;
+		case TOK_CHAR:
+			size = 1;
+			done = 1;
+			break;
+		case TOK_SHORT:
+			size = 2;
+			break;
+		case TOK_LONG:
+			size = LONGSZ;
+			break;
+		case TOK_SIGNED:
+			break;
+		case TOK_UNSIGNED:
+			sign = 0;
+			break;
+		case TOK_UNION:
+		case TOK_STRUCT:
+			isunion = tok_get() == TOK_UNION;
+			if (!tok_jmp(TOK_NAME))
+				strcpy(name, tok_id());
+			if (tok_see() == '{')
+				type->id = struct_create(name, isunion);
+			else
+				type->id = struct_find(name, isunion);
+			type->flags |= T_STRUCT;
+			type->bt = LONGSZ;
+			return 0;
+		case TOK_ENUM:
+			tok_get();
+			tok_jmp(TOK_NAME);
+			if (tok_see() == '{')
+				enum_create();
+			type->bt = 4 | BT_SIGNED;
+			return 0;
+		default:
+			if (tok_see() == TOK_NAME) {
+				int id = typedef_find(tok_id());
+				if (id != -1) {
+					tok_get();
+					memcpy(type, &typedefs[id].type,
+						sizeof(*type));
+					return 0;
+				}
+			}
+			if (!i)
+				return 1;
+			done = 1;
+			continue;
+		}
+		i++;
+		tok_get();
+	}
+	type->bt = size | (sign ? BT_SIGNED : 0);
+	return 0;
+}
+
+static void readptrs(struct type *type)
+{
+	while (!tok_jmp('*')) {
+		type->ptr++;
+		if (!type->bt)
+			type->bt = 1;
+	}
+}
+
+/* read function arguments */
+static int readargs(struct type *args, char argnames[][NAMELEN], int *varg)
+{
+	int nargs = 0;
+	tok_expect('(');
+	*varg = 0;
+	while (tok_see() != ')') {
+		if (!tok_jmp(TOK3("..."))) {
+			*varg = 1;
+			break;
+		}
+		if (readname(&args[nargs], argnames[nargs], NULL)) {
+			/* argument has no type, assume int */
+			tok_expect(TOK_NAME);
+			memset(&args[nargs], 0, sizeof(struct type));
+			args[nargs].bt = 4 | BT_SIGNED;
+			strcpy(argnames[nargs], tok_id());
+		}
+		/* argument arrays are pointers */
+		array2ptr(&args[nargs]);
+		nargs++;
+		if (tok_jmp(','))
+			break;
+	}
+	tok_expect(')');
+	/* void argument */
+	if (nargs == 1 && !TYPE_BT(&args[0]))
+		return 0;
+	return nargs;
+}
+
+/*
+ * readarrays() parses array specifiers when reading a definition in
+ * readname().  The "type" parameter contains the type contained in the
+ * inner array; for instance, type in "int *a[10][20]" would be an int
+ * pointer.  When returning, the "type" parameter is changed to point
+ * to the final array.  The function returns a pointer to the type in
+ * the inner array; this is useful when the type is not complete yet,
+ * like when creating an array of function pointers as in
+ * "int (*f[10])(int)".  If there is no array brackets, NULL is returned.
+ */
+static struct type *readarrays(struct type *type)
+{
+	long arsz[16];
+	struct type *inner = NULL;
+	int nar = 0;
+	int i;
+	while (!tok_jmp('[')) {
+		long n = 0;
+		if (tok_jmp(']')) {
+			readexpr();
+			ts_pop_de(NULL);
+			if (o_popnum(&n))
+				err("const expr expected\n");
+			tok_expect(']');
+		}
+		arsz[nar++] = n;
+	}
+	for (i = nar - 1; i >= 0; i--) {
+		type->id = array_add(type, arsz[i]);
+		if (!inner)
+			inner = &arrays[type->id].type;
+		type->flags = T_ARRAY;
+		type->bt = LONGSZ;
+		type->ptr = 0;
+	}
+	return inner;
+}
+
+/*
+ * readname() reads a variable definition; the name is copied into
+ * "name" and the type is copied into "main" argument.  The "base"
+ * argument, if not NULL, indicates the base type of the variable.
+ * For instance, the base type of "a" and "b" in "int *a, b[10]" is
+ * "int".  If NULL, basetype() is called directly to read the base
+ * type of the variable.  readname() returns zero, only if the
+ * variable can be read.
+ */
+static int readname(struct type *main, char *name, struct type *base)
+{
+	struct type tpool[3];
+	int npool = 0;
+	struct type *type = &tpool[npool++];
+	struct type *ptype = NULL;	/* type inside parenthesis */
+	struct type *btype = NULL;	/* type before parenthesis */
+	struct type *inner;
+	unsigned flags;
+	memset(tpool, 0, sizeof(tpool));
+	if (name)
+		*name = '\0';
+	if (!base) {
+		if (basetype(type, &flags))
+			return 1;
+	} else {
+		memcpy(type, base, sizeof(*base));
+	}
+	readptrs(type);
+	if (!tok_jmp('(')) {
+		btype = type;
+		type = &tpool[npool++];
+		ptype = type;
+		readptrs(type);
+	}
+	if (!tok_jmp(TOK_NAME) && name)
+		strcpy(name, tok_id());
+	inner = readarrays(type);
+	if (ptype && inner)
+		ptype = inner;
+	if (ptype)
+		tok_expect(')');
+	if (tok_see() == '(') {
+		struct type args[MAXARGS];
+		char argnames[MAXARGS][NAMELEN];
+		int varg = 0;
+		int nargs = readargs(args, argnames, &varg);
+		if (!ptype) {
+			btype = type;
+			type = &tpool[npool++];
+			ptype = type;
+		}
+		ptype->flags = T_FUNC;
+		ptype->bt = LONGSZ;
+		ptype->id = func_create(btype, name, argnames, args, nargs, varg);
+		if (tok_see() != ';')
+			while (tok_see() != '{' && !readdefs(krdef, &funcs[ptype->id]))
+				tok_expect(';');
+	} else {
+		if (ptype && readarrays(type))
+			array2ptr(type);
+	}
+	memcpy(main, type, sizeof(*type));
+	return 0;
+}
+
+static int readtype(struct type *type)
+{
+	return readname(type, NULL, NULL);
+}
+
+/*
+ * readdef() reads a variable definitions statement.  The definition
+ * statement can appear in anywhere: global variables, function
+ * local variables, struct fields, and typedefs.  For each defined
+ * variable, def() callback is called with the appropriate name
+ * struct and flags; the callback should finish parsing the definition
+ * by possibly reading the initializer expression and saving the name
+ * struct.
+ */
+static int readdefs(void (*def)(void *data, struct name *name, unsigned flags),
+			void *data)
+{
+	struct type base;
+	unsigned base_flags;
+	if (basetype(&base, &base_flags))
+		return 1;
+	if (tok_see() == ';' || tok_see() == '{')
+		return 0;
+	do {
+		struct name name = {{""}};
+		if (readname(&name.type, name.name, &base))
+			break;
+		def(data, &name, base_flags);
+	} while (!tok_jmp(','));
+	return 0;
+}
+
+/* just like readdefs, but default to int type; for handling K&R functions */
+static int readdefs_int(void (*def)(void *data, struct name *name, unsigned flags),
+			void *data)
+{
+	struct type base;
+	unsigned flags = 0;
+	if (basetype(&base, &flags)) {
+		if (tok_see() != TOK_NAME)
+			return 1;
+		memset(&base, 0, sizeof(base));
+		base.bt = 4 | BT_SIGNED;
+	}
+	if (tok_see() != ';') {
+		do {
+			struct name name = {{""}};
+			if (readname(&name.type, name.name, &base))
+				break;
+			def(data, &name, flags);
+		} while (!tok_jmp(','));
+	}
+	return 0;
+}
+
+
+/* parsing initializer expressions */
+
+static void jumpbrace(void)
+{
+	int depth = 0;
+	while (tok_see() != '}' || depth--)
+		if (tok_get() == '{')
+			depth++;
+	tok_expect('}');
+}
+
+/* compute the size of the initializer expression */
+static int initsize(void)
+{
+	long addr = tok_addr();
+	int n = 0;
+	if (tok_jmp('='))
+		err("array size unspecified");
+	if (!tok_jmp(TOK_STR)) {
+		n = tok_str(NULL);
+		tok_jump(addr);
+		return n;
+	}
+	tok_expect('{');
+	while (tok_jmp('}')) {
+		long idx = n;
+		if (!tok_jmp('[')) {
+			readexpr();
+			ts_pop_de(NULL);
+			o_popnum(&idx);
+			tok_expect(']');
+			tok_expect('=');
+		}
+		if (n < idx + 1)
+			n = idx + 1;
+		while (tok_see() != '}' && tok_see() != ',')
+			if (tok_get() == '{')
+				jumpbrace();
+		tok_jmp(',');
+	}
+	tok_jump(addr);
+	return n;
+}
+
+static struct type *innertype(struct type *t)
+{
+	if (t->flags & T_ARRAY && !t->ptr)
+		return innertype(&arrays[t->id].type);
+	return t;
+}
+
+/* read the initializer expression and initialize basic types using set() cb */
+static void initexpr(struct type *t, int off, void *obj,
+		void (*set)(void *obj, int off, struct type *t))
+{
+	if (tok_jmp('{')) {
+		set(obj, off, t);
+		return;
+	}
+	if (!t->ptr && t->flags & T_STRUCT) {
+		struct structinfo *si = &structs[t->id];
+		int i;
+		for (i = 0; i < si->nfields && tok_see() != '}'; i++) {
+			struct name *field = &si->fields[i];
+			if (!tok_jmp('.')) {
+				tok_expect(TOK_NAME);
+				field = struct_field(t->id, tok_id());
+				tok_expect('=');
+			}
+			initexpr(&field->type, off + field->addr, obj, set);
+			if (tok_jmp(','))
+				break;
+		}
+	} else if (t->flags & T_ARRAY) {
+		struct type *t_de = &arrays[t->id].type;
+		int i;
+		/* handling extra braces as in: char s[] = {"sth"} */
+		if (TYPE_SZ(t_de) == 1 && tok_see() == TOK_STR) {
+			set(obj, off, t);
+			tok_expect('}');
+			return;
+		}
+		for (i = 0; tok_see() != '}'; i++) {
+			long idx = i;
+			struct type *it = t_de;
+			if (!tok_jmp('[')) {
+				readexpr();
+				ts_pop_de(NULL);
+				o_popnum(&idx);
+				tok_expect(']');
+				tok_expect('=');
+			}
+			if (tok_see() != '{' && (tok_see() != TOK_STR ||
+						!(it->flags & T_ARRAY)))
+				it = innertype(t_de);
+			initexpr(it, off + type_totsz(it) * idx, obj, set);
+			if (tok_jmp(','))
+				break;
+		}
+	}
+	tok_expect('}');
 }
