@@ -68,9 +68,9 @@ static void i_not(int rd);
 static void i_lnot(int rd);
 static void i_zx(int rd, int bits);
 static void i_sx(int rd, int bits);
-static void i_b(long addr);
-static void i_b_fill(long *dst, int diff);
-static void i_b_if(long addr, int rn, int z);
+static void i_b(void);
+static void i_bz(int rn, int z);
+static void i_b_fill(long src, long dst);
 static void i_memcpy(int rd, int rs, int rn);
 static void i_memset(int rd, int rs, int rn);
 static void i_call(char *sym, int off);
@@ -82,13 +82,40 @@ static struct tmp *regs[NREGS];
 static int tmpregs[] = {4, 5, 6, 7, 8, 9, 0, 1, 2, 3};
 static int argregs[] = {0, 1, 2, 3};
 
-#define MAXRET			(1 << 8)
+/* labels and jmps */
+#define MAXJMPS		(1 << 14)
 
-static long ret[MAXRET];
-static int nret;
+static long labels[MAXJMPS];
+static int nlabels;
+static long jmp_loc[MAXJMPS];
+static int jmp_goal[MAXJMPS];
+static int njmps;
+
+void o_label(int id)
+{
+	if (id > nlabels)
+		nlabels = id + 1;
+	labels[id] = cslen;
+}
+
+static void jmp_add(int id)
+{
+	jmp_loc[njmps] = cslen - 4;
+	jmp_goal[njmps] = id;
+	njmps++;
+}
+
+static void jmp_fill(void)
+{
+	int i;
+	for (i = 0; i < njmps; i++)
+		i_b_fill(jmp_loc[i], labels[jmp_goal[i]]);
+}
 
 /* output div/mod functions */
 static int putdiv = 0;
+
+/* generating code */
 
 static void os(void *s, int n)
 {
@@ -371,7 +398,8 @@ void o_func_beg(char *name, int argc, int global, int vararg)
 	maxsp = sp;
 	ntmp = 0;
 	tmpsp = -1;
-	nret = 0;
+	nlabels = 0;
+	njmps = 0;
 	memset(regs, 0, sizeof(regs));
 }
 
@@ -409,14 +437,13 @@ void o_ret(int rets)
 		tmp_pop(REG_RET);
 	else
 		i_num(REG_RET, 0);
-	ret[nret++] = o_jmp(0);
+	o_jmp(0);
 }
 
 void o_func_end(void)
 {
-	int i;
-	for (i = 0; i < nret; i++)
-		o_filljmp(ret[i]);
+	o_label(0);
+	jmp_fill();
 	i_epilog();
 }
 
@@ -779,43 +806,28 @@ void o_memset(void)
 	tmp_drop(2);
 }
 
-long o_mklabel(void)
-{
-	return cslen;
-}
-
-static long jxz(long addr, int z)
+static void jxz(int id, int z)
 {
 	int r = reg_fortmp(TMP(0), 0);
 	tmp_pop(r);
-	i_b_if(addr, r, z);
-	return cslen - 4;
+	i_bz(r, z);
+	jmp_add(id);
 }
 
-long o_jz(long addr)
+void o_jz(int id)
 {
-	return jxz(addr, 1);
+	jxz(id, 1);
 }
 
-long o_jnz(long addr)
+void o_jnz(int id)
 {
-	return jxz(addr, 0);
+	jxz(id, 0);
 }
 
-long o_jmp(long addr)
+void o_jmp(int id)
 {
-	i_b(addr);
-	return cslen - 4;
-}
-
-void o_filljmp2(long addr, long jmpdst)
-{
-	i_b_fill((void *) cs + addr, jmpdst - addr);
-}
-
-void o_filljmp(long addr)
-{
-	o_filljmp2(addr, cslen);
+	i_b();
+	jmp_add(id);
 }
 
 void o_call(int argc, int rets)
@@ -1295,27 +1307,29 @@ static void i_sx(int rd, int bits)
 #define BL(cond, l, o)	(((cond) << 28) | (5 << 25) | ((l) << 24) | \
 				((((o) - 8) >> 2) & 0x00ffffff))
 
-static void i_b(long addr)
+static void i_b(void)
 {
-	oi(BL(14, 0, addr - cslen));
+	oi(BL(14, 0, 0));
 }
 
-static void i_b_if(long addr, int rn, int z)
+static void i_bz(int rn, int z)
 {
 	if (OPT_ISCMP()) {
 		int cond = OPT_CCOND();
 		cslen = last_cmp + 4;
 		last_set = -1;
-		oi(BL(z ? cond_nots[cond] : cond, 0, addr - cslen));
+		oi(BL(z ? cond_nots[cond] : cond, 0, 0));
 		return;
 	}
 	i_tst(rn, rn);
-	oi(BL(z ? 0 : 1, 0, addr - cslen));
+	oi(BL(z ? 0 : 1, 0, 0));
 }
 
-static void i_b_fill(long *dst, int diff)
+static void i_b_fill(long src, long dst)
 {
-	*dst = (*dst & 0xff000000) | (((diff - 8) >> 2) & 0x00ffffff);
+	long diff = dst - src - 8;
+	long *m = (long *) (cs + src);
+	*m = (*m & 0xff000000) | ((diff >> 2) & 0x00ffffff);
 }
 
 static void i_memcpy(int rd, int rs, int rn)

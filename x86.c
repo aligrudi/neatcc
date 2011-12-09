@@ -82,9 +82,9 @@ static void i_not(int rd);
 static void i_lnot(int rd);
 static void i_zx(int rd, int bits);
 static void i_sx(int rd, int bits);
-static void i_b(long addr);
-static void i_b_fill(long *dst, int diff);
-static void i_b_if(long addr, int rn, int z);
+static void i_b(void);
+static void i_bz(int rn, int z);
+static void i_b_fill(long src, long dst);
 static void i_call(char *sym, int off);
 static void i_call_reg(int rd);
 static void i_prolog(void);
@@ -93,10 +93,37 @@ static void i_epilog(void);
 static struct tmp *regs[N_REGS];
 static int tmpregs[] = {R_RAX, R_RSI, R_RDI, R_RBX, R_RDX, R_RCX};
 
-#define MAXRET			(1 << 8)
+/* labels and jmps */
+#define MAXJMPS		(1 << 14)
 
-static long ret[MAXRET];
-static int nret;
+static long labels[MAXJMPS];
+static int nlabels;
+static long jmp_loc[MAXJMPS];
+static int jmp_goal[MAXJMPS];
+static int njmps;
+
+void o_label(int id)
+{
+	if (id > nlabels)
+		nlabels = id + 1;
+	labels[id] = cslen;
+}
+
+static void jmp_add(int id)
+{
+	jmp_loc[njmps] = cslen - 4;
+	jmp_goal[njmps] = id;
+	njmps++;
+}
+
+static void jmp_fill(void)
+{
+	int i;
+	for (i = 0; i < njmps; i++)
+		i_b_fill(jmp_loc[i], labels[jmp_goal[i]]);
+}
+
+/* generating code */
 
 static void putint(char *s, long n, int l)
 {
@@ -389,7 +416,8 @@ void o_func_beg(char *name, int argc, int global, int vararg)
 	sp_max = sp;
 	ntmp = 0;
 	sp_tmp = -1;
-	nret = 0;
+	nlabels = 0;
+	njmps = 0;
 	memset(regs, 0, sizeof(regs));
 }
 
@@ -427,14 +455,13 @@ void o_ret(int rets)
 		tmp_pop(REG_RET);
 	else
 		i_num(REG_RET, 0);
-	ret[nret++] = o_jmp(0);
+	o_jmp(0);
 }
 
 void o_func_end(void)
 {
-	int i;
-	for (i = 0; i < nret; i++)
-		o_filljmp(ret[i]);
+	o_label(0);
+	jmp_fill();
 	i_epilog();
 }
 
@@ -794,43 +821,28 @@ void o_memset(void)
 	tmp_drop(2);
 }
 
-long o_mklabel(void)
-{
-	return cslen;
-}
-
-static long jxz(long addr, int z)
+static void jxz(int id, int z)
 {
 	int r = reg_fortmp(TMP(0), 0);
 	tmp_pop(r);
-	i_b_if(addr, r, z);
-	return cslen - 4;
+	i_bz(r, z);
+	jmp_add(id);
 }
 
-long o_jz(long addr)
+void o_jz(int id)
 {
-	return jxz(addr, 1);
+	jxz(id, 1);
 }
 
-long o_jnz(long addr)
+void o_jnz(int id)
 {
-	return jxz(addr, 0);
+	jxz(id, 0);
 }
 
-long o_jmp(long addr)
+void o_jmp(int id)
 {
-	i_b(addr);
-	return cslen - 4;
-}
-
-void o_filljmp2(long addr, long jmpdst)
-{
-	i_b_fill((void *) cs + addr, jmpdst - addr);
-}
-
-void o_filljmp(long addr)
-{
-	o_filljmp2(addr, cslen);
+	i_b();
+	jmp_add(id);
 }
 
 void o_call(int argc, int rets)
@@ -1171,28 +1183,28 @@ static void jx(int x, long addr)
 	oi(addr - cslen - 4, 4);
 }
 
-static void i_b_if(long addr, int rn, int z)
+static void i_bz(int rn, int z)
 {
 	if (OPT_ISCMP()) {
 		int cond = OPT_CCOND();
 		cslen = last_set;
-		jx((!z ? cond : cond ^ 0x01) & ~0x10, addr);
+		jx((!z ? cond : cond ^ 0x01) & ~0x10, 0);
 		last_set = -1;
 	} else {
 		i_tst(rn, rn);
-		jx(z ? 0x84 : 0x85, addr);
+		jx(z ? 0x84 : 0x85, 0);
 	}
 }
 
-static void i_b(long addr)
+static void i_b(void)
 {
 	os("\xe9", 1);			/* jmp $addr */
-	oi(addr - cslen - 4, 4);
+	oi(0, 4);
 }
 
-static void i_b_fill(long *dst, int diff)
+static void i_b_fill(long src, long dst)
 {
-	putint((void *) dst, diff - 4, 4);
+	putint((void *) (cs + src), (dst - src) - 4, 4);
 }
 
 static void i_call_reg(int rd)

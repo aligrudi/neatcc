@@ -54,12 +54,10 @@ long o_mklocal(int size);
 void o_rmlocal(long addr, int sz);
 long o_arg2loc(int i);
 /* branches */
-long o_mklabel(void);
-long o_jz(long addr);
-long o_jnz(long addr);
-long o_jmp(long addr);
-void o_filljmp(long addr);
-void o_filljmp2(long addr, long jmpdst);
+void o_label(int id);
+void o_jmp(int id);
+void o_jz(int id);
+void o_jnz(int id);
 /* conditional instructions */
 void o_fork(void);
 void o_forkpush(void);

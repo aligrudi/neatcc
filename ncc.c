@@ -35,12 +35,10 @@ static int nogen;		/* don't generate code */
 #define o_tmpdrop(n)		{if (!nogen) o_tmpdrop(n);}
 #define o_tmpswap()		{if (!nogen) o_tmpswap();}
 #define o_tmpcopy()		{if (!nogen) o_tmpcopy();}
-#define o_mklabel()		(nogen ? 0 : o_mklabel())
-#define o_jz(addr)		(nogen ? 0 : o_jz(addr))
-#define o_jnz(addr)		(nogen ? 0 : o_jnz(addr))
-#define o_jmp(addr)		(nogen ? 0 : o_jmp(addr))
-#define o_filljmp(addr)		{if (!nogen) o_filljmp(addr);}
-#define o_filljmp2(addr, dst)	{if (!nogen) o_filljmp2(addr, dst);}
+#define o_label(id)		{if (!nogen) o_label(id);}
+#define o_jz(id)		{if (!nogen) o_jz(id);}
+#define o_jnz(id)		{if (!nogen) o_jnz(id);}
+#define o_jmp(id)		{if (!nogen) o_jmp(id);}
 #define o_fork()		{if (!nogen) o_fork();}
 #define o_forkpush()		{if (!nogen) o_forkpush();}
 #define o_forkjoin()		{if (!nogen) o_forkjoin();}
@@ -151,6 +149,12 @@ static void global_add(struct name *name)
 		err("nomem: MAXGLOBALS reached!\n");
 	memcpy(&globals[nglobals++], name, sizeof(*name));
 }
+
+#define LABEL()			(++label)
+
+static int label;		/* last used label id */
+static int l_break;		/* current break label */
+static int l_cont;		/* current continue label */
 
 #define MAXENUMS		(1 << 10)
 
@@ -268,29 +272,6 @@ static struct name *struct_field(int id, char *name)
 		if (!strcmp(name, si->fields[i].name))
 			return &si->fields[i];
 	err("field not found\n");
-}
-
-#define MAXBREAK		(1 << 7)
-
-static long breaks[MAXBREAK];
-static int nbreaks;
-static long continues[MAXBREAK];
-static int ncontinues;
-
-static void break_fill(long addr, int till)
-{
-	int i;
-	for (i = till; i < nbreaks; i++)
-		o_filljmp2(breaks[i], addr);
-	nbreaks = till;
-}
-
-static void continue_fill(long addr, int till)
-{
-	int i;
-	for (i = till; i < ncontinues; i++)
-		o_filljmp2(continues[i], addr);
-	ncontinues = till;
 }
 
 /* return t's size */
@@ -970,59 +951,53 @@ static void readbitor(void)
 
 static void readand(void)
 {
-	long conds[MAXCOND];
-	int nconds = 0;
-	long passed;
-	int i;
+	int l_out = LABEL();
+	int l_fail = LABEL();
 	readbitor();
 	if (tok_see() != TOK2("&&"))
 		return;
 	o_fork();
 	ts_pop_de(NULL);
-	conds[nconds++] = o_jz(0);
+	o_jz(l_fail);
 	while (!tok_jmp(TOK2("&&"))) {
 		readbitor();
 		ts_pop_de(NULL);
-		conds[nconds++] = o_jz(0);
+		o_jz(l_fail);
 	}
 	o_num(1);
 	o_forkpush();
-	passed = o_jmp(0);
-	for (i = 0; i < nconds; i++)
-		o_filljmp(conds[i]);
+	o_jmp(l_out);
+	o_label(l_fail);
 	o_num(0);
 	o_forkpush();
 	o_forkjoin();
-	o_filljmp(passed);
+	o_label(l_out);
 	ts_push_bt(4 | BT_SIGNED);
 }
 
 static void reador(void)
 {
-	long conds[MAXCOND];
-	int nconds = 0;
-	long failed;
-	int i;
+	int l_pass = LABEL();
+	int l_end = LABEL();
 	readand();
 	if (tok_see() != TOK2("||"))
 		return;
 	o_fork();
 	ts_pop_de(NULL);
-	conds[nconds++] = o_jnz(0);
+	o_jnz(l_pass);
 	while (!tok_jmp(TOK2("||"))) {
 		readand();
 		ts_pop_de(NULL);
-		conds[nconds++] = o_jnz(0);
+		o_jnz(l_pass);
 	}
 	o_num(0);
 	o_forkpush();
-	failed = o_jmp(0);
-	for (i = 0; i < nconds; i++)
-		o_filljmp(conds[i]);
+	o_jmp(l_end);
+	o_label(l_pass);
 	o_num(1);
 	o_forkpush();
 	o_forkjoin();
-	o_filljmp(failed);
+	o_label(l_end);
 	ts_push_bt(4 | BT_SIGNED);
 }
 
@@ -1053,7 +1028,6 @@ static int readcexpr_const(void)
 
 static void readcexpr(void)
 {
-	long l1, l2;
 	reador();
 	if (tok_jmp('?'))
 		return;
@@ -1061,21 +1035,23 @@ static void readcexpr(void)
 	ts_pop_de(NULL);
 	o_fork();
 	if (readcexpr_const()) {
-		l1 = o_jz(0);
+		int l_fail = LABEL();
+		int l_end = LABEL();
+		o_jz(l_fail);
 		readcexpr();
 		/* both branches yield the same type; so ignore the first */
 		ts_pop_de(NULL);
 		o_forkpush();
-		l2 = o_jmp(0);
+		o_jmp(l_end);
 
 		tok_expect(':');
-		o_filljmp(l1);
+		o_label(l_fail);
 		readcexpr();
 		/* making sure t->addr == 0 on both branches */
 		ts_de(1);
 		o_forkpush();
 		o_forkjoin();
-		o_filljmp(l2);
+		o_label(l_end);
 	}
 	ncexpr--;
 }
@@ -1278,16 +1254,6 @@ static void localdef(void *data, struct name *name, unsigned flags)
 	}
 }
 
-/* read K&R function arguments */
-void krdef(void *data, struct name *name, unsigned flags)
-{
-	struct funcinfo *fi = data;
-	int i;
-	for (i = 0; i < fi->nargs; i++)
-		if (!strcmp(fi->argnames[i], name->name))
-			memcpy(&fi->args[i], &name->type, sizeof(name->type));
-}
-
 static void typedefdef(void *data, struct name *name, unsigned flags)
 {
 	typedef_add(name->name, &name->type);
@@ -1299,13 +1265,14 @@ static void readstmt(void);
 
 static void readswitch(void)
 {
-	int break_beg = nbreaks;
+	int o_break = l_break;
 	long val_addr = o_mklocal(LONGSZ);
 	struct type t;
-	int ncases = 0;		/* number of case labels */
-	long last_failed = -1;	/* address of last failed jmp */
-	long last_matched = -1;	/* address of last walk through jmp */
-	long default_addr = -1;	/* address of the default label */
+	int ncases = 0;			/* number of case labels */
+	int l_failed = LABEL();		/* address of last failed jmp */
+	int l_matched = LABEL();	/* address of last walk through jmp */
+	int l_default = 0;		/* default case label */
+	l_break = LABEL();
 	tok_expect('(');
 	readexpr();
 	ts_pop_de(&t);
@@ -1322,10 +1289,10 @@ static void readswitch(void)
 			continue;
 		}
 		if (ncases)
-			last_matched = o_jmp(0);
+			o_jmp(l_matched);
 		if (tok_get() == TOK_CASE) {
-			if (last_failed >= 0)
-				o_filljmp(last_failed);
+			o_label(l_failed);
+			l_failed = LABEL();
 			caseexpr = 1;
 			readexpr();
 			ts_pop_de(NULL);
@@ -1333,60 +1300,43 @@ static void readswitch(void)
 			o_local(val_addr);
 			o_deref(TYPE_BT(&t));
 			o_bop(O_EQ);
-			last_failed = o_jz(0);
+			o_jz(l_failed);
 			o_tmpdrop(1);
 		} else {
 			if (!ncases)
-				last_failed = o_jmp(0);
-			default_addr = o_mklabel();
+				o_jmp(l_failed);
+			l_default = LABEL();
+			o_label(l_default);
 		}
 		tok_expect(':');
-		if (last_matched >= 0)
-			o_filljmp(last_matched);
+		o_label(l_matched);
+		l_matched = LABEL();
 		ncases++;
 	}
 	o_rmlocal(val_addr, LONGSZ);
-	if (last_failed >= 0)
-		o_filljmp2(last_failed,
-			default_addr >= 0 ? default_addr : o_mklabel());
-	break_fill(o_mklabel(), break_beg);
+	o_jmp(l_break);
+	o_label(l_failed);
+	if (l_default)
+		o_jmp(l_default);
+	o_label(l_break);
+	l_break = o_break;
 }
 
-#define MAXGOTO			(1 << 10)
+#define MAXLABELS		(1 << 10)
 
-static struct gotoinfo {
-	char name[NAMELEN];
-	long addr;
-} gotos[MAXGOTO];
-static int ngotos;
-
-static struct labelinfo {
-	char name[NAMELEN];
-	long addr;
-} labels[MAXGOTO];
+static char label_name[MAXLABELS][NAMELEN];
+static int label_ids[MAXLABELS];
 static int nlabels;
 
-static void goto_add(char *name)
+static int label_id(char *name)
 {
-	strcpy(gotos[ngotos].name, name);
-	gotos[ngotos++].addr = o_jmp(0);
-}
-
-static void label_add(char *name)
-{
-	strcpy(labels[nlabels].name, name);
-	labels[nlabels++].addr = o_mklabel();
-}
-
-static void goto_fill(void)
-{
-	int i, j;
-	for (i = 0; i < ngotos; i++)
-		for (j = 0; j < nlabels; j++)
-			if (!strcmp(gotos[i].name, labels[j].name)) {
-				o_filljmp2(gotos[i].addr, labels[j].addr);
-				break;
-			}
+	int i;
+	for (i = nlabels - 1; i >= 0; --i)
+		if (!strcmp(label_name[i], name))
+			return label_ids[i];
+	strcpy(label_name[nlabels], name);
+	label_ids[nlabels] = LABEL();
+	return label_ids[nlabels++];
 }
 
 static void readstmt(void)
@@ -1422,88 +1372,93 @@ static void readstmt(void)
 		return;
 	}
 	if (!tok_jmp(TOK_IF)) {
-		long l1, l2;
+		int l_fail = LABEL();
+		int l_end = LABEL();
 		tok_expect('(');
 		readexpr();
 		tok_expect(')');
 		ts_pop_de(NULL);
-		l1 = o_jz(0);
+		o_jz(l_fail);
 		readstmt();
 		if (!tok_jmp(TOK_ELSE)) {
-			l2 = o_jmp(0);
-			o_filljmp(l1);
+			o_jmp(l_end);
+			o_label(l_fail);
 			readstmt();
-			o_filljmp(l2);
+			o_label(l_end);
 		} else {
-			o_filljmp(l1);
+			o_label(l_fail);
 		}
 		return;
 	}
 	if (!tok_jmp(TOK_WHILE)) {
-		long l1, l2;
-		int break_beg = nbreaks;
-		int continue_beg = ncontinues;
-		l1 = o_mklabel();
+		int o_break = l_break;
+		int o_cont = l_cont;
+		l_break = LABEL();
+		l_cont = LABEL();
+		o_label(l_cont);
 		tok_expect('(');
 		readexpr();
 		tok_expect(')');
 		ts_pop_de(NULL);
-		l2 = o_jz(0);
+		o_jz(l_break);
 		readstmt();
-		o_jmp(l1);
-		o_filljmp(l2);
-		break_fill(o_mklabel(), break_beg);
-		continue_fill(l1, continue_beg);
+		o_jmp(l_cont);
+		o_label(l_break);
+		l_break = o_break;
+		l_cont = o_cont;
 		return;
 	}
 	if (!tok_jmp(TOK_DO)) {
-		long l1, l2;
-		int break_beg = nbreaks;
-		int continue_beg = ncontinues;
-		l1 = o_mklabel();
+		int o_break = l_break;
+		int o_cont = l_cont;
+		int l_beg = LABEL();
+		l_break = LABEL();
+		l_cont = LABEL();
+		o_label(l_beg);
 		readstmt();
 		tok_expect(TOK_WHILE);
 		tok_expect('(');
-		l2 = o_mklabel();
+		o_label(l_cont);
 		readexpr();
 		ts_pop_de(NULL);
-		o_jnz(l1);
+		o_jnz(l_beg);
 		tok_expect(')');
-		break_fill(o_mklabel(), break_beg);
-		continue_fill(l2, continue_beg);
+		o_label(l_break);
 		tok_expect(';');
+		l_break = o_break;
+		l_cont = o_cont;
 		return;
 	}
 	if (!tok_jmp(TOK_FOR)) {
-		long l_check, l_jump, j_fail, j_pass;
-		int break_beg = nbreaks;
-		int continue_beg = ncontinues;
-		int has_cond = 0;
+		int o_break = l_break;
+		int o_cont = l_cont;
+		int l_check = LABEL();	/* for condition label */
+		int l_body = LABEL();	/* for block label */
+		l_cont = LABEL();
+		l_break = LABEL();
 		tok_expect('(');
 		if (tok_see() != ';')
 			readestmt();
 		tok_expect(';');
-		l_check = o_mklabel();
+		o_label(l_check);
 		if (tok_see() != ';') {
 			readestmt();
 			ts_pop_de(NULL);
-			j_fail = o_jz(0);
-			has_cond = 1;
+			o_jz(l_break);
 		}
 		tok_expect(';');
-		j_pass = o_jmp(0);
-		l_jump = o_mklabel();
+		o_jmp(l_body);
+		o_label(l_cont);
 		if (tok_see() != ')')
 			readestmt();
 		tok_expect(')');
 		o_jmp(l_check);
-		o_filljmp(j_pass);
+		o_label(l_body);
 		readstmt();
-		o_jmp(l_jump);
-		if (has_cond)
-			o_filljmp(j_fail);
-		break_fill(o_mklabel(), break_beg);
-		continue_fill(l_jump, continue_beg);
+		o_jmp(l_cont);
+		o_label(l_break);
+		l_break = o_break;
+		l_cont = o_cont;
 		return;
 	}
 	if (!tok_jmp(TOK_SWITCH)) {
@@ -1522,24 +1477,24 @@ static void readstmt(void)
 	}
 	if (!tok_jmp(TOK_BREAK)) {
 		tok_expect(';');
-		breaks[nbreaks++] = o_jmp(0);
+		o_jmp(l_break);
 		return;
 	}
 	if (!tok_jmp(TOK_CONTINUE)) {
 		tok_expect(';');
-		continues[ncontinues++] = o_jmp(0);
+		o_jmp(l_cont);
 		return;
 	}
 	if (!tok_jmp(TOK_GOTO)) {
 		tok_expect(TOK_NAME);
-		goto_add(tok_id());
+		o_jmp(label_id(tok_id()));
 		tok_expect(';');
 		return;
 	}
 	readestmt();
 	/* labels */
 	if (!tok_jmp(':')) {
-		label_add(tok_id());
+		o_label(label_id(tok_id()));
 		return;
 	}
 	tok_expect(';');
@@ -1557,11 +1512,10 @@ static void readfunc(struct name *name, int flags)
 		local_add(&arg);
 	}
 	readstmt();
-	goto_fill();
 	o_func_end();
 	func_name[0] = '\0';
 	nlocals = 0;
-	ngotos = 0;
+	label = 0;
 	nlabels = 0;
 }
 
@@ -1768,6 +1722,16 @@ static int readargs(struct type *args, char argnames[][NAMELEN], int *varg)
 	if (nargs == 1 && !TYPE_BT(&args[0]))
 		return 0;
 	return nargs;
+}
+
+/* read K&R function arguments */
+static void krdef(void *data, struct name *name, unsigned flags)
+{
+	struct funcinfo *fi = data;
+	int i;
+	for (i = 0; i < fi->nargs; i++)
+		if (!strcmp(fi->argnames[i], name->name))
+			memcpy(&fi->args[i], &name->type, sizeof(name->type));
 }
 
 /*
