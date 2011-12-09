@@ -38,6 +38,7 @@
 
 #define MIN(a, b)		((a) < (b) ? (a) : (b))
 #define ALIGN(x, a)		(((x) + (a) - 1) & ~((a) - 1))
+void err(char *msg);
 
 static char cs[SECSIZE];	/* code segment */
 static int cslen;
@@ -111,6 +112,8 @@ void o_label(int id)
 
 static void jmp_add(int id)
 {
+	if (njmps >= MAXJMPS)
+		err("nomem: MAXJMPS reached!\n");
 	jmp_loc[njmps] = cslen - 4;
 	jmp_goal[njmps] = id;
 	njmps++;
@@ -882,7 +885,6 @@ static char dat_names[MAXDATS][NAMELEN];
 static int dat_offs[MAXDATS];
 static int ndats;
 
-void err(char *msg);
 void *o_mkdat(char *name, int size, int global)
 {
 	void *addr = ds + dslen;
