@@ -636,7 +636,7 @@ static int func_create(struct type *ret, char *name, char argnames[][NAMELEN],
 		memcpy(&fi->args[i], &args[i], sizeof(*ret));
 	fi->nargs = nargs;
 	fi->varg = varg;
-	strcpy(fi->name, name);
+	strcpy(fi->name, name ? name : "");
 	for (i = 0; i < nargs; i++)
 		strcpy(fi->argnames[i], argnames[i]);
 	return fi - funcs;
