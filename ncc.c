@@ -1,12 +1,13 @@
 /*
  * neatcc - a small and simple C compiler
  *
- * Copyright (C) 2010-2011 Ali Gholami Rudi
+ * Copyright (C) 2010-2012 Ali Gholami Rudi
  *
  * This program is released under GNU GPL version 2.
  */
 #include <fcntl.h>
 #include <unistd.h>
+#include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -52,6 +53,7 @@ static int nogen;		/* don't generate code */
 
 #define TYPE_BT(t)		((t)->ptr ? LONGSZ : (t)->bt)
 #define TYPE_SZ(t)		((t)->ptr ? LONGSZ : (t)->bt & BT_SZMASK)
+#define TYPE_VOID(t)		(!(t)->bt && !(t)->flags && !(t)->ptr)
 
 /* type->flag values */
 #define T_ARRAY		0x01
@@ -101,8 +103,13 @@ static void ts_pop(struct type *type)
 		*type = ts[nts];
 }
 
-void err(char *msg)
+void err(char *fmt, ...)
 {
+	va_list ap;
+	char msg[512];
+	va_start(ap, fmt);
+	vsprintf(msg, fmt, ap);
+	va_end(ap);
 	die("%s: %s", cpp_loc(tok_addr()), msg);
 }
 
@@ -272,6 +279,7 @@ static struct name *struct_field(int id, char *name)
 		if (!strcmp(name, si->fields[i].name))
 			return &si->fields[i];
 	err("field not found\n");
+	return NULL;
 }
 
 /* return t's size */
@@ -337,7 +345,7 @@ static unsigned bt_op(unsigned bt1, unsigned bt2)
 {
 	unsigned s1 = BT_SZ(bt1);
 	unsigned s2 = BT_SZ(bt2);
-	return (bt1 | bt2) & BT_SIGNED | (s1 > s2 ? s1 : s2);
+	return ((bt1 | bt2) & BT_SIGNED) | (s1 > s2 ? s1 : s2);
 }
 
 static void ts_binop(int op)
@@ -523,7 +531,7 @@ static void readprimary(void)
 			return;
 		}
 		if (tok_see() != '(')
-			err("unknown symbol\n");
+			err("unkown symbol <%s>\n", name);
 		global_add(&unkn);
 		ts_push_bt(LONGSZ);
 		o_sym(unkn.name);
@@ -1037,11 +1045,13 @@ static void readcexpr(void)
 	if (readcexpr_const()) {
 		int l_fail = LABEL();
 		int l_end = LABEL();
+		struct type ret;
 		o_jz(l_fail);
 		readcexpr();
 		/* both branches yield the same type; so ignore the first */
-		ts_pop_de(NULL);
-		o_forkpush();
+		ts_pop_de(&ret);
+		if (!TYPE_VOID(&ret))
+			o_forkpush();
 		o_jmp(l_end);
 
 		tok_expect(':');
@@ -1049,8 +1059,10 @@ static void readcexpr(void)
 		readcexpr();
 		/* making sure t->addr == 0 on both branches */
 		ts_de(1);
-		o_forkpush();
-		o_forkjoin();
+		if (!TYPE_VOID(&ret)) {
+			o_forkpush();
+			o_forkjoin();
+		}
 		o_label(l_end);
 	}
 	ncexpr--;
@@ -1229,7 +1241,7 @@ static char func_name[NAMELEN];
 static void localdef(void *data, struct name *name, unsigned flags)
 {
 	struct type *t = &name->type;
-	if ((flags & F_EXTERN) || (t->flags & T_FUNC) && !t->ptr) {
+	if ((flags & F_EXTERN) || ((t->flags & T_FUNC) && !t->ptr)) {
 		global_add(name);
 		return;
 	}
@@ -1503,6 +1515,7 @@ static void readstmt(void)
 static void readfunc(struct name *name, int flags)
 {
 	struct funcinfo *fi = &funcs[name->type.id];
+	long beg = tok_addr();
 	int i;
 	strcpy(func_name, fi->name);
 	o_func_beg(func_name, fi->nargs, F_GLOBAL(flags), fi->varg);
@@ -1511,6 +1524,12 @@ static void readfunc(struct name *name, int flags)
 		strcpy(arg.name, fi->argnames[i]);
 		local_add(&arg);
 	}
+	/* first pass: collecting statistics */
+	o_pass1();
+	readstmt();
+	tok_jump(beg);
+	/* second pass: generating code */
+	o_pass2();
 	readstmt();
 	o_func_end();
 	func_name[0] = '\0';
@@ -1540,11 +1559,7 @@ static void compat_macros(void)
 {
 	cpp_define("__STDC__", "");
 	cpp_define("__linux__", "");
-#ifdef NEATCC_ARM
-	cpp_define("__arm__", "");
-#else
-	cpp_define("__x86_64__", "");
-#endif
+	cpp_define(I_ARCH, "");
 
 	/* ignored keywords */
 	cpp_define("const", "");
@@ -1910,7 +1925,7 @@ static int initsize(void)
 	long addr = tok_addr();
 	int n = 0;
 	if (tok_jmp('='))
-		err("array size unspecified");
+		return 0;
 	if (!tok_jmp(TOK_STR)) {
 		n = tok_str(NULL);
 		tok_jump(addr);

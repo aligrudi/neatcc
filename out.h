@@ -4,8 +4,10 @@
 
 #define OUT_GLOB	0x0010		/* global symbol */
 
-#define OUT_REL		0x0100		/* relative relocation */
-#define OUT_REL24	0x0200		/* 24-bit relative relocation */
+#define OUT_RLREL	0x0020		/* relative relocation */
+#define OUT_RLSX	0x0040		/* sign extend relocation */
+#define OUT_RL24	0x0400		/* 3-byte relocation */
+#define OUT_RL32	0x0800		/* 4-byte relocation */
 
 #define OUT_ALIGNMENT	16		/* amount of section alignment */
 

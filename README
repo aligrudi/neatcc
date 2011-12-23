@@ -1,15 +1,15 @@
 NEATCC
 ======
 
-neatcc is a simple ARM/x86 C compiler.  I wrote it to complete my
-development toolchain (see http://litcave.berlios.de/):
+neatcc is a simple ARM/x86(_64) C compiler.  I wrote it to complete my
+development toolchain (see http://litcave.rudi.ir/):
 
 * cc:	git://repo.or.cz/neatcc.git
 * ld:	git://repo.or.cz/ld.git
 * as:	git://repo.or.cz/neatas.git
 * libc:	git://repo.or.cz/neatlibc.git
-* gdb:	http://litcave.berlios.de/coredump.tar.gz
-  	http://litcave.berlios.de/elfloc.tar.gz
+* gdb:	http://litcave.rudi.ir/coredump.tar.gz
+  	http://litcave.rudi.ir/elfloc.tar.gz
 
 neatcc supports a large subset of C language but lacks some of the
 features that I didn't use much myself.  The most important missing

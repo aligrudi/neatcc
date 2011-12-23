@@ -11,6 +11,15 @@
 #define R_RBP		0x05
 #define R_RSI		0x06
 #define R_RDI		0x07
+/* x86_64 registers */
+#define R_R8		0x08
+#define R_R9		0x09
+#define R_R10		0x0a
+#define R_R11		0x0b
+#define R_R12		0x0c
+#define R_R13		0x0d
+#define R_R14		0x0e
+#define R_R15		0x0f
 
 /* x86 opcodes */
 #define I_MOV		0x89
@@ -34,13 +43,14 @@
 #define MIN(a, b)		((a) < (b) ? (a) : (b))
 #define ALIGN(x, a)		(((x) + (a) - 1) & ~((a) - 1))
 
-int tmpregs[] = {0, 1, 2, 6, 7, 3};
-int argregs[] = {0};
+int tmpregs[] = {0, 7, 6, 2, 1, 8, 9, 10, 11, 3, 12, 13, 14, 15};
+int argregs[] = {7, 6, 2, 1, 8, 9};
 
 #define OP2(o2, o1)		(0x010000 | ((o2) << 8) | (o1))
 #define O2(op)			(((op) >> 8) & 0xff)
 #define O1(op)			((op) & 0xff)
 #define MODRM(m, r1, r2)	((m) << 6 | (r1) << 3 | (r2))
+#define REX(r1, r2)		(0x48 | (((r1) & 8) >> 1) | (((r2) & 8) >> 3))
 
 static void putint(char *s, long n, int l)
 {
@@ -53,8 +63,19 @@ static void putint(char *s, long n, int l)
 static void op_x(int op, int r1, int r2, int bt)
 {
 	int sz = BT_SZ(bt);
+	int rex = 0;
+	if (sz == 8)
+		rex |= 8;
+	if (sz == 1)
+		rex |= 0x40;
+	if (r1 & 0x8)
+		rex |= 4;
+	if (r2 & 0x8)
+		rex |= 1;
 	if (sz == 2)
 		oi(0x66, 1);
+	if (rex)
+		oi(rex | 0x40, 1);
 	if (op & 0x10000)
 		oi(O2(op), 1);
 	oi(sz == 1 ? O1(op) & ~0x1 : O1(op), 1);
@@ -83,11 +104,13 @@ static void op_rr(int op, int src, int dst, int bt)
 	oi(MODRM(3, src & 0x07, dst & 0x07), 1);
 }
 
-#define movrx_bt(bt)		(LONGSZ)
+#define movrx_bt(bt)		(((bt) == 4) ? 4 : LONGSZ)
 
 static int movrx_op(int bt, int mov)
 {
 	int sz = BT_SZ(bt);
+	if (sz == 4)
+		return bt & BT_SIGNED ? I_MOVSXD : mov;
 	if (sz == 2)
 		return OP2(0x0f, bt & BT_SIGNED ? 0xbf : 0xb7);
 	if (sz == 1)
@@ -183,12 +206,7 @@ void i_reg(int op, int *rd, int *r1, int *r2, int *tmp)
 			*r1 = 1 << R_RSI;
 			*r2 = 1 << R_RCX;
 		}
-		if (op == O_SX || op == O_ZX) {
-			*rd = R_TMPS;
-			*r1 = R_BYTE;
-			*r2 = 0;
-		}
-		if (op == O_MOV) {
+		if (op == O_SX || op == O_ZX || op == O_MOV) {
 			*rd = R_TMPS;
 			*r2 = 0;
 		}
@@ -207,8 +225,8 @@ static void i_add_imm(int op, int rd, int rn, long n)
 {
 	/* opcode for O_ADD, O_SUB, O_AND, O_OR, O_XOR */
 	static int rx[] = {0xc0, 0xe8, 0xe0, 0xc8, 0xf0};
-	unsigned char s[3] = {0x83, rx[op & 0x0f] | rd, n & 0xff};
-	os((void *) s, 3);
+	unsigned char s[4] = {REX(0, rd), 0x83, rx[op & 0x0f] | (rd & 7), n & 0xff};
+	os((void *) s, 4);
 }
 
 void i_num(int rd, long n)
@@ -216,9 +234,16 @@ void i_num(int rd, long n)
 	if (!n) {
 		op_rr(I_XOR, rd, rd, 4);
 		return;
+	}
+	if (n < 0 && -n <= 0xffffffff) {
+		op_rr(I_MOVI, 0, rd, LONGSZ);
+		oi(n, 4);
 	} else {
-		op_x(I_MOVIR + (rd & 7), 0, rd, LONGSZ);
-		oi(n, LONGSZ);
+		int len = 8;
+		if (n > 0 && n <= 0xffffffff)
+			len = 4;
+		op_x(I_MOVIR + (rd & 7), 0, rd, len);
+		oi(n, len);
 	}
 }
 
@@ -252,8 +277,8 @@ static void i_cmp(int rn, int rm)
 
 static void i_cmp_imm(int rn, long n)
 {
-	unsigned char s[3] = {0x83, 0xf8 | rn, n & 0xff};
-	os(s, 3);
+	unsigned char s[4] = {REX(0, rn), 0x83, 0xf8 | rn, n & 0xff};
+	os(s, 4);
 }
 
 static void i_shl(int op, int rd, int r1, int rs)
@@ -266,17 +291,21 @@ static void i_shl(int op, int rd, int r1, int rs)
 
 static void i_shl_imm(int op, int rd, int rn, long n)
 {
-	int sm = (op & 0x1) ? (op & O_SIGNED ? 0xf8 : 0xe8) : 0xe0;
-	char s[3] = {0xc1, sm | rn, n & 0xff};
-	os(s, 3);
+	int sm = (op & 0x1) ? (op & O_SIGNED ? 0xf8 : 0xe8) : 0xe0 ;
+	char s[4] = {REX(0, rn), 0xc1, sm | (rn & 7), n & 0xff};
+	os(s, 4);
 }
 
 void i_sym(int rd, char *sym, int off)
 {
-	op_x(I_MOVIR + (rd & 7), 0, rd, LONGSZ);
+	int sz = X64_ABS_RL & OUT_RL32 ? 4 : LONGSZ;
+	if (X64_ABS_RL & OUT_RLSX)
+		op_rr(I_MOVI, 0, rd, sz);
+	else
+		op_x(I_MOVIR + (rd & 7), 0, rd, sz);
 	if (!pass1)
-		out_rel(sym, OUT_CS, cslen);
-	oi(off, LONGSZ);
+		out_rel(sym, OUT_CS | X64_ABS_RL, cslen);
+	oi(off, sz);
 }
 
 static void i_neg(int rd)
@@ -290,7 +319,7 @@ static void i_not(int rd)
 }
 
 /* for optimizing cmp + tst + jmp to cmp + jmp */
-#define OPT_ISCMP()		(last_set >= 0 && last_set + 6 == cslen)
+#define OPT_ISCMP()		(last_set >= 0 && last_set + 7 == cslen)
 #define OPT_CCOND()		(cs[last_set + 1])
 
 static long last_set = -1;
@@ -305,7 +334,7 @@ static void i_set(int op, int rd)
 	set[1] = cond;
 	last_set = cslen;
 	os(set, 3);			/* setl al */
-	os("\x0f\xb6\xc0", 3);		/* movzx rax, al */
+	os("\x48\x0f\xb6\xc0", 4);	/* movzx rax, al */
 }
 
 static void i_lnot(int rd)
@@ -313,9 +342,10 @@ static void i_lnot(int rd)
 	if (OPT_ISCMP()) {
 		cs[last_set + 1] ^= 0x01;
 	} else {
-		char cmp[] = "\x83\xf8\x00";
-		cmp[1] |= rd;
-		os(cmp, 3);		/* cmp eax, 0 */
+		char cmp[] = "\x00\x83\xf8\x00";
+		cmp[0] = REX(0, rd);
+		cmp[2] |= rd & 7;
+		os(cmp, 4);		/* cmp rax, 0 */
 		i_set(O_EQ, rd);
 	}
 }
@@ -475,7 +505,7 @@ static int spsub_addr;
 
 int i_args(void)
 {
-	return LONGSZ << 1;
+	return 16;
 }
 
 int i_sp(void)
@@ -484,8 +514,18 @@ int i_sp(void)
 	int n = 0;
 	for (i = 0; i < N_TMPS; i++)
 		if ((1 << tmpregs[i]) & func_sregs)
-			n += LONGSZ;
+			n += 8;
 	return -n;
+}
+
+static void i_saveargs(void)
+{
+	int i;
+	os("\x58", 1);		/* pop rax */
+	for (i = N_ARGS - 1; i >= 0; i--)
+		if ((1 << argregs[i]) & func_sargs)
+			i_push(argregs[i]);
+	os("\x50", 1);		/* push rax */
 }
 
 void i_prolog(int argc, int varg, int sargs, int sregs, int initfp, int subsp)
@@ -498,9 +538,11 @@ void i_prolog(int argc, int varg, int sargs, int sregs, int initfp, int subsp)
 	func_sregs = sregs;
 	func_initfp = initfp;
 	func_spsub = subsp;
+	if (func_sargs)
+		i_saveargs();
 	if (initfp) {
 		os("\x55", 1);			/* push rbp */
-		os("\x89\xe5", 2);		/* mov rbp, rsp */
+		os("\x48\x89\xe5", 3);		/* mov rbp, rsp */
 	}
 	if (func_sregs) {
 		for (i = N_TMPS - 1; i >= 0; i--)
@@ -508,7 +550,7 @@ void i_prolog(int argc, int varg, int sargs, int sregs, int initfp, int subsp)
 				i_push(tmpregs[i]);
 	}
 	if (func_spsub) {
-		os("\x81\xec", 2);		/* sub rsp, $xxx */
+		os("\x48\x81\xec", 3);		/* sub rsp, $xxx */
 		spsub_addr = cslen;
 		oi(0, 4);
 	}
@@ -518,13 +560,17 @@ void i_epilog(int sp_max)
 {
 	int diff;
 	int nsregs = 0;
+	int nsargs = 0;
 	int i;
 	for (i = 0; i < N_TMPS; i++)
 		if ((1 << tmpregs[i]) & func_sregs)
 			nsregs++;
+	for (i = 0; i < N_ARGS; i++)
+		if ((1 << argregs[i]) & func_sargs)
+			nsargs++;
 	diff = ALIGN(-sp_max - nsregs * LONGSZ, 16);
 	/* forcing 16-byte alignment */
-	diff = nsregs & 1 ? diff + LONGSZ : diff;
+	diff = (nsregs + nsargs) & 1 ? diff + LONGSZ : diff;
 	if (func_spsub && diff) {
 		i_add_anyimm(R_RSP, R_RBP, -nsregs * LONGSZ);
 		putint(cs + spsub_addr, diff, 4);
@@ -536,7 +582,12 @@ void i_epilog(int sp_max)
 	}
 	if (func_initfp)
 		os("\xc9", 1);		/* leave */
-	os("\xc3", 1);			/* ret */
+	if (func_sargs) {
+		os("\xc2", 1);		/* ret n */
+		oi(nsargs * LONGSZ, 2);
+	} else {
+		os("\xc3", 1);		/* ret */
+	}
 }
 
 void i_done(void)

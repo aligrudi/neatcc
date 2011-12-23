@@ -52,6 +52,7 @@ static struct buf {
 	int arg_buf;			/* the bufs index of the owning macro */
 } bufs[MAXBUFS];
 static int nbufs;
+static int bufs_limit = 1;		/* cpp_read() limit; useful in cpp_eval() */
 
 void die(char *fmt, ...)
 {
@@ -148,10 +149,12 @@ int cpp_init(char *path)
 	return include_file(path);
 }
 
-static void jumpws(void)
+static int jumpws(void)
 {
+	int old = cur;
 	while (cur < len && isspace(buf[cur]))
 		cur++;
+	return cur == old;
 }
 
 static void read_word(char *dst)
@@ -262,7 +265,7 @@ static void readarg(char *s)
 {
 	int depth = 0;
 	int beg = cur;
-	while (cur < len && (depth || buf[cur] != ',' && buf[cur] != ')')) {
+	while (cur < len && (depth || (buf[cur] != ',' && buf[cur] != ')'))) {
 		if (!jumpstr() || !jumpcomment())
 			continue;
 		switch (buf[cur++]) {
@@ -347,16 +350,18 @@ static long evalexpr(void);
 
 static int cpp_eval(void)
 {
-	int bufid;
-	int ret;
 	char evalbuf[BUFSIZE];
+	int old_limit;
+	int ret, nr;
 	read_tilleol(evalbuf);
 	buf_new(BUF_EVAL, evalbuf, strlen(evalbuf));
-	bufid = nbufs;
 	elen = 0;
 	ecur = 0;
-	while (bufid < nbufs || (bufid == nbufs && cur < len))
-		elen += cpp_read(ebuf + elen);
+	old_limit = bufs_limit;
+	bufs_limit = nbufs;
+	while ((nr = cpp_read(ebuf + elen)) >= 0)
+		elen += nr;
+	bufs_limit = old_limit;
 	ret = evalexpr();
 	buf_pop();
 	return ret;
@@ -442,7 +447,7 @@ static int cpp_cmd(void)
 		file[e - s] = '\0';
 		cur += e - s + 2;
 		if (include_find(file, *e == '>') == -1)
-			die("cannot include <%s>\n", file);
+			err("cannot include <%s>\n", file);
 		return 0;
 	}
 	return 1;
@@ -471,12 +476,10 @@ static int buf_arg_find(char *name)
 	return -1;
 }
 
-static void macro_expand(void)
+static void macro_expand(char *name)
 {
-	char name[NAMELEN];
 	struct macro *m;
 	int mbuf;
-	read_word(name);
 	if ((mbuf = buf_arg_find(name)) >= 0) {
 		int arg = macro_arg(bufs[mbuf].macro, name);
 		char *dat = bufs[mbuf].args[arg];
@@ -522,11 +525,16 @@ static int buf_expanding(char *macro)
 	return 0;
 }
 
+/* return 1 for plain macros and arguments and 2 for function macros */
 static int expandable(char *word)
 {
+	int i;
 	if (buf_arg_find(word) >= 0)
 		return 1;
-	return !buf_expanding(word) && macro_find(word) != -1;
+	if (buf_expanding(word))
+		return 0;
+	i = macro_find(word);
+	return i >= 0 ? macros[i].isfunc + 1 : 0;
 }
 
 void cpp_define(char *name, char *def)
@@ -541,21 +549,23 @@ void cpp_define(char *name, char *def)
 	buf_pop();
 }
 
-static int seen_macro;
+static int seen_macro;		/* seen a macro; 2 if a function macro */
+static char seen_name[NAMELEN];	/* the name of the last macro */
 
 static int hunk_off;
 static int hunk_len;
 
 int cpp_read(char *s)
 {
-	int old;
-	if (seen_macro) {
+	int old, end;
+	int jump_name = 0;
+	if (seen_macro == 1) {
+		macro_expand(seen_name);
 		seen_macro = 0;
-		macro_expand();
 	}
 	if (cur == len) {
 		struct buf *cbuf = &bufs[nbufs - 1];
-		if (nbufs < 2)
+		if (nbufs < bufs_limit + 1)
 			return -1;
 		if (cbuf->type == BUF_FILE)
 			free(buf);
@@ -566,18 +576,28 @@ int cpp_read(char *s)
 		if (!cpp_cmd())
 			return 0;
 	while (cur < len) {
+		if (!jumpws())
+			continue;
 		if (buf[cur] == '#')
 			break;
 		if (!jumpcomment())
 			continue;
+		if (seen_macro == 2) {
+			if (buf[cur] == '(')
+				macro_expand(seen_name);
+			seen_macro = 0;
+			old = cur;
+			continue;
+		}
 		if (!jumpstr())
 			continue;
 		if (isalpha(buf[cur]) || buf[cur] == '_') {
 			char word[NAMELEN];
 			read_word(word);
-			if (expandable(word)) {
-				cur -= strlen(word);
-				seen_macro = 1;
+			seen_macro = expandable(word);
+			if (seen_macro) {
+				strcpy(seen_name, word);
+				jump_name = 1;
 				break;
 			}
 			if (buf_iseval() && !strcmp("defined", word)) {
@@ -597,13 +617,15 @@ int cpp_read(char *s)
 		}
 		cur++;
 	}
-	memcpy(s, buf + old, cur - old);
-	s[cur - old] = '\0';
+	/* macros are expanded later; ignore its name */
+	end = jump_name ? cur - strlen(seen_name) : cur;
+	memcpy(s, buf + old, end - old);
+	s[end - old] = '\0';
 	if (!buf_iseval()) {
 		hunk_off += hunk_len;
-		hunk_len = cur - old;
+		hunk_len = end - old;
 	}
-	return cur - old;
+	return end - old;
 }
 
 /* preprocessor constant expression evaluation */

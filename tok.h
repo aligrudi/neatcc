@@ -54,3 +54,4 @@ char *cpp_loc(long addr);
 int cpp_read(char *s);
 
 void die(char *msg, ...);
+void err(char *fmt, ...);
