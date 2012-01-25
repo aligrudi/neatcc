@@ -1,12 +1,13 @@
 /*
  * neatpp - a small and simple C preprocessor
  *
- * Copyright (C) 2010-2011 Ali Gholami Rudi
+ * Copyright (C) 2010-2012 Ali Gholami Rudi
  *
  * This file is released under GNU GPL version 2.
  */
 #include <errno.h>
 #include <fcntl.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -62,6 +63,16 @@ static int xwrite(int fd, char *buf, int len)
 		nw += ret;
 	}
 	return nw;
+}
+
+void err(char *fmt, ...)
+{
+	va_list ap;
+	char msg[512];
+	va_start(ap, fmt);
+	vsprintf(msg, fmt, ap);
+	va_end(ap);
+	die(msg);
 }
 
 int main(int argc, char *argv[])
