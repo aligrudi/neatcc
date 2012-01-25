@@ -2,7 +2,7 @@
 #ARCH = -DNEATCC_ARM
 #GEN = arm.o
 
-# for x86_64 build
+# for x86 build
 #ARCH = -DNEATCC_X86
 #GEN = x86.o
 
