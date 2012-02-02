@@ -493,15 +493,14 @@ static void readprimary(void)
 		return;
 	}
 	if (!tok_jmp(TOK_STR)) {
-		struct type t;
+		struct type t = {};	/* char type inside the arrays */
+		struct type a = {};	/* the char array type */
 		char buf[BUFSIZE];
-		int len;
+		int len = tok_str(buf);
 		t.bt = 1 | BT_SIGNED;
-		t.ptr = 1;
-		t.addr = 0;
-		t.flags = 0;
-		ts_push(&t);
-		len = tok_str(buf);
+		a.id = array_add(&t, len);
+		a.flags = T_ARRAY;
+		ts_push(&a);
 		o_sym(tmp_str(buf, len));
 		return;
 	}
@@ -531,7 +530,7 @@ static void readprimary(void)
 			return;
 		}
 		if (tok_see() != '(')
-			err("unkown symbol <%s>\n", name);
+			err("unknown symbol <%s>\n", name);
 		global_add(&unkn);
 		ts_push_bt(LONGSZ);
 		o_sym(unkn.name);
