@@ -591,7 +591,7 @@ int cpp_read(char *s)
 		}
 		if (!jumpstr())
 			continue;
-		if (isalpha(buf[cur]) || buf[cur] == '_') {
+		if (isalnum(buf[cur]) || buf[cur] == '_') {
 			char word[NAMELEN];
 			read_word(word);
 			seen_macro = expandable(word);
