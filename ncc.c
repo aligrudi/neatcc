@@ -3,7 +3,7 @@
  *
  * Copyright (C) 2010-2012 Ali Gholami Rudi
  *
- * This program is released under GNU GPL version 2.
+ * This program is released under the modified BSD license.
  */
 #include <fcntl.h>
 #include <unistd.h>
