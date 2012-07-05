@@ -761,6 +761,10 @@ static void readpre(void)
 		ts_push_bt(4 | BT_SIGNED);
 		return;
 	}
+	if (!tok_jmp('+')) {
+		readpre();
+		return;
+	}
 	if (!tok_jmp('-')) {
 		readpre();
 		ts_de(1);
