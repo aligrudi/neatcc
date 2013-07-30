@@ -1,9 +1,9 @@
 /*
  * neatcc - a small and simple C compiler
  *
- * Copyright (C) 2010-2012 Ali Gholami Rudi
+ * Copyright (C) 2010-2013 Ali Gholami Rudi
  *
- * This program is released under the modified BSD license.
+ * This program is released under the Modified BSD license.
  */
 #include <fcntl.h>
 #include <unistd.h>
