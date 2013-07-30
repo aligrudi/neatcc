@@ -81,7 +81,7 @@ static int esc_char(int *c, char *s)
 			base = 16;
 			i++;
 		}
-		while ((d = strchr(digs, s[i]))) {
+		while ((d = memchr(digs, s[i], base))) {
 			ret *= base;
 			ret += d - digs;
 			i++;
