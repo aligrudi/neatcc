@@ -83,7 +83,7 @@ void o_pass2(void);
  * entry points.  The differences between RISC and CISC architectures,
  * actually the annoying asymmetry in CISC architecture, made this interface
  * a bit more complex than it could have ideally been.  Nevertheless, the
- * benefits of extracting gen.c and the cleaner design, specially with the
+ * benefits of extracting gen.c and the cleaner design, especially with the
  * presence of the optimization patch, is worth the added complexity.
  *
  * I tried to make the interface as small as possible.  I'll describe the
