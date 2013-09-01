@@ -3,6 +3,7 @@
 #include <string.h>
 #include "gen.h"
 #include "out.h"
+#include "reg.h"
 #include "tok.h"
 
 /* variable location */
@@ -24,29 +25,8 @@ static long bsslen;		/* bss segment size */
 static long sp;			/* stack pointer offset from R_RBP */
 static long sp_max;		/* maximum stack pointer offset */
 static long sp_tmp;		/* sp for the first tmp on the stack */
-
-#define TMP(i)		(((i) < ntmp) ? &tmps[ntmp - 1 - (i)] : NULL)
-
-static struct tmp {
-	long addr;
-	char sym[NAMELEN];
-	long off;	/* offset from a symbol or a local */
-	unsigned loc;	/* variable location */
-	unsigned bt;	/* type of address; zero when not a pointer */
-	int id;		/* local variable id */
-} tmps[MAXTMP];
-static int ntmp;
-
-static struct tmp *regs[N_REGS];
-
-#define MAXLOCALS	(1 << 10)
-static struct local {
-	int loc;
-	int sz;
-	int n_addr;		/* # of address accesses */
-	int n_access;		/* # of accesses */
-} locals[MAXLOCALS];
-static int nlocals;
+static int localoff[NLOCALS];	/* the offset of locals on the stack */
+static int nlocals;		/* number of locals */
 
 /* function info */
 static int func_beg;
@@ -62,13 +42,24 @@ static int stat_regs;		/* mask of used registers */
 /* optimization info */
 static int pass2;		/* use the collected statistics in the 1st pass */
 static int tmp_mask;		/* registers that can be used for tmps */
-static int opt_sargs;		/* saved args */
-static int opt_isreg[MAXLOCALS];/* is a register allocated to a local? */
-static int opt_lreg[MAXLOCALS];	/* registers allocated to locals */
-static int opt_lregs;		/* mask of registers allocated to locals */
 
-#define TMP_ISLREG(t)	(!(t)->bt && (t)->loc == LOC_LOCAL && opt_isreg[(t)->id])
-#define TMP_LREG(t)	(opt_lreg[(t)->id])
+/* register allocation for locals */
+#define TMP_ISLREG(t)	(!(t)->bt && (t)->loc == LOC_LOCAL && r_regmap((t)->id) >= 0)
+#define TMP_LREG(t)	(r_regmap((t)->id))
+
+#define TMP(i)		(((i) < ntmp) ? &tmps[ntmp - 1 - (i)] : NULL)
+
+static struct tmp {
+	long addr;
+	char sym[NAMELEN];
+	long off;	/* offset from a symbol or a local */
+	unsigned loc;	/* variable location */
+	unsigned bt;	/* type of address; zero when not a pointer */
+	int id;		/* local variable id */
+} tmps[MAXTMP];
+static int ntmp;
+
+static struct tmp *regs[N_REGS];
 
 /* labels and jmps */
 #define MAXJMPS		(1 << 14)
@@ -82,6 +73,7 @@ static int njmps;
 
 void o_label(int id)
 {
+	r_label(id);
 	if (id > nlabels)
 		nlabels = id + 1;
 	labels[id] = cslen;
@@ -100,6 +92,7 @@ static int jmp_sz(int id)
 
 static void jmp_add(int id, int rn, int z)
 {
+	r_jmp(id);
 	if (njmps >= MAXJMPS)
 		err("nomem: MAXJMPS reached!\n");
 	i_jmp(rn, z, jmp_sz(njmps));
@@ -142,7 +135,7 @@ static long sp_push(int sz)
 static void tmp_mem(struct tmp *tmp)
 {
 	int src = tmp->addr;
-	if (tmp->loc != LOC_REG || (1 << src) & opt_lregs)
+	if (tmp->loc != LOC_REG || (1 << src) & r_lregs())
 		return;
 	if (sp_tmp == -1)
 		sp_tmp = sp;
@@ -190,9 +183,9 @@ static void tmp_reg(struct tmp *tmp, int dst, int deref)
 	}
 	if (tmp->loc == LOC_LOCAL) {
 		if (deref)
-			locals[tmp->id].n_access++;
+			r_read(tmp->id);
 		else
-			locals[tmp->id].n_addr++;
+			r_addr(tmp->id);
 		if (deref)
 			i_load(dst, REG_FP, tmp->addr + tmp->off, bt);
 		else
@@ -281,7 +274,7 @@ static void tmp_push(int reg)
 void o_local(long addr)
 {
 	struct tmp *t = tmp_new();
-	t->addr = locals[addr].loc;
+	t->addr = localoff[addr];
 	t->id = addr;
 	t->loc = LOC_LOCAL;
 	t->bt = 0;
@@ -371,7 +364,7 @@ static int reg_get(int mask)
 static int reg_tmp(struct tmp *t, int mask, int readonly)
 {
 	if (t->loc == LOC_REG && (mask & (1 << t->addr)))
-		if (!(opt_lregs & (1 << t->addr)) || (readonly && !t->bt))
+		if (!(r_lregs() & (1 << t->addr)) || (readonly && !t->bt))
 			return t->addr;
 	return reg_get(mask);
 }
@@ -379,7 +372,7 @@ static int reg_tmp(struct tmp *t, int mask, int readonly)
 static int reg_tmpn(struct tmp *t, int notmask, int readonly)
 {
 	if (t->loc == LOC_REG && !(notmask & (1 << t->addr)))
-		if (!(opt_lregs & (1 << t->addr)) || (readonly && !t->bt))
+		if (!(r_lregs() & (1 << t->addr)) || (readonly && !t->bt))
 			return t->addr;
 	return reg_get(~notmask);
 }
@@ -449,13 +442,14 @@ void o_ret(int rets)
 
 long o_mklocal(int sz)
 {
-	locals[nlocals].loc = sp_push(ALIGN(sz, LONGSZ));
-	locals[nlocals].sz = sz;
+	r_mk(sz);
+	localoff[nlocals] = sp_push(ALIGN(sz, LONGSZ));
 	return nlocals++;
 }
 
 void o_rmlocal(long addr, int sz)
 {
+	r_rm(addr);
 }
 
 long o_arg2loc(int i)
@@ -482,7 +476,7 @@ void o_assign(unsigned bt)
 	if (t2->loc == LOC_LOCAL) {
 		r2 = REG_FP;
 		off = t2->addr + t2->off;
-		locals[t2->id].n_access++;
+		r_read(t2->id);
 	} else {
 		tmp_to(t2, r2);
 	}
@@ -576,7 +570,7 @@ static int c_bop(int op)
 		if (!TMP_NUM(t1))
 			o_tmpswap();
 		if (t2->loc == LOC_LOCAL)
-			locals[t2->id].n_addr++;
+			r_addr(t2->id);
 		t2->off = ret;
 		tmp_drop(1);
 	} else {
@@ -925,25 +919,11 @@ void o_write(int fd)
 	out_write(fd, cs, cslen, ds, dslen);
 }
 
-static void opt_reset(void)
-{
-	int i;
-	memset(opt_isreg, 0, sizeof(opt_isreg));
-	opt_sargs = func_varg ? R_ARGS : 0;
-	for (i = MIN(func_argc, N_ARGS) - 1; i >= 0; --i)
-		opt_sargs |= 1 << argregs[i];
-	tmp_mask = N_TMPS > 6 ? R_TMPS & ~R_SAVED : R_TMPS;
-	opt_lregs = 0;
-	pass1 = 0;
-	pass2 = 0;
-}
-
 static void func_reset(void)
 {
 	int i;
 	int argaddr = 0;
 	memset(regs, 0, sizeof(regs));
-	memset(locals, 0, sizeof(*locals) * nlocals);
 	sp = i_sp();
 	sp_max = sp;
 	ntmp = 0;
@@ -955,10 +935,8 @@ static void func_reset(void)
 	stat_tmps = 0;
 	stat_regs = 1 << REG_RET;
 	for (i = 0; i < func_argc; i++) {
-		locals[nlocals].loc = i_args() + argaddr;
-		locals[nlocals].sz = LONGSZ;
-		nlocals++;
-		if (i >= N_ARGS || opt_sargs & (1 << argregs[i]))
+		localoff[nlocals++] = i_args() + argaddr;
+		if (i >= N_ARGS || r_sargs() & (1 << argregs[i]))
 			argaddr += LONGSZ;
 	}
 }
@@ -968,73 +946,13 @@ void o_func_beg(char *name, int argc, int global, int varg)
 	func_argc = argc;
 	func_varg = varg;
 	func_beg = cslen;
+	pass1 = 0;
+	pass2 = 0;
+	tmp_mask = N_TMPS > 6 ? R_TMPS & ~R_SAVED : R_TMPS;
+	r_func(argc, varg);
 	out_sym(name, (global ? OUT_GLOB : 0) | OUT_CS, cslen, 0);
-	opt_reset();
-	i_prolog(argc, varg, opt_sargs, tmp_mask & R_SAVED, 1, 1);
+	i_prolog(argc, varg, r_sargs(), tmp_mask & R_SAVED, 1, 1);
 	func_reset();
-}
-
-/* sort locals for register allocation based on the number of accesses */
-static int *sortedlocals(void)
-{
-	static int ord[MAXLOCALS];
-	int i, j;
-	for (i = 0; i < nlocals; i++) {
-		for (j = i - 1; j >= 0; j--) {
-			if (locals[i].n_access <= locals[ord[j]].n_access)
-				break;
-			ord[j + 1] = ord[j];
-		}
-		ord[j + 1] = i;
-	}
-	return ord;
-}
-
-/* assign locals to registers */
-static int locals2regs(int leaf)
-{
-	int *ord = sortedlocals();
-	int nlocregs = 0;
-	int idx = 0;
-	int i;
-	/* letting arguments stay in their registers for leaf functions */
-	if (!func_varg && leaf) {
-		for (i = 0; i < MIN(func_argc, N_ARGS); i++) {
-			if (locals[i].sz > LONGSZ || (1 << argregs[i]) & stat_regs)
-				continue;
-			if (locals[i].n_access && !locals[i].n_addr) {
-				opt_isreg[i] = 1;
-				opt_lreg[i] = argregs[i];
-				opt_sargs &= ~(1 << argregs[i]);
-				opt_lregs |= (1 << argregs[i]);
-				nlocregs++;
-			}
-		}
-	}
-	/* try finding a register for each local */
-	for (i = 0; i < nlocals; i++) {
-		int l = ord[i];
-		int nmask = (leaf ? 0 : ~R_SAVED) | stat_regs | opt_lregs;
-		if (opt_isreg[l] || (func_varg && l < func_argc))
-			continue;
-		/* find a free register */
-		while (idx < N_TMPS && ((1 << tmpregs[idx]) & nmask))
-			idx++;
-		if (idx >= N_TMPS)
-			break;
-		if (locals[l].sz > LONGSZ || locals[l].n_addr)
-			continue;
-		if (locals[l].n_access > (leaf ? 0 : 1)) {
-			opt_isreg[l] = 1;
-			opt_lreg[l] = tmpregs[idx];
-			opt_lregs |= 1 << tmpregs[idx];
-			if (l < MIN(N_ARGS, func_argc))
-				opt_sargs &= ~(1 << argregs[l]);
-			nlocregs++;
-			idx++;
-		}
-	}
-	return nlocregs;
 }
 
 void o_pass1(void)
@@ -1051,25 +969,21 @@ void o_pass2(void)
 	jmp_fill();
 	leaf = !stat_calls;
 	cslen = func_beg;
-	locregs = locals2regs(leaf);
+	locregs = r_alloc(leaf, stat_regs);
 	subsp = nlocals > locregs || !leaf;
 	initfp = subsp || stat_tmps || func_argc > N_ARGS;
-	sregs = (opt_lregs | stat_regs) & R_SAVED;
+	sregs = (r_lregs() | stat_regs) & R_SAVED;
 	tmp_mask = stat_regs;
 	pass1 = 0;
 	pass2 = 1;
-	if (!func_varg)
-		for (i = 0; i < func_argc; i++)
-			if (i < N_ARGS && (locals[i].n_access + locals[i].n_addr) == 0)
-				opt_sargs &= ~(1 << argregs[i]);
-	i_prolog(func_argc, func_varg, opt_sargs, sregs, initfp, subsp);
+	i_prolog(func_argc, func_varg, r_sargs(), sregs, initfp, subsp);
 	func_reset();
 	for (i = 0; i < MIN(func_argc, N_ARGS); i++)
-		if (opt_isreg[i] && opt_lreg[i] != argregs[i])
-			i_mov(opt_lreg[i], argregs[i]);
+		if (r_regmap(i) >= 0 && r_regmap(i) != argregs[i])
+			i_mov(r_regmap(i), argregs[i]);
 	for (i = N_ARGS; i < func_argc; i++)
-		if (opt_isreg[i])
-			i_load(opt_lreg[i], REG_FP, locals[i].loc, LONGSZ);
+		if (r_regmap(i) >= 0)
+			i_load(r_regmap(i), REG_FP, localoff[i], LONGSZ);
 }
 
 void o_func_end(void)
