@@ -80,11 +80,9 @@ void i_done(void)
 static long last_cmp = -1;
 static long last_set = -1;
 
-#define MAXNUMS		1024
-
 /* data pool */
-static long num_offs[MAXNUMS];			/* data immediate value */
-static char num_names[MAXNUMS][NAMELEN];	/* relocation data symbol name */
+static long num_offs[NNUMS];		/* data immediate value */
+static char num_names[NNUMS][NAMELEN];	/* relocation data symbol name */
 static int nums;
 
 static int pool_find(char *name, int off)

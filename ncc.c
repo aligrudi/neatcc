@@ -1,5 +1,5 @@
 /*
- * neatcc - a small and simple C compiler
+ * neatcc - the neatcc compiler
  *
  * Copyright (C) 2010-2013 Ali Gholami Rudi
  *
@@ -14,11 +14,11 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include "gen.h"
-#include "tok.h"
+#include "ncc.h"
 #include "out.h"
+#include "tok.h"
 
-static int nogen;		/* don't generate code */
-/* nogen macros */
+static int nogen;		/* do not generate code, if set */
 #define o_bop(op)		{if (!nogen) o_bop(op);}
 #define o_uop(op)		{if (!nogen) o_uop(op);}
 #define o_cast(bt)		{if (!nogen) o_cast(bt);}
@@ -43,10 +43,6 @@ static int nogen;		/* don't generate code */
 #define o_fork()		{if (!nogen) o_fork();}
 #define o_forkpush()		{if (!nogen) o_forkpush();}
 #define o_forkjoin()		{if (!nogen) o_forkjoin();}
-
-#define MAXLOCALS	(1 << 10)
-#define MAXGLOBALS	(1 << 10)
-#define MAXARGS		(1 << 5)
 
 #define ALIGN(x, a)		(((x) + (a) - 1) & ~((a) - 1))
 #define MIN(a, b)		((a) < (b) ? (a) : (b))
@@ -73,7 +69,7 @@ struct type {
 };
 
 /* type stack */
-static struct type ts[MAXTMP];
+static struct type ts[NTMPS];
 static int nts;
 
 static void ts_push_bt(unsigned bt)
@@ -115,20 +111,20 @@ void err(char *fmt, ...)
 
 struct name {
 	char name[NAMELEN];
-	char elfname[NAMELEN];	/* local elf name for static variables in function */
+	char elfname[NAMELEN];	/* local elf name for function static variables */
 	struct type type;
-	long addr;	/* local stack offset, global data addr, struct offset */
+	long addr;		/* local stack offset, global data addr, struct offset */
 };
 
-static struct name locals[MAXLOCALS];
+static struct name locals[NLOCALS];
 static int nlocals;
-static struct name globals[MAXGLOBALS];
+static struct name globals[NGLOBALS];
 static int nglobals;
 
 static void local_add(struct name *name)
 {
-	if (nlocals >= MAXLOCALS)
-		err("nomem: MAXLOCALS reached!\n");
+	if (nlocals >= NLOCALS)
+		err("nomem: NLOCALS reached!\n");
 	memcpy(&locals[nlocals++], name, sizeof(*name));
 }
 
@@ -152,8 +148,8 @@ static int global_find(char *name)
 
 static void global_add(struct name *name)
 {
-	if (nglobals >= MAXGLOBALS)
-		err("nomem: MAXGLOBALS reached!\n");
+	if (nglobals >= NGLOBALS)
+		err("nomem: NGLOBALS reached!\n");
 	memcpy(&globals[nglobals++], name, sizeof(*name));
 }
 
@@ -163,19 +159,17 @@ static int label;		/* last used label id */
 static int l_break;		/* current break label */
 static int l_cont;		/* current continue label */
 
-#define MAXENUMS		(1 << 10)
-
 static struct enumval {
 	char name[NAMELEN];
 	int n;
-} enums[MAXENUMS];
+} enums[NENUMS];
 static int nenums;
 
 static void enum_add(char *name, int val)
 {
 	struct enumval *ev = &enums[nenums++];
-	if (nenums >= MAXENUMS)
-		err("nomem: MAXENUMS reached!\n");
+	if (nenums >= NENUMS)
+		err("nomem: NENUMS reached!\n");
 	strcpy(ev->name, name);
 	ev->n = val;
 }
@@ -191,19 +185,17 @@ static int enum_find(int *val, char *name)
 	return 1;
 }
 
-#define MAXTYPEDEFS		(1 << 10)
-
 static struct typdefinfo {
 	char name[NAMELEN];
 	struct type type;
-} typedefs[MAXTYPEDEFS];
+} typedefs[NTYPEDEFS];
 static int ntypedefs;
 
 static void typedef_add(char *name, struct type *type)
 {
 	struct typdefinfo *ti = &typedefs[ntypedefs++];
-	if (ntypedefs >= MAXTYPEDEFS)
-		err("nomem: MAXTYPEDEFS reached!\n");
+	if (ntypedefs >= NTYPEDEFS)
+		err("nomem: NTYPEDEFS reached!\n");
 	strcpy(ti->name, name);
 	memcpy(&ti->type, type, sizeof(*type));
 }
@@ -217,19 +209,17 @@ static int typedef_find(char *name)
 	return -1;
 }
 
-#define MAXARRAYS		(1 << 10)
-
 static struct array {
 	struct type type;
 	int n;
-} arrays[MAXARRAYS];
+} arrays[NARRAYS];
 static int narrays;
 
 static int array_add(struct type *type, int n)
 {
 	struct array *a = &arrays[narrays++];
-	if (narrays >= MAXARRAYS)
-		err("nomem: MAXARRAYS reached!\n");
+	if (narrays >= NARRAYS)
+		err("nomem: NARRAYS reached!\n");
 	memcpy(&a->type, type, sizeof(*type));
 	a->n = n;
 	return a - arrays;
@@ -243,16 +233,13 @@ static void array2ptr(struct type *t)
 	}
 }
 
-#define MAXSTRUCTS		(1 << 10)
-#define MAXFIELDS		(1 << 7)
-
 static struct structinfo {
 	char name[NAMELEN];
-	struct name fields[MAXFIELDS];
+	struct name fields[NFIELDS];
 	int nfields;
 	int isunion;
 	int size;
-} structs[MAXSTRUCTS];
+} structs[NSTRUCTS];
 static int nstructs;
 
 static int struct_find(char *name, int isunion)
@@ -263,8 +250,8 @@ static int struct_find(char *name, int isunion)
 				structs[i].isunion == isunion)
 			return i;
 	i = nstructs++;
-	if (nstructs >= MAXSTRUCTS)
-		err("nomem: MAXTYPES reached!\n");
+	if (nstructs >= NSTRUCTS)
+		err("nomem: NSTRUCTS reached!\n");
 	memset(&structs[i], 0, sizeof(structs[i]));
 	strcpy(structs[i].name, name);
 	structs[i].isunion = isunion;
@@ -495,7 +482,7 @@ static void readprimary(void)
 	if (!tok_jmp(TOK_STR)) {
 		struct type t = {};	/* char type inside the arrays */
 		struct type a = {};	/* the char array type */
-		char buf[BUFSIZE];
+		char buf[STRLEN];
 		int len = tok_str(buf);
 		t.bt = 1 | BT_SIGNED;
 		a.id = array_add(&t, len);
@@ -618,17 +605,15 @@ static void readfield(void)
 	ts_push_addr(&field->type);
 }
 
-#define MAXFUNCS		(1 << 10)
-
 static struct funcinfo {
-	struct type args[MAXARGS];
+	struct type args[NARGS];
 	struct type ret;
 	int nargs;
 	int varg;
 	/* function and argument names; useful only when defining */
-	char argnames[MAXARGS][NAMELEN];
+	char argnames[NARGS][NAMELEN];
 	char name[NAMELEN];
-} funcs[MAXFUNCS];
+} funcs[NFUNCS];
 static int nfuncs;
 
 static int func_create(struct type *ret, char *name, char argnames[][NAMELEN],
@@ -636,8 +621,8 @@ static int func_create(struct type *ret, char *name, char argnames[][NAMELEN],
 {
 	struct funcinfo *fi = &funcs[nfuncs++];
 	int i;
-	if (nfuncs >= MAXFUNCS)
-		err("nomem: MAXFUNCS reached!\n");
+	if (nfuncs >= NFUNCS)
+		err("nomem: NFUNCS reached!\n");
 	memcpy(&fi->ret, ret, sizeof(*ret));
 	for (i = 0; i < nargs; i++)
 		memcpy(&fi->args[i], &args[i], sizeof(*ret));
@@ -958,8 +943,6 @@ static void readbitor(void)
 	}
 }
 
-#define MAXCOND			(1 << 7)
-
 static void readand(void)
 {
 	int l_out = LABEL();
@@ -1168,7 +1151,7 @@ static void globalinit(void *obj, int off, struct type *t)
 	if (t->flags & T_ARRAY && tok_see() == TOK_STR) {
 		struct type *t_de = &arrays[t->id].type;
 		if (!t_de->ptr && !t_de->flags && TYPE_SZ(t_de) == 1) {
-			char buf[BUFSIZE];
+			char buf[STRLEN];
 			int len;
 			tok_expect(TOK_STR);
 			len = tok_str(buf);
@@ -1221,7 +1204,7 @@ static void localinit(void *obj, int off, struct type *t)
 	if (t->flags & T_ARRAY && tok_see() == TOK_STR) {
 		struct type *t_de = &arrays[t->id].type;
 		if (!t_de->ptr && !t_de->flags && TYPE_SZ(t_de) == 1) {
-			char buf[BUFSIZE];
+			char buf[STRLEN];
 			int len;
 			tok_expect(TOK_STR);
 			len = tok_str(buf);
@@ -1278,8 +1261,6 @@ static void typedefdef(void *data, struct name *name, unsigned flags)
 }
 
 static void readstmt(void);
-
-#define MAXCASES		(1 << 7)
 
 static void readswitch(void)
 {
@@ -1340,10 +1321,8 @@ static void readswitch(void)
 	l_break = o_break;
 }
 
-#define MAXLABELS		(1 << 10)
-
-static char label_name[MAXLABELS][NAMELEN];
-static int label_ids[MAXLABELS];
+static char label_name[NLABELS][NAMELEN];
+static int label_ids[NLABELS];
 static int nlabels;
 
 static int label_id(char *name)
@@ -1835,8 +1814,8 @@ static int readname(struct type *main, char *name, struct type *base)
 	if (ptype)
 		tok_expect(')');
 	if (tok_see() == '(') {
-		struct type args[MAXARGS];
-		char argnames[MAXARGS][NAMELEN];
+		struct type args[NARGS];
+		char argnames[NARGS][NAMELEN];
 		int varg = 0;
 		int nargs = readargs(args, argnames, &varg);
 		if (!ptype) {

@@ -3,9 +3,10 @@
 #include <stdlib.h>
 #include <string.h>
 #include "gen.h"
+#include "ncc.h"
 #include "tok.h"
 
-static char buf[BUFSIZE];
+static char buf[BUFLEN];
 static int len;
 static int cur;
 static char name[NAMELEN];
@@ -52,7 +53,7 @@ static char *tok3[] = {
 static int get_tok3(int num)
 {
 	int i;
-	for (i = 0; i < ARRAY_SIZE(tok3); i++)
+	for (i = 0; i < LEN(tok3); i++)
 		if (num == TOK3(tok3[i]))
 			return num;
 	return 0;
@@ -143,7 +144,7 @@ static void readnum(void)
 	num = -1;
 }
 
-static char str[BUFSIZE];
+static char str[STRLEN];
 static int str_len;
 
 int tok_str(char *buf)
@@ -247,7 +248,7 @@ int tok_get(void)
 		while (cur < len && id_char(buf[cur]))
 			*s++ = buf[cur++];
 		*s = '\0';
-		for (i = 0; i < ARRAY_SIZE(kwds); i++)
+		for (i = 0; i < LEN(kwds); i++)
 			if (!strcmp(kwds[i].name, name))
 				return kwds[i].id;
 		return TOK_NAME;

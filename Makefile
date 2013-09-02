@@ -15,9 +15,9 @@ CFLAGS = -Wall -O2 $(ARCH)
 LDFLAGS =
 
 all: ncc npp
-.c.o:
+%.o: %.c ncc.h
 	$(CC) -c $(CFLAGS) $<
-ncc: ncc.o tok.o $(GEN) out.o cpp.o tab.o gen.o reg.o
+ncc: ncc.o tok.o out.o cpp.o tab.o gen.o reg.o $(GEN)
 	$(CC) -o $@ $^ $(LDFLAGS)
 npp: npp.o cpp.o tab.o
 	$(CC) -o $@ $^ $(LDFLAGS)

@@ -1,13 +1,12 @@
 #include <elf.h>
 #include <string.h>
 #include <unistd.h>
-#include "out.h"
 #include "gen.h"
+#include "ncc.h"
+#include "out.h"
 
 #define ALIGN(x, a)		(((x) + (a) - 1) & ~((a) - 1))
 
-#define MAXSYMS			(1 << 12)
-#define MAXREL			(1 << 12)
 #define SEC_TEXT		1
 #define SEC_REL			2
 #define SEC_SYMS		3
@@ -44,14 +43,14 @@
 
 static Elf_Ehdr ehdr;
 static Elf_Shdr shdr[NSECS];
-static Elf_Sym syms[MAXSYMS];
+static Elf_Sym syms[NSYMS];
 static int nsyms = 1;
-static char symstr[MAXSYMS * 8];
+static char symstr[NSYMS * 8];
 static int nsymstr = 1;
 
-static Elf_Rel dsrels[MAXREL];
+static Elf_Rel dsrels[NREL];
 static int ndsrels;
-static Elf_Rel rels[MAXREL];
+static Elf_Rel rels[NREL];
 static int nrels;
 
 static int rel_type(int flags);
@@ -100,7 +99,7 @@ static void mvrela(int *mv, Elf_Rel *rels, int nrels)
 
 static int syms_sort(void)
 {
-	int mv[MAXSYMS];
+	int mv[NSYMS];
 	int i, j;
 	int glob_beg = 1;
 	for (i = 0; i < nsyms; i++)

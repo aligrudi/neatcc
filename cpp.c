@@ -8,30 +8,25 @@
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/stat.h>
-#include "tok.h"
+#include "ncc.h"
 #include "tab.h"
+#include "tok.h"
 
 static char *buf;
 static int len;
 static int cur;
 
-#define MAXDEFS			(1 << 12)
-#define MACROLEN		(1 << 10)
-#define MAXARGS			(1 << 5)
-#define NBUCKET			(MAXDEFS << 1)
-
 static struct macro {
 	char name[NAMELEN];
 	char def[MACROLEN];
-	char args[MAXARGS][NAMELEN];
+	char args[NARGS][NAMELEN];
 	int nargs;
 	int isfunc;
-} macros[MAXDEFS];
+} macros[NDEFS];
 static int nmacros;
 /* macro hash table */
 static struct tab mtab;
 
-#define MAXBUFS			(1 << 5)
 #define BUF_FILE		0
 #define BUF_MACRO		1
 #define BUF_ARG			2
@@ -47,10 +42,10 @@ static struct buf {
 	char path[NAMELEN];
 	/* for BUF_MACRO */
 	struct macro *macro;
-	char args[MAXARGS][MACROLEN];	/* arguments passed to a macro */
+	char args[NARGS][MACROLEN];	/* arguments passed to a macro */
 	/* for BUF_ARG */
 	int arg_buf;			/* the bufs index of the owning macro */
-} bufs[MAXBUFS];
+} bufs[NBUFS];
 static int nbufs;
 static int bufs_limit = 1;		/* cpp_read() limit; useful in cpp_eval() */
 
@@ -72,8 +67,8 @@ static void buf_new(int type, char *dat, int dlen)
 		bufs[nbufs - 1].cur = cur;
 		bufs[nbufs - 1].len = len;
 	}
-	if (nbufs >= MAXBUFS)
-		die("nomem: MAXBUFS reached!\n");
+	if (nbufs >= NBUFS)
+		die("nomem: NBUFS reached!\n");
 	nbufs++;
 	cur = 0;
 	buf = dat;
@@ -233,9 +228,7 @@ static char *putstr(char *d, char *s)
 	return d;
 }
 
-#define MAXLOCS			(1 << 10)
-
-static char *locs[MAXLOCS] = {};
+static char *locs[NLOCS] = {};
 static int nlocs = 0;
 
 void cpp_addpath(char *s)
@@ -307,8 +300,8 @@ static int macro_new(char *name)
 	int i = macro_find(name);
 	if (i >= 0)
 		return i;
-	if (nmacros >= MAXDEFS)
-		die("nomem: MAXDEFS reached!\n");
+	if (nmacros >= NDEFS)
+		die("nomem: NDEFS reached!\n");
 	i = nmacros++;
 	strcpy(macros[i].name, name);
 	tab_add(&mtab, macros[i].name);
@@ -342,7 +335,7 @@ static void macro_define(void)
 
 int cpp_read(char *buf);
 
-static char ebuf[BUFSIZE];
+static char ebuf[BUFLEN];
 static int elen;
 static int ecur;
 
@@ -350,7 +343,7 @@ static long evalexpr(void);
 
 static int cpp_eval(void)
 {
-	char evalbuf[BUFSIZE];
+	char evalbuf[BUFLEN];
 	int old_limit;
 	int ret, nr;
 	read_tilleol(evalbuf);
@@ -668,7 +661,7 @@ static int eval_tok(void)
 		*s = '\0';
 		return TOK_NUM;
 	}
-	for (i = 0; i < ARRAY_SIZE(tok2); i++)
+	for (i = 0; i < LEN(tok2); i++)
 		if (TOK2(tok2[i]) == TOK2(ebuf + ecur)) {
 			int ret = TOK2(tok2[i]);
 			ecur += 2;

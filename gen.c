@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "gen.h"
+#include "ncc.h"
 #include "out.h"
 #include "reg.h"
 #include "tok.h"
@@ -16,9 +17,9 @@
 #define MIN(a, b)		((a) < (b) ? (a) : (b))
 #define ALIGN(x, a)		(((x) + (a) - 1) & ~((a) - 1))
 
-char cs[SECSIZE];		/* code segment */
+char cs[SECLEN];		/* code segment */
 int cslen;
-static char ds[SECSIZE];	/* data segment */
+static char ds[SECLEN];		/* data segment */
 static int dslen;
 static long bsslen;		/* bss segment size */
 
@@ -56,19 +57,17 @@ static struct tmp {
 	unsigned loc;	/* variable location */
 	unsigned bt;	/* type of address; zero when not a pointer */
 	int id;		/* local variable id */
-} tmps[MAXTMP];
+} tmps[NTMPS];
 static int ntmp;
 
 static struct tmp *regs[N_REGS];
 
 /* labels and jmps */
-#define MAXJMPS		(1 << 14)
-
-static long labels[MAXJMPS];
+static long labels[NJMPS];
 static int nlabels;
-static long jmp_loc[MAXJMPS];
-static int jmp_goal[MAXJMPS];
-static int jmp_len[MAXJMPS];
+static long jmp_loc[NJMPS];
+static int jmp_goal[NJMPS];
+static int jmp_len[NJMPS];
 static int njmps;
 
 void o_label(int id)
@@ -93,8 +92,8 @@ static int jmp_sz(int id)
 static void jmp_add(int id, int rn, int z)
 {
 	r_jmp(id);
-	if (njmps >= MAXJMPS)
-		err("nomem: MAXJMPS reached!\n");
+	if (njmps >= NJMPS)
+		err("nomem: NJMPS reached!\n");
 	i_jmp(rn, z, jmp_sz(njmps));
 	jmp_loc[njmps] = cslen;
 	jmp_goal[njmps] = id;
@@ -864,9 +863,8 @@ void o_mkbss(char *name, int size, int global)
 	bsslen += ALIGN(size, OUT_ALIGNMENT);
 }
 
-#define MAXDATS		(1 << 10)
-static char dat_names[MAXDATS][NAMELEN];
-static int dat_offs[MAXDATS];
+static char dat_names[NDATS][NAMELEN];
+static int dat_offs[NDATS];
 static int ndats;
 
 void *o_mkdat(char *name, int size, int global)
@@ -876,8 +874,8 @@ void *o_mkdat(char *name, int size, int global)
 	if (pass1)
 		return addr;
 	idx = ndats++;
-	if (idx >= MAXDATS)
-		err("nomem: MAXDATS reached!\n");
+	if (idx >= NDATS)
+		err("nomem: NDATS reached!\n");
 	strcpy(dat_names[idx], name);
 	dat_offs[idx] = dslen;
 	out_sym(name, OUT_DS | (global ? OUT_GLOB : 0), dslen, size);

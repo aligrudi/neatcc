@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "gen.h"
+#include "ncc.h"
 #include "reg.h"
 
 static int l_sz[NLOCALS];	/* size of locals */

@@ -1,7 +1,3 @@
-#define SECSIZE		(1 << 18)
-#define MAXTMP		(1 << 12)
-#define NLOCALS		(1 << 10)
-
 /* basic types */
 #define BT_SZMASK	0x00ff
 #define BT_SIGNED	0x0100
