@@ -59,9 +59,10 @@ void o_fork(void);
 void o_forkpush(void);
 void o_forkjoin(void);
 /* data/bss sections */
-void o_mkbss(char *name, int size, int global);
-void *o_mkdat(char *name, int size, int global);
-void o_datset(char *name, int off, unsigned bt);
+long o_dsnew(char *name, int size, int global);
+void o_dscpy(long addr, void *buf, int len);
+void o_dsset(char *name, int off, unsigned bt);
+void o_bsnew(char *name, int size, int global);
 /* functions */
 void o_func_beg(char *name, int argc, int global, int vararg);
 void o_func_end(void);

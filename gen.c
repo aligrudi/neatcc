@@ -855,7 +855,7 @@ void o_call(int argc, int rets)
 	stat_calls++;
 }
 
-void o_mkbss(char *name, int size, int global)
+void o_bsnew(char *name, int size, int global)
 {
 	if (pass1)
 		return;
@@ -867,12 +867,11 @@ static char dat_names[NDATS][NAMELEN];
 static int dat_offs[NDATS];
 static int ndats;
 
-void *o_mkdat(char *name, int size, int global)
+long o_dsnew(char *name, int size, int global)
 {
-	void *addr = ds + dslen;
 	int idx;
 	if (pass1)
-		return addr;
+		return dslen;
 	idx = ndats++;
 	if (idx >= NDATS)
 		err("nomem: NDATS reached!\n");
@@ -880,7 +879,12 @@ void *o_mkdat(char *name, int size, int global)
 	dat_offs[idx] = dslen;
 	out_sym(name, OUT_DS | (global ? OUT_GLOB : 0), dslen, size);
 	dslen += ALIGN(size, OUT_ALIGNMENT);
-	return addr;
+	return dat_offs[idx];
+}
+
+void o_dscpy(long addr, void *buf, int len)
+{
+	memcpy(ds + addr, buf, len);
 }
 
 static int dat_off(char *name)
@@ -892,7 +896,7 @@ static int dat_off(char *name)
 	return 0;
 }
 
-void o_datset(char *name, int off, unsigned bt)
+void o_dsset(char *name, int off, unsigned bt)
 {
 	struct tmp *t = TMP(0);
 	int sym_off = dat_off(name) + off;

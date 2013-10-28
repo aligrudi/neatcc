@@ -463,10 +463,8 @@ static char *tmp_str(char *buf, int len)
 {
 	static char name[NAMELEN];
 	static int id;
-	void *dat;
 	sprintf(name, "__neatcc.s%d", id++);
-	dat = o_mkdat(name, len, 0);
-	memcpy(dat, buf, len);
+	o_dscpy(o_dsnew(name, len, 0), buf, len);
 	return name;
 }
 
@@ -1155,12 +1153,12 @@ static void globalinit(void *obj, int off, struct type *t)
 			int len;
 			tok_expect(TOK_STR);
 			len = tok_str(buf);
-			memcpy((void *) name->addr + off, buf, len);
+			o_dscpy(name->addr + off, buf, len);
 			return;
 		}
 	}
 	readexpr();
-	o_datset(elfname, off, TYPE_BT(t));
+	o_dsset(elfname, off, TYPE_BT(t));
 	ts_pop(NULL);
 }
 
@@ -1177,9 +1175,9 @@ static void globaldef(void *data, struct name *name, unsigned flags)
 	sz = type_totsz(t);
 	if (!(flags & F_EXTERN) && (!(t->flags & T_FUNC) || t->ptr)) {
 		if (tok_see() == '=')
-			name->addr = (long) o_mkdat(elfname, sz, F_GLOBAL(flags));
+			name->addr = o_dsnew(elfname, sz, F_GLOBAL(flags));
 		else
-			o_mkbss(elfname, sz, F_GLOBAL(flags));
+			o_bsnew(elfname, sz, F_GLOBAL(flags));
 	}
 	global_add(name);
 	if (!tok_jmp('='))
