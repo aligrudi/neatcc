@@ -17,9 +17,9 @@ LDFLAGS =
 all: ncc npp
 %.o: %.c ncc.h
 	$(CC) -c $(CFLAGS) $<
-ncc: ncc.o tok.o out.o cpp.o tab.o gen.o reg.o mem.o $(GEN)
+ncc: ncc.o tok.o out.o cpp.o gen.o reg.o mem.o $(GEN)
 	$(CC) -o $@ $^ $(LDFLAGS)
-npp: npp.o cpp.o tab.o
+npp: npp.o cpp.o
 	$(CC) -o $@ $^ $(LDFLAGS)
 
 clean:

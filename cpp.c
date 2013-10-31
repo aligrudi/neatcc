@@ -10,7 +10,6 @@
 #include <sys/stat.h>
 #include "mem.h"
 #include "ncc.h"
-#include "tab.h"
 #include "tok.h"
 
 static char *buf;
@@ -18,15 +17,16 @@ static int len;
 static int cur;
 
 static struct macro {
-	char name[NAMELEN];
-	char def[MDEFLEN];
+	char name[NAMELEN];	/* macro name */
+	char def[MDEFLEN];	/* macro definition */
 	char args[NARGS][NAMELEN];
-	int nargs;
-	int isfunc;
+	int nargs;		/* number of arguments */
+	int isfunc;		/* macro is a function */
+	int undef;		/* macro is removed */
 } macros[NDEFS];
-static int nmacros;
-/* macro hash table */
-static struct tab mtab;
+static int mcount = 1;		/* number of macros */
+static int mhead[256];		/* macro hash table heads */
+static int mnext[NDEFS];	/* macro hash table next entries */
 
 #define BUF_FILE		0
 #define BUF_MACRO		1
@@ -270,31 +270,37 @@ static void readarg(char *s)
 	}
 }
 
-static int macro_find(char *name)
+/* find a macro; if undef is nonzero, search #undef-ed macros too */
+static int macro_find(char *name, int undef)
 {
-	char *n = tab_get(&mtab, name);
-	if (!n)
-		return -1;
-	return container(n, struct macro, name) - macros;
+	int i = mhead[(unsigned char) name[0]];
+	while (i > 0) {
+		if (!strcmp(name, macros[i].name))
+			if (!macros[i].undef || undef)
+				return i;
+		i = mnext[i];
+	}
+	return -1;
 }
 
 static void macro_undef(char *name)
 {
-	int i = macro_find(name);
+	int i = macro_find(name, 0);
 	if (i >= 0)
-		tab_del(&mtab, macros[i].name);
+		macros[i].undef = 1;
 }
 
 static int macro_new(char *name)
 {
-	int i = macro_find(name);
+	int i = macro_find(name, 1);
 	if (i >= 0)
 		return i;
-	if (nmacros >= NDEFS)
+	if (mcount >= NDEFS)
 		die("nomem: NDEFS reached!\n");
-	i = nmacros++;
+	i = mcount++;
 	strcpy(macros[i].name, name);
-	tab_add(&mtab, macros[i].name);
+	mnext[i] = mhead[(unsigned char) name[0]];
+	mhead[(unsigned char) name[0]] = i;
 	return i;
 }
 
@@ -406,8 +412,8 @@ static int cpp_cmd(void)
 		if (cmd[2]) {
 			int not = cmd[2] == 'n';
 			read_word(name);
-			matched = not ? macro_find(name) < 0 :
-					macro_find(name) >= 0;
+			matched = not ? macro_find(name, 0) < 0 :
+					macro_find(name, 0) >= 0;
 		} else {
 			matched = cpp_eval();
 		}
@@ -470,7 +476,7 @@ static void macro_expand(char *name)
 		buf_arg(dat, mbuf);
 		return;
 	}
-	m = &macros[macro_find(name)];
+	m = &macros[macro_find(name, 0)];
 	if (!m->isfunc) {
 		buf_macro(m);
 		return;
@@ -517,7 +523,7 @@ static int expandable(char *word)
 		return 1;
 	if (buf_expanding(word))
 		return 0;
-	i = macro_find(word);
+	i = macro_find(word, 0);
 	return i >= 0 ? macros[i].isfunc + 1 : 0;
 }
 
@@ -711,7 +717,7 @@ static long evalatom(void)
 		int parens = !eval_jmp('(');
 		long ret;
 		eval_expect(TOK_NAME);
-		ret = macro_find(eval_id()) >= 0;
+		ret = macro_find(eval_id(), 0) >= 0;
 		if (parens)
 			eval_expect(')');
 		return ret;
