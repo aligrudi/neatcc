@@ -480,8 +480,9 @@ static void readprimary(void)
 	if (!tok_jmp(TOK_STR)) {
 		struct type t = {};	/* char type inside the arrays */
 		struct type a = {};	/* the char array type */
-		char buf[STRLEN];
-		int len = tok_str(buf);
+		char *buf;
+		int len;
+		tok_str(&buf, &len);
 		t.bt = 1 | BT_SIGNED;
 		a.id = array_add(&t, len);
 		a.flags = T_ARRAY;
@@ -1149,10 +1150,10 @@ static void globalinit(void *obj, int off, struct type *t)
 	if (t->flags & T_ARRAY && tok_see() == TOK_STR) {
 		struct type *t_de = &arrays[t->id].type;
 		if (!t_de->ptr && !t_de->flags && TYPE_SZ(t_de) == 1) {
-			char buf[STRLEN];
+			char *buf;
 			int len;
 			tok_expect(TOK_STR);
-			len = tok_str(buf);
+			tok_str(&buf, &len);
 			o_dscpy(name->addr + off, buf, len);
 			return;
 		}
@@ -1202,10 +1203,10 @@ static void localinit(void *obj, int off, struct type *t)
 	if (t->flags & T_ARRAY && tok_see() == TOK_STR) {
 		struct type *t_de = &arrays[t->id].type;
 		if (!t_de->ptr && !t_de->flags && TYPE_SZ(t_de) == 1) {
-			char buf[STRLEN];
+			char *buf;
 			int len;
 			tok_expect(TOK_STR);
-			len = tok_str(buf);
+			tok_str(&buf, &len);
 			o_localoff(addr, off);
 			o_sym(tmp_str(buf, len));
 			o_num(len);
@@ -1910,7 +1911,7 @@ static int initsize(void)
 	if (tok_jmp('='))
 		return 0;
 	if (!tok_jmp(TOK_STR)) {
-		n = tok_str(NULL);
+		tok_str(NULL, &n);
 		tok_jump(addr);
 		return n;
 	}

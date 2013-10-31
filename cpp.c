@@ -8,6 +8,7 @@
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include "mem.h"
 #include "ncc.h"
 #include "tab.h"
 #include "tok.h"
@@ -18,7 +19,7 @@ static int cur;
 
 static struct macro {
 	char name[NAMELEN];
-	char def[MACROLEN];
+	char def[MDEFLEN];
 	char args[NARGS][NAMELEN];
 	int nargs;
 	int isfunc;
@@ -42,7 +43,7 @@ static struct buf {
 	char path[NAMELEN];
 	/* for BUF_MACRO */
 	struct macro *macro;
-	char args[NARGS][MACROLEN];	/* arguments passed to a macro */
+	char args[NARGS][MARGLEN];	/* arguments passed to a macro */
 	/* for BUF_ARG */
 	int arg_buf;			/* the bufs index of the owning macro */
 } bufs[NBUFS];
@@ -220,14 +221,6 @@ static void read_tilleol(char *dst)
 	*dst = '\0';
 }
 
-static char *putstr(char *d, char *s)
-{
-	while (*s)
-		*d++ = *s++;
-	*d = '\0';
-	return d;
-}
-
 static char *locs[NLOCS] = {};
 static int nlocs = 0;
 
@@ -241,13 +234,10 @@ static int include_find(char *name, int std)
 	int i;
 	for (i = std ? nlocs - 1 : nlocs; i >= 0; i--) {
 		char path[1 << 10];
-		char *s;
-		s = path;
-		if (locs[i]) {
-			s = putstr(s, locs[i]);
-			*s++ = '/';
-		}
-		s = putstr(s, name);
+		if (locs[i])
+			sprintf(path, "%s/%s", locs[i], name);
+		else
+			strcpy(path, name);
 		if (!include_file(path))
 			return 0;
 	}
@@ -333,9 +323,7 @@ static void macro_define(void)
 	read_tilleol(d->def);
 }
 
-int cpp_read(char *buf);
-
-static char ebuf[BUFLEN];
+static char ebuf[MARGLEN];
 static int elen;
 static int ecur;
 
@@ -343,17 +331,20 @@ static long evalexpr(void);
 
 static int cpp_eval(void)
 {
-	char evalbuf[BUFLEN];
+	char evalbuf[MARGLEN];
 	int old_limit;
-	int ret, nr;
+	int ret, clen;
+	char *cbuf;
 	read_tilleol(evalbuf);
 	buf_new(BUF_EVAL, evalbuf, strlen(evalbuf));
 	elen = 0;
 	ecur = 0;
 	old_limit = bufs_limit;
 	bufs_limit = nbufs;
-	while ((nr = cpp_read(ebuf + elen)) >= 0)
-		elen += nr;
+	while (!cpp_read(&cbuf, &clen)) {
+		memcpy(ebuf + elen, cbuf, clen);
+		elen += clen;
+	}
 	bufs_limit = old_limit;
 	ret = evalexpr();
 	buf_pop();
@@ -532,12 +523,9 @@ static int expandable(char *word)
 
 void cpp_define(char *name, char *def)
 {
-	char tmp_buf[MACROLEN];
-	char *s = tmp_buf;
-	s = putstr(s, name);
-	*s++ = '\t';
-	s = putstr(s, def);
-	buf_new(BUF_TEMP, tmp_buf, s - tmp_buf);
+	char tmp_buf[MDEFLEN];
+	sprintf(tmp_buf, "%s\t%s", name, def);
+	buf_new(BUF_TEMP, tmp_buf, strlen(tmp_buf));
 	macro_define();
 	buf_pop();
 }
@@ -548,10 +536,12 @@ static char seen_name[NAMELEN];	/* the name of the last macro */
 static int hunk_off;
 static int hunk_len;
 
-int cpp_read(char *s)
+int cpp_read(char **obuf, int *olen)
 {
 	int old, end;
 	int jump_name = 0;
+	*olen = 0;
+	*obuf = "";
 	if (seen_macro == 1) {
 		macro_expand(seen_name);
 		seen_macro = 0;
@@ -610,15 +600,15 @@ int cpp_read(char *s)
 		}
 		cur++;
 	}
-	/* macros are expanded later; ignore its name */
+	/* macros are expanded later; ignoring their names */
 	end = jump_name ? cur - strlen(seen_name) : cur;
-	memcpy(s, buf + old, end - old);
-	s[end - old] = '\0';
 	if (!buf_iseval()) {
 		hunk_off += hunk_len;
 		hunk_len = end - old;
 	}
-	return end - old;
+	*obuf = buf + old;
+	*olen = end - old;
+	return 0;
 }
 
 /* preprocessor constant expression evaluation */

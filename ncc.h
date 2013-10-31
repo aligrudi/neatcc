@@ -1,7 +1,5 @@
 /* predefined array limits; (p.f. means per function) */
-#define SECLEN		(1 << 18)	/* size of CS/DS sections */
-#define BUFLEN		(1 << 18)	/* buffer size in cpp.c and tok.c */
-#define STRLEN		(1 << 17)	/* size of strings */
+#define SECLEN		(1 << 19)	/* size of CS section */
 #define NDATS		1024		/* number of DS data symbols */
 #define NSYMS		4096		/* number of elf symbols */
 #define NREL		4096		/* number of elf relocations */
@@ -20,7 +18,8 @@
 #define NLABELS		1024		/* number of labels p.f. */
 #define NAMELEN		128		/* size of identifiers */
 #define NDEFS		1024		/* number of macros */
-#define MACROLEN	1024		/* size of macros arguments/definitions */
+#define MARGLEN		1024		/* size of macro arguments */
+#define MDEFLEN		2048		/* size of macro definitions */
 #define NBUFS		32		/* macro expansion stack depth */
 #define NLOCS		1024		/* number of header search paths */
 

@@ -3,10 +3,13 @@
 #include <stdlib.h>
 #include <string.h>
 #include "gen.h"
+#include "mem.h"
 #include "ncc.h"
 #include "tok.h"
 
-static char buf[BUFLEN];
+static struct mem tok_mem;	/* the data read via cpp_read() so far */
+static struct mem str;		/* the last tok_str() string */
+static char *buf;
 static int len;
 static int cur;
 static char name[NAMELEN];
@@ -66,7 +69,7 @@ static char *digs = "0123456789abcdef";
 static int esc_char(int *c, char *s)
 {
 	if (*s != '\\') {
-		*c = *s;
+		*c = (unsigned char) *s;
 		return 1;
 	}
 	if (strchr(esc_code, s[1])) {
@@ -90,7 +93,7 @@ static int esc_char(int *c, char *s)
 		*c = ret;
 		return i;
 	}
-	*c = s[1];
+	*c = (unsigned char) s[1];
 	return 2;
 }
 
@@ -144,34 +147,29 @@ static void readnum(void)
 	num = -1;
 }
 
-static char str[STRLEN];
-static int str_len;
-
-int tok_str(char *buf)
+void tok_str(char **buf, int *len)
 {
+	if (len)
+		*len = mem_len(&str) + 1;
 	if (buf)
-		memcpy(buf, str, str_len);
-	return str_len;
+		*buf = mem_buf(&str);
 }
 
-static int readstr(char *out)
+static void readstr(struct mem *mem)
 {
-	char *s = out;
-	char *r = buf + cur;
+	char *s = buf + cur;
 	char *e = buf + len;
-	r++;
-	while (r < e && *r != '"') {
-		if (*r == '\\') {
-			int c;
-			r += esc_char(&c, r);
-			*s++ = c;
+	int c;
+	s++;
+	while (s < e && *s != '"') {
+		if (*s == '\\') {
+			s += esc_char(&c, s);
+			mem_putc(mem, c);
 		} else {
-			*s++ = *r++;
+			mem_putc(mem, (unsigned char) *s++);
 		}
 	}
-	*s++ = '\0';
-	cur = r - buf + 1;
-	return s - out - 1;
+	cur = s - buf + 1;
 }
 
 static int id_char(int c)
@@ -181,14 +179,17 @@ static int id_char(int c)
 
 static int skipws(void)
 {
+	int clen;
+	char *cbuf;
 	while (1) {
 		if (cur == len) {
-			int r;
-			while (!(r = cpp_read(buf + cur)))
-				;
-			if (r == -1)
-				return 1;
-			len += r;
+			clen = 0;
+			while (!clen)
+				if (cpp_read(&cbuf, &clen))
+					return 1;
+			mem_put(&tok_mem, cbuf, clen);
+			buf = mem_buf(&tok_mem);
+			len = mem_len(&tok_mem);
 		}
 		while (cur < len && isspace(buf[cur]))
 			cur++;
@@ -229,13 +230,12 @@ int tok_get(void)
 	if (skipws())
 		return TOK_EOF;
 	if (buf[cur] == '"') {
-		str_len = 0;
+		mem_cut(&str, 0);
 		while (buf[cur] == '"') {
-			str_len += readstr(str + str_len);
+			readstr(&str);
 			if (skipws())
 				return TOK_EOF;
 		}
-		str_len++;
 		return TOK_STR;
 	}
 	if (isdigit(buf[cur]) || buf[cur] == '\'') {

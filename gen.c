@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "gen.h"
+#include "mem.h"
 #include "ncc.h"
 #include "out.h"
 #include "reg.h"
@@ -19,8 +20,7 @@
 
 char cs[SECLEN];		/* code segment */
 int cslen;
-static char ds[SECLEN];		/* data segment */
-static int dslen;
+static struct mem ds;		/* data segment */
 static long bsslen;		/* bss segment size */
 
 static long sp;			/* stack pointer offset from R_RBP */
@@ -871,20 +871,21 @@ long o_dsnew(char *name, int size, int global)
 {
 	int idx;
 	if (pass1)
-		return dslen;
+		return mem_len(&ds);
 	idx = ndats++;
 	if (idx >= NDATS)
 		err("nomem: NDATS reached!\n");
 	strcpy(dat_names[idx], name);
-	dat_offs[idx] = dslen;
-	out_sym(name, OUT_DS | (global ? OUT_GLOB : 0), dslen, size);
-	dslen += ALIGN(size, OUT_ALIGNMENT);
+	dat_offs[idx] = mem_len(&ds);
+	out_sym(name, OUT_DS | (global ? OUT_GLOB : 0), mem_len(&ds), size);
+	mem_putz(&ds, ALIGN(size, OUT_ALIGNMENT));
 	return dat_offs[idx];
 }
 
 void o_dscpy(long addr, void *buf, int len)
 {
-	memcpy(ds + addr, buf, len);
+	if (!pass1)
+		mem_cpy(&ds, addr, buf, len);
 }
 
 static int dat_off(char *name)
@@ -906,11 +907,11 @@ void o_dsset(char *name, int off, unsigned bt)
 	}
 	if (t->loc == LOC_NUM && !t->bt) {
 		num_cast(t, bt);
-		memcpy(ds + sym_off, &t->addr, BT_SZ(bt));
+		mem_cpy(&ds, sym_off, &t->addr, BT_SZ(bt));
 	}
 	if (t->loc == LOC_SYM && !t->bt) {
 		out_rel(t->sym, OUT_DS, sym_off);
-		memcpy(ds + sym_off, &t->off, BT_SZ(bt));
+		mem_cpy(&ds, sym_off, &t->off, BT_SZ(bt));
 	}
 	tmp_drop(1);
 }
@@ -918,7 +919,7 @@ void o_dsset(char *name, int off, unsigned bt)
 void o_write(int fd)
 {
 	i_done();
-	out_write(fd, cs, cslen, ds, dslen);
+	out_write(fd, cs, cslen, mem_buf(&ds), mem_len(&ds));
 }
 
 static void func_reset(void)

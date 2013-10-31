@@ -80,8 +80,9 @@ int main(int argc, char *argv[])
 	int ofd = 1;
 	int i = 1;
 	char *s1, *s2;
-	int nr;
 	int len = 0;
+	char *cbuf;
+	int clen;
 	while (i < argc && argv[i][0] == '-') {
 		if (argv[i][1] == 'I')
 			cpp_addpath(argv[i][2] ? argv[i] + 2 : argv[++i]);
@@ -110,8 +111,10 @@ int main(int argc, char *argv[])
 	s2 = malloc(OBUFSZ);
 	if (!s1 || !s2)
 		die("npp: cannot allocate enough memory\n");
-	while ((nr = cpp_read(s1 + len)) >= 0)
-		len += nr;
+	while (!cpp_read(&cbuf, &clen)) {
+		memcpy(s1 + len, cbuf, clen);
+		len += clen;
+	}
 	len = rmcomments(s2, s1, len);
 	xwrite(ofd, s2, len);
 	close(ofd);

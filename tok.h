@@ -39,7 +39,7 @@ int tok_see(void);
 int tok_get(void);
 char *tok_id(void);
 int tok_num(long *n);
-int tok_str(char *out);
+void tok_str(char **buf, int *len);
 long tok_addr(void);
 void tok_jump(long addr);
 
@@ -47,7 +47,7 @@ int cpp_init(char *path);
 void cpp_addpath(char *s);
 void cpp_define(char *name, char *def);
 char *cpp_loc(long addr);
-int cpp_read(char *s);
+int cpp_read(char **buf, int *len);
 
 void die(char *msg, ...);
 void err(char *fmt, ...);
