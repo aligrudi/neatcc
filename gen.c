@@ -73,6 +73,8 @@ static int njmps;
 void o_label(int id)
 {
 	r_label(id);
+	if (id >= NJMPS)
+		err("nomem: NJMPS reached!\n");
 	if (id > nlabels)
 		nlabels = id + 1;
 	labels[id] = cslen;

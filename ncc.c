@@ -944,11 +944,12 @@ static void readbitor(void)
 
 static void readand(void)
 {
-	int l_out = LABEL();
-	int l_fail = LABEL();
+	int l_out, l_fail;
 	readbitor();
 	if (tok_see() != TOK2("&&"))
 		return;
+	l_out = LABEL();
+	l_fail = LABEL();
 	o_fork();
 	ts_pop_de(NULL);
 	o_jz(l_fail);
@@ -970,11 +971,12 @@ static void readand(void)
 
 static void reador(void)
 {
-	int l_pass = LABEL();
-	int l_end = LABEL();
+	int l_pass, l_end;
 	readand();
 	if (tok_see() != TOK2("||"))
 		return;
+	l_pass = LABEL();
+	l_end = LABEL();
 	o_fork();
 	ts_pop_de(NULL);
 	o_jnz(l_pass);
@@ -1509,17 +1511,19 @@ static void readfunc(struct name *name, int flags)
 		local_add(&arg);
 	}
 	/* first pass: collecting statistics */
+	label = 0;
+	nlabels = 0;
 	o_pass1();
 	readstmt();
 	tok_jump(beg);
 	/* second pass: generating code */
+	label = 0;
+	nlabels = 0;
 	o_pass2();
 	readstmt();
 	o_func_end();
 	func_name[0] = '\0';
 	nlocals = 0;
-	label = 0;
-	nlabels = 0;
 }
 
 static void readdecl(void)
