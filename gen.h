@@ -1,3 +1,4 @@
+/* neatcc code generation interface */
 /* basic types */
 #define BT_SZMASK	0x00ff
 #define BT_SIGNED	0x0100
@@ -26,9 +27,9 @@
 #define O_NOT		0x41
 #define O_LNOT		0x42
 
-/* operations */
-void o_bop(int op);
-void o_uop(int op);
+/* operations on the stack */
+void o_bop(int op);		/* binary operation */
+void o_uop(int op);		/* unary operation */
 void o_cast(unsigned bt);
 void o_memcpy(void);
 void o_memset(void);
@@ -38,7 +39,7 @@ void o_assign(unsigned bt);
 void o_deref(unsigned bt);
 void o_load(void);
 int o_popnum(long *c);
-/* pushing values */
+/* pushing values to the stack */
 void o_num(long n);
 void o_local(long addr);
 void o_sym(char *sym);

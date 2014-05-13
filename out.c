@@ -1,3 +1,4 @@
+/* neatcc ELF object generation */
 #include <elf.h>
 #include <string.h>
 #include <unistd.h>
@@ -16,7 +17,7 @@
 #define SEC_BSS			7
 #define NSECS			8
 
-/* simplifed elf struct and macro names */
+/* simplified elf struct and macro names */
 #if LONGSZ == 8
 #  define USERELA	1
 #  define Elf_Ehdr	Elf64_Ehdr

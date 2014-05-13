@@ -1,3 +1,4 @@
+/* neatcc output object generation interface */
 #define OUT_CS		0x0001		/* code segment symbol */
 #define OUT_DS		0x0002		/* data segment symbol */
 #define OUT_BSS		0x0004		/* bss segment symbol */

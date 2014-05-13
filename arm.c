@@ -1,3 +1,4 @@
+/* architecture-dependent code generation for ARM */
 #include <string.h>
 #include "tok.h"
 #include "gen.h"

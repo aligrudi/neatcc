@@ -1,9 +1,24 @@
 /*
  * neatcc - the neatcc compiler
  *
- * Copyright (C) 2010-2013 Ali Gholami Rudi
+ * Copyright (C) 2010-2014 Ali Gholami Rudi
  *
  * This program is released under the Modified BSD license.
+ */
+/*
+ * neatcc parser
+ *
+ * The parser reads tokens from the tokenizer (tok_*) and calls the
+ * appropriate code generation functions (o_*).  The generator
+ * maintains a stack of values pushed via, for instance, o_num()
+ * and generates the necessary code for the accesses to the items
+ * in this stack, like o_bop() for performing a binary operations
+ * on the top two items of the stack.  The parser maintains the
+ * types of values pushed to the generator stack in its type stack
+ * (ts_*).  For instance, for binary operations two types are
+ * popped first and the resulting type is pushed to the type stack
+ * (ts_binop()).
+ *
  */
 #include <fcntl.h>
 #include <unistd.h>
@@ -328,6 +343,7 @@ static void tok_expect(int tok)
 		err("syntax error\n");
 }
 
+/* the result of a binary operation on variables of type bt1 and bt2 */
 static unsigned bt_op(unsigned bt1, unsigned bt2)
 {
 	unsigned s1 = BT_SZ(bt1);
@@ -335,6 +351,7 @@ static unsigned bt_op(unsigned bt1, unsigned bt2)
 	return ((bt1 | bt2) & BT_SIGNED) | (s1 > s2 ? s1 : s2);
 }
 
+/* push the result of a binary operation on the type stack */
 static void ts_binop(int op)
 {
 	struct type t1, t2;
@@ -348,6 +365,7 @@ static void ts_binop(int op)
 	ts_push_bt(bt);
 }
 
+/* push the result of an additive binary operation on the type stack */
 static void ts_addop(int op)
 {
 	struct type t1, t2;
@@ -453,7 +471,7 @@ static void enum_create(void)
 	}
 }
 
-/* used to differenciate labels from case and cond exprs */
+/* used to differentiate labels from case and cond exprs */
 static int ncexpr;
 static int caseexpr;
 

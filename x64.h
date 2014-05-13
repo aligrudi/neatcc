@@ -1,3 +1,4 @@
+/* architecture-dependent header for x86_64 */
 #define LONGSZ		8	/* word size */
 #define I_ARCH		"__x86_64__"
 

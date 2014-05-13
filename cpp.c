@@ -1,3 +1,4 @@
+/* neatcc preprocessor */
 #include <ctype.h>
 #include <fcntl.h>
 #include <stdarg.h>
@@ -34,6 +35,7 @@ static int mnext[NDEFS];	/* macro hash table next entries */
 #define BUF_EVAL		3
 #define BUF_TEMP		4
 
+/* preprocessing input buffers for files, macros and macro arguments */
 static struct buf {
 	char *buf;
 	int len;

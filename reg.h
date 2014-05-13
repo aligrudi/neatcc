@@ -1,3 +1,4 @@
+/* register allocation interface */
 void r_func(int nargs, int vargs);	/* reset variables for functions */
 int r_alloc(int leaf, int used);	/* register allocation */
 

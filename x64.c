@@ -1,3 +1,4 @@
+/* architecture-dependent code generation for x86_64 */
 #include "tok.h"
 #include "gen.h"
 #include "out.h"

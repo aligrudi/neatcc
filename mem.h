@@ -1,4 +1,4 @@
-/* variable length memory buffer */
+/* variable length buffer */
 struct mem {
 	char *s;		/* allocated buffer */
 	int sz;			/* buffer size */
