@@ -49,17 +49,20 @@ static int nsyms = 1;
 static char symstr[NSYMS * 8];
 static int nsymstr = 1;
 
-static Elf_Rel dsrels[NREL];
+static Elf_Rel dsrels[NRELS];
 static int ndsrels;
-static Elf_Rel rels[NREL];
+static Elf_Rel rels[NRELS];
 static int nrels;
 
+void err(char *msg, ...);
 static int rel_type(int flags);
 static void ehdr_init(Elf_Ehdr *ehdr);
 
 static int symstr_add(char *name)
 {
 	int len = strlen(name) + 1;
+	if (nsymstr + len >= sizeof(symstr))
+		err("nomem: NSYMS reached!\n");
 	strcpy(symstr + nsymstr, name);
 	nsymstr += len;
 	return nsymstr - len;
@@ -80,6 +83,8 @@ static Elf_Sym *put_sym(char *name)
 	Elf_Sym *sym = found != -1 ? &syms[found] : &syms[nsyms++];
 	if (found >= 0)
 		return sym;
+	if (nsyms >= NSYMS)
+		err("nomem: NSYMS reached!\n");
 	sym->st_name = symstr_add(name);
 	sym->st_shndx = SHN_UNDEF;
 	sym->st_info = ELF_ST_INFO(STB_GLOBAL, STT_FUNC);
@@ -150,6 +155,8 @@ void out_sym(char *name, int flags, int off, int len)
 static void out_csrel(int idx, int off, int flags)
 {
 	Elf_Rel *r = &rels[nrels++];
+	if (nrels >= NRELS)
+		err("nomem: NRELS reached!\n");
 	r->r_offset = off;
 	r->r_info = ELF_R_INFO(idx, rel_type(flags));
 }
@@ -157,6 +164,8 @@ static void out_csrel(int idx, int off, int flags)
 static void out_dsrel(int idx, int off, int flags)
 {
 	Elf_Rel *r = &dsrels[ndsrels++];
+	if (ndsrels >= NRELS)
+		err("nomem: NRELS reached!\n");
 	r->r_offset = off;
 	r->r_info = ELF_R_INFO(idx, rel_type(flags));
 }

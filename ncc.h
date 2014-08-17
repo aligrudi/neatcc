@@ -2,7 +2,7 @@
 #define SECLEN		(1 << 19)	/* size of CS section */
 #define NDATS		4096		/* number of DS data symbols */
 #define NSYMS		4096		/* number of elf symbols */
-#define NREL		8192		/* number of elf relocations */
+#define NRELS		8192		/* number of elf relocations */
 #define NGLOBALS	2048		/* number of global variables */
 #define NLOCALS		1024		/* number of locals p.f. */
 #define NARGS		32		/* number of function/macro arguments */
