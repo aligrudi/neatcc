@@ -3,6 +3,7 @@
 #define BT_SZMASK	0x00ff
 #define BT_SIGNED	0x0100
 #define BT_SZ(bt)	((bt) & BT_SZMASK)
+#define BT(sign, size)	(((sign) & BT_SIGNED) | ((size) & BT_SZMASK))
 
 #define O_SIGNED	0x100
 /* binary instructions for o_bop() */

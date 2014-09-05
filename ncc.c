@@ -61,6 +61,7 @@ static int nogen;		/* do not generate code, if set */
 
 #define ALIGN(x, a)		(((x) + (a) - 1) & ~((a) - 1))
 #define MIN(a, b)		((a) < (b) ? (a) : (b))
+#define MAX(a, b)		((a) < (b) ? (b) : (a))
 
 #define TYPE_BT(t)		((t)->ptr ? LONGSZ : (t)->bt)
 #define TYPE_SZ(t)		((t)->ptr ? LONGSZ : (t)->bt & BT_SZMASK)
@@ -346,21 +347,27 @@ static void tok_expect(int tok)
 /* the result of a binary operation on variables of type bt1 and bt2 */
 static unsigned bt_op(unsigned bt1, unsigned bt2)
 {
-	unsigned s1 = BT_SZ(bt1);
-	unsigned s2 = BT_SZ(bt2);
-	return ((bt1 | bt2) & BT_SIGNED) | (s1 > s2 ? s1 : s2);
+	int sz = MAX(BT_SZ(bt1), BT_SZ(bt2));
+	return ((bt1 | bt2) & BT_SIGNED) | MAX(sz, 4);
+}
+
+/* the result of a unary operation on variables of bt */
+static unsigned bt_uop(unsigned bt)
+{
+	return bt_op(bt, 4);
 }
 
 /* push the result of a binary operation on the type stack */
 static void ts_binop(int op)
 {
 	struct type t1, t2;
-	int bt;
+	unsigned bt1, bt2, bt;
 	ts_pop_de2(&t1, &t2);
+	bt1 = TYPE_BT(&t1);
+	bt2 = TYPE_BT(&t2);
+	bt = bt_op(bt1, bt2);
 	if (op == O_DIV || op == O_MOD)
-		bt = TYPE_BT(&t2);
-	else
-		bt = bt_op(TYPE_BT(&t1), TYPE_BT(&t2));
+		bt = BT(bt2 & BT_SIGNED, bt);
 	o_bop(op | (bt & BT_SIGNED ? O_SIGNED : 0));
 	ts_push_bt(bt);
 }
@@ -391,7 +398,7 @@ static void ts_addop(int op)
 			o_num(sz);
 			o_bop(O_DIV);
 		}
-		ts_push_bt(4 | BT_SIGNED);
+		ts_push_bt(LONGSZ | BT_SIGNED);
 	} else {
 		ts_push(t1.ptr ? &t1 : &t2);
 	}
@@ -491,8 +498,8 @@ static void readprimary(void)
 	if (!tok_jmp(TOK_NUM)) {
 		long n;
 		int bt = tok_num(&n);
-		ts_push_bt(bt);
 		o_num(n);
+		ts_push_bt(bt);
 		return;
 	}
 	if (!tok_jmp(TOK_STR)) {
@@ -504,8 +511,8 @@ static void readprimary(void)
 		t.bt = 1 | BT_SIGNED;
 		a.id = array_add(&t, len);
 		a.flags = T_ARRAY;
-		ts_push(&a);
 		o_sym(tmp_str(buf, len));
+		ts_push(&a);
 		return;
 	}
 	if (!tok_jmp(TOK_NAME)) {
@@ -529,15 +536,15 @@ static void readprimary(void)
 			return;
 		}
 		if (!enum_find(&n, name)) {
-			ts_push_bt(4 | BT_SIGNED);
 			o_num(n);
+			ts_push_bt(4 | BT_SIGNED);
 			return;
 		}
 		if (tok_see() != '(')
 			err("unknown symbol <%s>\n", name);
 		global_add(&unkn);
-		ts_push_bt(LONGSZ);
 		o_sym(unkn.name);
+		ts_push_bt(LONGSZ);
 		return;
 	}
 	if (!tok_jmp('(')) {
@@ -731,19 +738,18 @@ static void inc_pre(int op)
 
 static void readpre(void)
 {
+	struct type t;
 	if (!tok_jmp('&')) {
-		struct type type;
 		readpre();
-		ts_pop(&type);
-		if (!type.addr)
+		ts_pop(&t);
+		if (!t.addr)
 			err("cannot use the address\n");
-		type.ptr++;
-		type.addr = 0;
-		ts_push(&type);
+		t.ptr++;
+		t.addr = 0;
+		ts_push(&t);
 		return;
 	}
 	if (!tok_jmp('*')) {
-		struct type t;
 		readpre();
 		ts_pop(&t);
 		array2ptr(&t);
@@ -765,18 +771,25 @@ static void readpre(void)
 	}
 	if (!tok_jmp('+')) {
 		readpre();
+		ts_de(1);
+		ts_pop(&t);
+		ts_push_bt(bt_uop(TYPE_BT(&t)));
 		return;
 	}
 	if (!tok_jmp('-')) {
 		readpre();
 		ts_de(1);
+		ts_pop(&t);
 		o_uop(O_NEG);
+		ts_push_bt(bt_uop(TYPE_BT(&t)));
 		return;
 	}
 	if (!tok_jmp('~')) {
 		readpre();
 		ts_de(1);
+		ts_pop(&t);
 		o_uop(O_NOT);
+		ts_push_bt(bt_uop(TYPE_BT(&t)));
 		return;
 	}
 	if (!tok_jmp(TOK2("++"))) {
@@ -799,8 +812,8 @@ static void readpre(void)
 			nogen--;
 			ts_pop(&t);
 		}
-		ts_push_bt(4);
 		o_num(type_totsz(&t));
+		ts_push_bt(LONGSZ);
 		if (op)
 			tok_expect(')');
 		return;
@@ -855,7 +868,7 @@ static void shift(int op)
 	readadd();
 	ts_pop_de2(NULL, &t);
 	o_bop(op | (BT_SIGNED & TYPE_BT(&t) ? O_SIGNED : 0));
-	ts_push_bt(TYPE_BT(&t));
+	ts_push_bt(bt_uop(TYPE_BT(&t)));
 }
 
 static void readshift(void)
