@@ -102,11 +102,6 @@ static void mov_r2r(int rd, int r1, unsigned bt)
 		op_rr(movrx_op(bt, I_MOVR), rd, r1, movrx_bt(bt));
 }
 
-static void mov_m2r(int dst, int base, int off, int bt)
-{
-	op_rm(movrx_op(bt, I_MOVR), dst, base, off, movrx_bt(bt));
-}
-
 int i_imm(int op, long imm)
 {
 	if ((op & 0xf0) == 0x20)
@@ -116,12 +111,12 @@ int i_imm(int op, long imm)
 
 static void i_push(int reg)
 {
-	op_x(I_PUSH | (reg & 0x7), 0, reg, 4);
+	op_x(I_PUSH | (reg & 0x7), 0, reg, LONGSZ);
 }
 
 static void i_pop(int reg)
 {
-	op_x(I_POP | (reg & 0x7), 0, reg, 4);
+	op_x(I_POP | (reg & 0x7), 0, reg, LONGSZ);
 }
 
 void i_mov(int rd, int rn)
@@ -131,7 +126,7 @@ void i_mov(int rd, int rn)
 
 void i_load(int rd, int rn, int off, int bt)
 {
-	mov_m2r(rd, rn, off, bt);
+	op_rm(movrx_op(bt, I_MOVR), rd, rn, off, movrx_bt(bt));
 }
 
 void i_save(int rd, int rn, int off, int bt)
@@ -429,7 +424,7 @@ void i_op_imm(int op, int rd, int r1, long n)
 		i_shl_imm(op, rd, r1, n);
 	if ((op & 0xf0) == 0x20)	/* mul */
 		die("mul/imm not implemented");
-	if ((op & 0xf0) == 0x30) {	/* imm */
+	if ((op & 0xf0) == 0x30) {	/* cmp */
 		i_cmp_imm(r1, n);
 		i_set(op, rd);
 	}
