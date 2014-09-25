@@ -23,4 +23,4 @@ npp: npp.o cpp.o
 	$(CC) -o $@ $^ $(LDFLAGS)
 
 clean:
-	rm -f *.o ncc cpp
+	rm -f *.o ncc npp
