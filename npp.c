@@ -1,9 +1,9 @@
 /*
  * neatpp - a small and simple C preprocessor
  *
- * Copyright (C) 2010-2012 Ali Gholami Rudi
+ * Copyright (C) 2010-2014 Ali Gholami Rudi
  *
- * This file is released under GNU GPL version 2.
+ * This program is released under the Modified BSD license.
  */
 #include <errno.h>
 #include <fcntl.h>
