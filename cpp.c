@@ -174,9 +174,9 @@ static int jumpcomment(void)
 		}
 	}
 	if (buf[cur] == '/' && buf[cur + 1] == '/') {
-		while (++cur < len)
-			if (buf[cur] == '\n')
-				break;
+		while (++cur < len && buf[cur] != '\n')
+			if (buf[cur] == '\\')
+				cur++;
 		return 0;
 	}
 	return 1;
@@ -185,14 +185,14 @@ static int jumpcomment(void)
 static int jumpstr(void)
 {
 	if (buf[cur] == '\'') {
-		while (cur < len && buf[++cur] != '\'')
+		while (++cur < len && buf[cur] != '\'')
 			if (buf[cur] == '\\')
 				cur++;
 		cur++;
 		return 0;
 	}
 	if (buf[cur] == '"') {
-		while (cur < len && buf[++cur] != '"')
+		while (++cur < len && buf[cur] != '"')
 			if (buf[cur] == '\\')
 				cur++;
 		cur++;

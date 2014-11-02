@@ -201,8 +201,9 @@ static int skipws(void)
 			continue;
 		}
 		if (buf[cur] == '/' && buf[cur + 1] == '/') {
-			while (cur < len && buf[cur] != '\n')
-				cur++;
+			while (++cur < len && buf[cur] != '\n')
+				if (buf[cur] == '\\')
+					cur++;
 			continue;
 		}
 		if (buf[cur] == '/' && buf[cur + 1] == '*') {
