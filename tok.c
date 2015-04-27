@@ -111,7 +111,7 @@ static void readnum(void)
 {
 	int base = 10;
 	num_bt = 4 | BT_SIGNED;
-	if (buf[cur] == '0' && buf[cur + 1] == 'x') {
+	if (buf[cur] == '0' && tolower(buf[cur + 1]) == 'x') {
 		num_bt &= ~BT_SIGNED;
 		base = 16;
 		cur += 2;
