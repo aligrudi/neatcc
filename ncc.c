@@ -1404,7 +1404,7 @@ static void readstmt(void)
 		int l_fail = LABEL();
 		int l_end = LABEL();
 		tok_expect('(');
-		readexpr();
+		readestmt();
 		tok_expect(')');
 		ts_pop_de(NULL);
 		o_jz(l_fail);
@@ -1426,7 +1426,7 @@ static void readstmt(void)
 		l_cont = LABEL();
 		o_label(l_cont);
 		tok_expect('(');
-		readexpr();
+		readestmt();
 		tok_expect(')');
 		ts_pop_de(NULL);
 		o_jz(l_break);
