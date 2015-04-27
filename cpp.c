@@ -442,6 +442,7 @@ static int cpp_cmd(void)
 			err("cannot include <%s>\n", file);
 		return 0;
 	}
+	err("unknown directive <%s>\n", cmd);
 	return 1;
 }
 
