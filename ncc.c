@@ -1,7 +1,7 @@
 /*
  * neatcc - the neatcc compiler
  *
- * Copyright (C) 2010-2014 Ali Gholami Rudi
+ * Copyright (C) 2010-2015 Ali Gholami Rudi
  *
  * This program is released under the Modified BSD license.
  */
@@ -94,6 +94,9 @@ static void ts_push_bt(unsigned bt)
 	ts[nts].flags = 0;
 	ts[nts].addr = 0;
 	ts[nts++].bt = bt;
+#ifdef NCCWORDCAST
+	o_cast(bt);		/* casting to architecture word */
+#endif
 }
 
 static void ts_push(struct type *t)
