@@ -1,9 +1,7 @@
 /* architecture-dependent code generation for x86_64 */
-#include "tok.h"
-#include "gen.h"
-#include "out.h"
+#include "ncc.h"
 
-/* registers */
+/* x86-64 registers, without r8-r15 */
 #define R_RAX		0x00
 #define R_RCX		0x01
 #define R_RDX		0x02
@@ -12,15 +10,8 @@
 #define R_RBP		0x05
 #define R_RSI		0x06
 #define R_RDI		0x07
-/* x86_64 registers */
-#define R_R8		0x08
-#define R_R9		0x09
-#define R_R10		0x0a
-#define R_R11		0x0b
-#define R_R12		0x0c
-#define R_R13		0x0d
-#define R_R14		0x0e
-#define R_R15		0x0f
+
+#define REG_RET		R_RAX
 
 /* x86 opcodes */
 #define I_MOV		0x89
@@ -52,14 +43,6 @@ int argregs[] = {7, 6, 2, 1, 8, 9};
 #define O1(op)			((op) & 0xff)
 #define MODRM(m, r1, r2)	((m) << 6 | (r1) << 3 | (r2))
 #define REX(r1, r2)		(0x48 | (((r1) & 8) >> 1) | (((r2) & 8) >> 3))
-
-static void putint(char *s, long n, int l)
-{
-	while (l--) {
-		*s++ = n;
-		n >>= 8;
-	}
-}
 
 static void op_x(int op, int r1, int r2, int bt)
 {
@@ -125,7 +108,7 @@ static void mov_r2r(int rd, int r1, unsigned bt)
 		op_rr(movrx_op(bt, I_MOVR), rd, r1, movrx_bt(bt));
 }
 
-int i_imm(int op, long imm)
+static int i_imm(int op, long imm)
 {
 	if ((op & 0xf0) == 0x20)
 		return 0;
@@ -147,69 +130,6 @@ void i_mov(int rd, int rn)
 	op_rr(movrx_op(LONGSZ, I_MOVR), rd, rn, movrx_bt(LONGSZ));
 }
 
-void i_load(int rd, int rn, int off, int bt)
-{
-	op_rm(movrx_op(bt, I_MOVR), rd, rn, off, movrx_bt(bt));
-}
-
-void i_save(int rd, int rn, int off, int bt)
-{
-	op_rm(I_MOV, rd, rn, off, bt);
-}
-
-void i_reg(int op, int *rd, int *r1, int *r2, int *tmp)
-{
-	*rd = 0;
-	*r1 = R_TMPS;
-	*r2 = op & O_IMM ? 0 : R_TMPS;
-	*tmp = 0;
-	if ((op & 0xf0) == 0x00)	/* add */
-		return;
-	if ((op & 0xf0) == 0x10) {	/* shl */
-		if (~op & O_IMM) {
-			*r2 = 1 << R_RCX;
-			*r1 = R_TMPS & ~*r2;
-		}
-		return;
-	}
-	if ((op & 0xf0) == 0x20) {	/* mul */
-		*rd = (op & 0xff) == O_MOD ? (1 << R_RDX) : (1 << R_RAX);
-		*r1 = (1 << R_RAX);
-		*r2 = R_TMPS & ~*rd & ~*r1;
-		if ((op & 0xff) == O_DIV)
-			*r2 &= ~(1 << R_RDX);
-		*tmp = (1 << R_RDX) | (1 << R_RAX);
-		return;
-	}
-	if ((op & 0xf0) == 0x30) {	/* cmp */
-		*rd = 1 << R_RAX;
-		return;
-	}
-	if ((op & 0xf0) == 0x40) {	/* uop */
-		*r2 = 0;
-		if ((op & 0xff) == O_LNOT)
-			*r1 = 1 << R_RAX;
-		return;
-	}
-	if ((op & 0xf0) == 0x50) {	/* etc */
-		if (op == O_MSET) {
-			*rd = 1 << R_RDI;
-			*r1 = 1 << R_RAX;
-			*r2 = 1 << R_RCX;
-		}
-		if (op == O_MCPY) {
-			*rd = 1 << R_RDI;
-			*r1 = 1 << R_RSI;
-			*r2 = 1 << R_RCX;
-		}
-		if (op == O_SX || op == O_ZX || op == O_MOV) {
-			*rd = R_TMPS;
-			*r2 = 0;
-		}
-		return;
-	}
-}
-
 static void i_add(int op, int rd, int r1, int r2)
 {
 	/* opcode for O_ADD, O_SUB, O_AND, O_OR, O_XOR */
@@ -225,7 +145,7 @@ static void i_add_imm(int op, int rd, int rn, long n)
 	os((void *) s, 4);
 }
 
-void i_num(int rd, long n)
+static void i_num(int rd, long n)
 {
 	if (!n) {
 		op_rr(I_XOR, rd, rd, 4);
@@ -292,15 +212,14 @@ static void i_shl_imm(int op, int rd, int rn, long n)
 	os(s, 4);
 }
 
-void i_sym(int rd, char *sym, int off)
+static void i_sym(int rd, int sym, int off)
 {
 	int sz = X64_ABS_RL & OUT_RL32 ? 4 : LONGSZ;
 	if (X64_ABS_RL & OUT_RLSX)
 		op_rr(I_MOVI, 0, rd, sz);
 	else
 		op_x(I_MOVIR + (rd & 7), 0, rd, sz);
-	if (!pass1)
-		out_rel(sym, OUT_CS | X64_ABS_RL, cslen);
+	out_rel(sym, OUT_CS | X64_ABS_RL, opos());
 	oi(off, sz);
 }
 
@@ -314,12 +233,6 @@ static void i_not(int rd)
 	op_rr(I_NOT, 2, rd, LONGSZ);
 }
 
-/* for optimizing cmp + tst + jmp to cmp + jmp */
-#define OPT_ISCMP()		(last_set >= 0 && last_set + 7 == cslen)
-#define OPT_CCOND()		(cs[last_set + 1])
-
-static long last_set = -1;
-
 static void i_set(int op, int rd)
 {
 	/* lt, gt, le, ge, eq, neq */
@@ -328,67 +241,47 @@ static void i_set(int op, int rd)
 	int cond = op & O_SIGNED ? scond[op & 0x0f] : ucond[op & 0x0f];
 	char set[] = "\x0f\x00\xc0";
 	set[1] = cond;
-	last_set = cslen;
 	os(set, 3);			/* setl al */
 	os("\x48\x0f\xb6\xc0", 4);	/* movzx rax, al */
 }
 
 static void i_lnot(int rd)
 {
-	if (OPT_ISCMP()) {
-		cs[last_set + 1] ^= 0x01;
-	} else {
-		char cmp[] = "\x00\x83\xf8\x00";
-		cmp[0] = REX(0, rd);
-		cmp[2] |= rd & 7;
-		os(cmp, 4);		/* cmp rax, 0 */
-		i_set(O_EQ, rd);
-	}
+	char cmp[] = "\x00\x83\xf8\x00";
+	cmp[0] = REX(0, rd);
+	cmp[2] |= rd & 7;
+	os(cmp, 4);		/* cmp rax, 0 */
+	i_set(O_EQ, rd);
 }
 
-static void jx(int x, int nbytes)
+static long i_jmp(int rn, int z, int nbytes)
 {
-	char op[2] = {0x0f};
-	if (nbytes == 1) {
-		op[0] = 0x70 | (x & 0x0f);
-		os(op, 1);		/* jx $addr */
-	} else {
-		op[1] = x;
-		os(op, 2);		/* jx $addr */
-	}
-	oi(0, nbytes);
-}
-
-void i_jmp(int rn, int z, int nbytes)
-{
-	if (!nbytes)
-		return;
+	long ret;
 	if (nbytes > 1)
 		nbytes = 4;
 	if (rn >= 0) {
-		if (OPT_ISCMP()) {
-			int cond = OPT_CCOND();
-			cslen = last_set;
-			jx((!z ? cond : cond ^ 0x01) & ~0x10, nbytes);
-			last_set = -1;
+		i_tst(rn, rn);
+		if (nbytes == 1) {
+			oi(z ? 0x74 : 0x75, 1);	/* jx $addr */
 		} else {
-			i_tst(rn, rn);
-			jx(z ? 0x84 : 0x85, nbytes);
+			char op[2] = {0x0f, z ? 0x84 : 0x85};
+			os(op, 2);		/* jx $addr */
 		}
+		ret = opos();
+		oi(0, nbytes);
 	} else {
-		os(nbytes == 1 ? "\xeb" : "\xe9", 1);		/* jmp $addr */
+		os(nbytes == 1 ? "\xeb" : "\xe9", 1);	/* jmp $addr */
+		ret = opos();
 		oi(0, nbytes);
 	}
+	return ret;
 }
 
-long i_fill(long src, long dst, int nbytes)
+void i_fill(long src, long dst, long nbytes)
 {
-	if (!nbytes)
-		return 0;
 	if (nbytes > 1)
 		nbytes = 4;
-	putint((void *) (cs + src - nbytes), dst - src, nbytes);
-	return dst - src;
+	oi_at(src, dst - src - nbytes, nbytes);
 }
 
 static void i_zx(int rd, int r1, int bits)
@@ -406,34 +299,16 @@ static void i_sx(int rd, int r1, int bits)
 	mov_r2r(rd, r1, BT_SIGNED | (bits >> 3));
 }
 
-void i_op(int op, int rd, int r1, int r2)
+static void i_cast(int rd, int rn, int bt)
 {
-	if ((op & 0xf0) == 0x00)
-		i_add(op, r1, r1, r2);
-	if ((op & 0xf0) == 0x10)
-		i_shl(op, r1, r1, r2);
-	if ((op & 0xf0) == 0x20) {
-		if ((op & 0xff) == O_MUL)
-			i_mul(R_RAX, r1, r2);
-		if ((op & 0xff) == O_DIV)
-			i_div(op, R_RAX, r1, r2);
-		if ((op & 0xff) == O_MOD)
-			i_div(op, R_RDX, r1, r2);
-		return;
-	}
-	if ((op & 0xf0) == 0x30) {
-		i_cmp(r1, r2);
-		i_set(op, rd);
-		return;
-	}
-	if ((op & 0xf0) == 0x40) {	/* uop */
-		if ((op & 0xff) == O_NEG)
-			i_neg(r1);
-		if ((op & 0xff) == O_NOT)
-			i_not(r1);
-		if ((op & 0xff) == O_LNOT)
-			i_lnot(r1);
-		return;
+	if (BT_SZ(bt) == 8) {
+		if (rd != rn)
+			i_mov(rd, rn);
+	} else {
+		if (bt & O_SIGNED)
+			i_sx(rd, rn, BT_SZ(bt) * 8);
+		else
+			i_zx(rd, rn, BT_SZ(bt) * 8);
 	}
 }
 
@@ -442,7 +317,7 @@ static void i_add_anyimm(int rd, int rn, long n)
 	op_rm(I_LEA, rd, rn, n, LONGSZ);
 }
 
-void i_op_imm(int op, int rd, int r1, long n)
+static void i_op_imm(int op, int rd, int r1, long n)
 {
 	if ((op & 0xf0) == 0x00) {	/* add */
 		if (rd == r1 && i_imm(O_ADD, n))
@@ -458,61 +333,14 @@ void i_op_imm(int op, int rd, int r1, long n)
 		i_cmp_imm(r1, n);
 		i_set(op, rd);
 	}
-	if ((op & 0xf0) == 0x50) {	/* etc */
-		if ((op & 0xff) == O_ZX)
-			i_zx(rd, r1, n);
-		if ((op & 0xff) == O_SX)
-			i_sx(rd, r1, n);
-		if ((op & 0xff) == O_MOV)
-			i_mov(rd, r1);
-	}
 }
 
-void i_memcpy(int r0, int r1, int r2)
-{
-	os("\xfc\xf3\xa4", 3);		/* cld; rep movs */
-}
-
-void i_memset(int r0, int r1, int r2)
-{
-	os("\xfc\xf3\xaa", 3);		/* cld; rep stosb */
-}
-
-void i_call_reg(int rd)
-{
-	op_rr(I_CALL, 2, rd, LONGSZ);
-}
-
-void i_call(char *sym, int off)
-{
-	os("\xe8", 1);		/* call $x */
-	if (!pass1)
-		out_rel(sym, OUT_CS | OUT_RLREL, cslen);
-	oi(-4 + off, 4);
-}
-
-static int func_argc;
-static int func_varg;
-static int func_spsub;
-static int func_sargs;
-static int func_sregs;
+static int func_sargs;		/* saved arguments */
+static int func_sregs;		/* saved registers */
 static int func_initfp;
-static int spsub_addr;
-
-int i_args(void)
-{
-	return 16;
-}
-
-int i_sp(void)
-{
-	int i;
-	int n = 0;
-	for (i = 0; i < N_TMPS; i++)
-		if ((1 << tmpregs[i]) & func_sregs)
-			n += 8;
-	return -n;
-}
+static int func_nsregs;		/* number of saved registers */
+static int func_nsargs;		/* number of saved arguments */
+static int func_spsub;		/* stack pointer subtraction */
 
 static void i_saveargs(void)
 {
@@ -524,16 +352,16 @@ static void i_saveargs(void)
 	os("\x50", 1);		/* push rax */
 }
 
-void i_prolog(int argc, int varg, int sargs, int sregs, int initfp, int subsp)
+void i_prolog(int argc, int varg, int sargs, int sregs, int initfp, int spsub)
 {
 	int i;
-	last_set = -1;
-	func_argc = argc;
-	func_varg = varg;
+	int mod16;
+	int nsregs = 0;
+	int nsargs = 0;
 	func_sargs = sargs;
 	func_sregs = sregs;
 	func_initfp = initfp;
-	func_spsub = subsp;
+	func_spsub = 0;
 	if (func_sargs)
 		i_saveargs();
 	if (initfp) {
@@ -545,32 +373,28 @@ void i_prolog(int argc, int varg, int sargs, int sregs, int initfp, int subsp)
 			if ((1 << tmpregs[i]) & func_sregs)
 				i_push(tmpregs[i]);
 	}
-	if (func_spsub) {
-		os("\x48\x81\xec", 3);		/* sub rsp, $xxx */
-		spsub_addr = cslen;
-		oi(0, 4);
-	}
-}
-
-void i_epilog(int sp_max)
-{
-	int diff;
-	int nsregs = 0;
-	int nsargs = 0;
-	int i;
 	for (i = 0; i < N_TMPS; i++)
 		if ((1 << tmpregs[i]) & func_sregs)
 			nsregs++;
 	for (i = 0; i < N_ARGS; i++)
 		if ((1 << argregs[i]) & func_sargs)
 			nsargs++;
-	diff = ALIGN(-sp_max - nsregs * LONGSZ, 16);
+	func_nsregs = nsregs;
+	func_nsargs = nsargs;
 	/* forcing 16-byte alignment */
-	diff = (nsregs + nsargs) & 1 ? diff + LONGSZ : diff;
-	if (func_spsub && diff) {
-		i_add_anyimm(R_RSP, R_RBP, -nsregs * LONGSZ);
-		putint(cs + spsub_addr, diff, 4);
+	mod16 = (spsub + (nsargs + nsregs) * LONGSZ) % 16;
+	if (spsub) {
+		os("\x48\x81\xec", 3);
+		func_spsub = spsub + (16 - mod16);
+		oi(func_spsub, 4);
 	}
+}
+
+static void i_ret(void)
+{
+	int i;
+	if (func_spsub)
+		i_add_anyimm(R_RSP, R_RBP, -func_nsregs * LONGSZ);
 	if (func_sregs) {
 		for (i = 0; i < N_TMPS; i++)
 			if ((1 << tmpregs[i]) & func_sregs)
@@ -580,12 +404,172 @@ void i_epilog(int sp_max)
 		os("\xc9", 1);		/* leave */
 	if (func_sargs) {
 		os("\xc2", 1);		/* ret n */
-		oi(nsargs * LONGSZ, 2);
+		oi(func_nsargs * LONGSZ, 2);
 	} else {
 		os("\xc3", 1);		/* ret */
 	}
 }
 
+void i_epilog(void)
+{
+}
+
 void i_done(void)
 {
+}
+
+long i_reg(long op, long *rd, long *r1, long *r2, long *tmp, long bt)
+{
+	*rd = 0;
+	*r1 = R_TMPS;
+	*r2 = op & O_IMM ? 0 : R_TMPS;
+	*tmp = 0;
+	if ((op & 0xf0) == 0x00)	/* add */
+		return 0;
+	if ((op & 0xf0) == 0x10) {	/* shl */
+		if (~op & O_IMM) {
+			*r2 = 1 << R_RCX;
+			*r1 = R_TMPS & ~*r2;
+		}
+		return 0;
+	}
+	if ((op & 0xf0) == 0x20) {	/* mul */
+		*rd = (op & 0xff) == O_MOD ? (1 << R_RDX) : (1 << R_RAX);
+		*r1 = (1 << R_RAX);
+		*r2 = R_TMPS & ~*rd & ~*r1;
+		if ((op & 0xff) == O_DIV)
+			*r2 &= ~(1 << R_RDX);
+		*tmp = (1 << R_RDX) | (1 << R_RAX);
+		return 0;
+	}
+	if ((op & 0xf0) == 0x30) {	/* cmp */
+		*rd = 1 << R_RAX;
+		return 0;
+	}
+	if ((op & 0xf0) == 0x40) {	/* uop */
+		*r2 = 0;
+		if ((op & 0xff) == O_LNOT)
+			*r1 = 1 << R_RAX;
+		return 0;
+	}
+	if (op == O_MSET) {
+		*rd = 1 << R_RDI;
+		*r1 = 1 << R_RAX;
+		*r2 = 1 << R_RCX;
+	}
+	if (op == O_MCPY) {
+		*rd = 1 << R_RDI;
+		*r1 = 1 << R_RSI;
+		*r2 = 1 << R_RCX;
+	}
+	if (op == O_MOV) {
+		*rd = R_TMPS;
+		*r1 = R_TMPS;
+		*r2 = 0;
+	}
+	if (op == O_RET) {
+		*rd = (1 << REG_RET);
+		*r1 = 0;
+		*r2 = 0;
+	}
+	if (op == O_CALL) {
+		*rd = (1 << REG_RET);
+		*r1 = R_TMPS;
+		*r2 = 0;
+	}
+	if (op == O_SAVE || op == O_LOAD) {
+		*rd = R_TMPS;
+		*r1 = R_TMPS;
+		*r2 = 0;
+	}
+	if (op == O_JZ || op == O_SYM) {
+		*rd = R_TMPS;
+		*r1 = 0;
+		*r2 = 0;
+	}
+	return 0;
+}
+
+long i_ins(long op, long r0, long r1, long r2, long bt)
+{
+	if ((op & 0xf0) == 0x00) {
+		if (op & O_IMM)
+			i_op_imm(O_ADD, r0, r1, r2);
+		else
+			i_add(op, r1, r1, r2);
+	}
+	if ((op & 0xf0) == 0x10)
+		i_shl(op, r1, r1, r2);
+	if ((op & 0xf0) == 0x20) {
+		if ((op & 0xff) == O_MUL)
+			i_mul(R_RAX, r1, r2);
+		if ((op & 0xff) == O_DIV)
+			i_div(op, R_RAX, r1, r2);
+		if ((op & 0xff) == O_MOD)
+			i_div(op, R_RDX, r1, r2);
+		return 0;
+	}
+	if ((op & 0xf0) == 0x30) {
+		i_cmp(r1, r2);
+		i_set(op, r0);
+		return 0;
+	}
+	if ((op & 0xf0) == 0x40) {	/* uop */
+		if ((op & 0xff) == O_NEG)
+			i_neg(r1);
+		if ((op & 0xff) == O_NOT)
+			i_not(r1);
+		if ((op & 0xff) == O_LNOT)
+			i_lnot(r1);
+		return 0;
+	}
+	if (op == O_CALL) {
+		op_rr(I_CALL, 2, r1, LONGSZ);
+		return 0;
+	}
+	if (op == O_CALLSYM) {
+		os("\xe8", 1);		/* call $x */
+		out_rel(r2, OUT_CS | OUT_RLREL, opos());
+		oi(-4 + r1, 4);
+		return 0;
+	}
+	if (op == O_SYM) {
+		i_sym(r0, r2, r1);
+		return 0;
+	}
+	if (op == O_NUM) {
+		i_num(r0, r2);
+		return 0;
+	}
+	if (op == O_MSET) {
+		os("\xfc\xf3\xaa", 3);		/* cld; rep stosb */
+		return 0;
+	}
+	if (op == O_MCPY) {
+		os("\xfc\xf3\xa4", 3);		/* cld; rep movs */
+		return 0;
+	}
+	if (op == O_RET) {
+		i_ret();
+		return 0;
+	}
+	if (op == O_LOAD) {
+		op_rm(movrx_op(bt, I_MOVR), r0, r1, r2, movrx_bt(bt));
+		return 0;
+	}
+	if (op == O_SAVE) {
+		op_rm(I_MOV, r0, r1, r2, bt);
+		return 0;
+	}
+	if (op == O_MOV) {
+		i_cast(r0, r1, bt);
+		return 0;
+	}
+	if (op == O_JMP) {
+		return i_jmp(-1, 0, r2);
+	}
+	if (op == O_JZ) {
+		return i_jmp(r0, 1, r2);
+	}
+	return 1;
 }

@@ -4,8 +4,7 @@ OUT = x64
 CC = cc
 CFLAGS = -Wall -O2 -DNEATCC_`echo $(OUT) | tr xarm XARM`
 LDFLAGS =
-
-OBJS = ncc.o tok.o out.o cpp.o gen.o reg.o mem.o $(OUT).o
+OBJS = ncc.o tok.o out.o cpp.o gen.o int.o mem.o $(GEN)
 
 all: ncc
 %.o: %.c ncc.h

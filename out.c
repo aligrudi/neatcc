@@ -1,10 +1,9 @@
 /* neatcc ELF object generation */
 #include <elf.h>
+#include <stdio.h>
 #include <string.h>
 #include <unistd.h>
-#include "gen.h"
 #include "ncc.h"
-#include "out.h"
 
 #define ALIGN(x, a)		(((x) + (a) - 1) & ~((a) - 1))
 
@@ -132,11 +131,12 @@ static int syms_sort(void)
 	return glob_beg;
 }
 
-void out_init(int flags)
+void out_init(long flags)
 {
 }
 
-void out_sym(char *name, int flags, int off, int len)
+/* return a symbol identifier */
+void out_def(char *name, long flags, long off, long len)
 {
 	Elf_Sym *sym = put_sym(name);
 	int type = (flags & OUT_CS) ? STT_FUNC : STT_OBJECT;
@@ -150,6 +150,11 @@ void out_sym(char *name, int flags, int off, int len)
 	sym->st_info = ELF_ST_INFO(bind, type);
 	sym->st_value = off;
 	sym->st_size = len;
+}
+
+long out_sym(char *name)
+{
+	return put_sym(name) - syms;
 }
 
 static void out_csrel(int idx, int off, int flags)
@@ -170,10 +175,8 @@ static void out_dsrel(int idx, int off, int flags)
 	r->r_info = ELF_R_INFO(idx, rel_type(flags));
 }
 
-void out_rel(char *name, int flags, int off)
+void out_rel(long idx, long flags, long off)
 {
-	Elf_Sym *sym = put_sym(name);
-	int idx = sym - syms;
 	if (flags & OUT_DS)
 		out_dsrel(idx, off, flags);
 	else
@@ -193,7 +196,7 @@ static int bss_len(void)
 	return len;
 }
 
-void out_write(int fd, char *cs, int cslen, char *ds, int dslen)
+void out_write(int fd, char *cs, long cslen, char *ds, long dslen)
 {
 	Elf_Shdr *text_shdr = &shdr[SEC_TEXT];
 	Elf_Shdr *rela_shdr = &shdr[SEC_REL];

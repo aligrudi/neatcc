@@ -1,66 +1,32 @@
 /* neatcc tokenizer */
 #include <ctype.h>
-#include <unistd.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "gen.h"
-#include "mem.h"
+#include <unistd.h>
 #include "ncc.h"
-#include "tok.h"
 
 static struct mem tok_mem;	/* the data read via cpp_read() so far */
-static struct mem str;		/* the last tok_str() string */
+static struct mem tok;		/* the previous token */
 static char *buf;
-static int len;
-static int cur;
-static char name[NAMELEN];
-static int next = -1;
-static int pre;
-
-static struct {
-	char *name;
-	unsigned id;
-} kwds[] = {
-	{"void", TOK_VOID},
-	{"static", TOK_STATIC},
-	{"extern", TOK_EXTERN},
-	{"return", TOK_RETURN},
-	{"unsigned", TOK_UNSIGNED},
-	{"signed", TOK_SIGNED},
-	{"short", TOK_SHORT},
-	{"long", TOK_LONG},
-	{"int", TOK_INT},
-	{"char", TOK_CHAR},
-	{"struct", TOK_STRUCT},
-	{"union", TOK_UNION},
-	{"enum", TOK_ENUM},
-	{"typedef", TOK_TYPEDEF},
-	{"if", TOK_IF},
-	{"else", TOK_ELSE},
-	{"for", TOK_FOR},
-	{"while", TOK_WHILE},
-	{"do", TOK_DO},
-	{"switch", TOK_SWITCH},
-	{"case", TOK_CASE},
-	{"sizeof", TOK_SIZEOF},
-	{"break", TOK_BREAK},
-	{"continue", TOK_CONTINUE},
-	{"default", TOK_DEFAULT},
-	{"goto", TOK_GOTO},
-};
+static long off, off_pre;	/* current and previous positions */
+static long len;
+static int tok_set;		/* the current token was read */
 
 static char *tok3[] = {
 	"<<=", ">>=", "...", "<<", ">>", "++", "--", "+=", "-=", "*=", "/=",
 	"%=", "|=", "&=", "^=", "&&", "||", "==", "!=", "<=", ">=", "->"
 };
 
-static int get_tok3(int num)
+static char *find_tok3(char *r)
 {
 	int i;
-	for (i = 0; i < LEN(tok3); i++)
-		if (num == TOK3(tok3[i]))
-			return num;
-	return 0;
+	for (i = 0; i < LEN(tok3); i++) {
+		char *s = tok3[i];
+		if (s[0] == r[0] && s[1] == r[1] && (!s[2] || s[2] == r[2]))
+			return s;
+	}
+	return NULL;
 }
 
 static char *esc_code = "abefnrtv";
@@ -73,8 +39,8 @@ static int esc_char(int *c, char *s)
 		*c = (unsigned char) *s;
 		return 1;
 	}
-	if (strchr(esc_code, s[1])) {
-		*c = esc[strchr(esc_code, s[1]) - esc_code];
+	if (strchr(esc_code, (unsigned char) s[1])) {
+		*c = esc[strchr(esc_code, (unsigned char) s[1]) - esc_code];
 		return 2;
 	}
 	if (isdigit(s[1]) || s[1] == 'x') {
@@ -98,79 +64,45 @@ static int esc_char(int *c, char *s)
 	return 2;
 }
 
-static long num;
-static int num_bt;
-
-int tok_num(long *n)
-{
-	*n = num;
-	return num_bt;
-}
-
-static void readnum(void)
+long tok_num(char *tok, long *num)
 {
 	int base = 10;
-	num_bt = 4 | BT_SIGNED;
-	if (buf[cur] == '0' && tolower(buf[cur + 1]) == 'x') {
+	long num_bt = 4 | BT_SIGNED;
+	if (tok[0] == '0' && tolower(tok[1]) == 'x') {
 		num_bt &= ~BT_SIGNED;
 		base = 16;
-		cur += 2;
+		tok += 2;
 	}
-	if (strchr(digs, tolower(buf[cur]))) {
+	if (strchr(digs, tolower((unsigned char) tok[0]))) {
 		long result = 0;
 		char *c;
-		if (base == 10 && buf[cur] == '0')
+		if (base == 10 && tok[0] == '0')
 			base = 8;
-		while (cur < len && (c = strchr(digs, tolower(buf[cur])))) {
+		while (tok[0] && (c = strchr(digs, tolower((unsigned char) tok[0])))) {
 			result *= base;
 			result += c - digs;
-			cur++;
+			tok++;
 		}
-		num = result;
-		while (cur < len) {
-			int c = tolower(buf[cur]);
+		*num = result;
+		while (tok[0]) {
+			int c = tolower((unsigned char) tok[0]);
 			if (c != 'u' && c != 'l')
 				break;
 			if (c == 'u')
 				num_bt &= ~BT_SIGNED;
 			if (c == 'l')
 				num_bt = (num_bt & BT_SIGNED) | LONGSZ;
-			cur++;
+			tok++;
 		}
-		return;
+		return num_bt;
 	}
-	if (buf[cur] == '\'') {
+	if (tok[0] == '\'') {
 		int ret;
-		cur += 2 + esc_char(&ret, buf + cur + 1);
-		num = ret;
-		return;
+		esc_char(&ret, tok + 1);
+		*num = ret;
+		return num_bt;
 	}
-	num = -1;
-}
-
-void tok_str(char **buf, int *len)
-{
-	if (len)
-		*len = mem_len(&str) + 1;
-	if (buf)
-		*buf = mem_buf(&str);
-}
-
-static void readstr(struct mem *mem)
-{
-	char *s = buf + cur;
-	char *e = buf + len;
-	int c;
-	s++;
-	while (s < e && *s != '"') {
-		if (*s == '\\') {
-			s += esc_char(&c, s);
-			mem_putc(mem, c);
-		} else {
-			mem_putc(mem, (unsigned char) *s++);
-		}
-	}
-	cur = s - buf + 1;
+	return 0;
 }
 
 static int id_char(int c)
@@ -180,10 +112,10 @@ static int id_char(int c)
 
 static int skipws(void)
 {
-	int clen;
+	long clen;
 	char *cbuf;
 	while (1) {
-		if (cur == len) {
+		if (off == len) {
 			clen = 0;
 			while (!clen)
 				if (cpp_read(&cbuf, &clen))
@@ -192,24 +124,24 @@ static int skipws(void)
 			buf = mem_buf(&tok_mem);
 			len = mem_len(&tok_mem);
 		}
-		while (cur < len && isspace(buf[cur]))
-			cur++;
-		if (cur == len)
+		while (off < len && isspace(buf[off]))
+			off++;
+		if (off == len)
 			continue;
-		if (buf[cur] == '\\' && buf[cur + 1] == '\n') {
-			cur += 2;
-			continue;
-		}
-		if (buf[cur] == '/' && buf[cur + 1] == '/') {
-			while (++cur < len && buf[cur] != '\n')
-				if (buf[cur] == '\\')
-					cur++;
+		if (buf[off] == '\\' && buf[off + 1] == '\n') {
+			off += 2;
 			continue;
 		}
-		if (buf[cur] == '/' && buf[cur + 1] == '*') {
-			while (++cur < len) {
-				if (buf[cur] == '*' && buf[cur + 1] == '/') {
-					cur += 2;
+		if (buf[off] == '/' && buf[off + 1] == '/') {
+			while (++off < len && buf[off] != '\n')
+				if (buf[off] == '\\')
+					off++;
+			continue;
+		}
+		if (buf[off] == '/' && buf[off + 1] == '*') {
+			while (++off < len) {
+				if (buf[off] == '*' && buf[off + 1] == '/') {
+					off += 2;
 					break;
 				}
 			}
@@ -220,74 +152,100 @@ static int skipws(void)
 	return 0;
 }
 
-int tok_get(void)
+static int tok_read(void)
 {
-	int num;
-	if (next != -1) {
-		int tok = next;
-		next = -1;
-		return tok;
-	}
-	pre = cur;
+	char *t3;
+	int c;
+	off_pre = off;
+	mem_cut(&tok, 0);
 	if (skipws())
-		return TOK_EOF;
-	if (buf[cur] == '"') {
-		mem_cut(&str, 0);
-		while (buf[cur] == '"') {
-			readstr(&str);
+		return 1;
+	if (buf[off] == '"') {
+		mem_putc(&tok, '"');
+		while (buf[off] == '"') {
+			off++;
+			while (off < len && buf[off] != '"') {
+				if (buf[off] == '\\') {
+					off += esc_char(&c, buf + off);
+					mem_putc(&tok, c);
+				} else {
+					mem_putc(&tok, (unsigned char) buf[off++]);
+				}
+			}
+			if (off >= len || buf[off++] != '"')
+				return 1;
 			if (skipws())
-				return TOK_EOF;
+				return 1;
 		}
-		return TOK_STR;
+		mem_putc(&tok, '"');
+		return 0;
 	}
-	if (isdigit(buf[cur]) || buf[cur] == '\'') {
-		readnum();
-		return TOK_NUM;
+	if (isdigit((unsigned char) buf[off])) {
+		if (buf[off] == '0' && (buf[off + 1] == 'x' || buf[off + 1] == 'X')) {
+			mem_putc(&tok, (unsigned char) buf[off++]);
+			mem_putc(&tok, (unsigned char) buf[off++]);
+		}
+		while (off < len && strchr(digs, tolower((unsigned char) buf[off])))
+			mem_putc(&tok, (unsigned char) buf[off++]);
+		while (off < len && strchr("uUlL", (unsigned char) buf[off]))
+			mem_putc(&tok, (unsigned char) buf[off++]);
+		return 0;
 	}
-	if (id_char(buf[cur])) {
-		char *s = name;
-		int i;
-		while (cur < len && id_char(buf[cur]))
-			*s++ = buf[cur++];
-		*s = '\0';
-		for (i = 0; i < LEN(kwds); i++)
-			if (!strcmp(kwds[i].name, name))
-				return kwds[i].id;
-		return TOK_NAME;
+	if (buf[off] == '\'') {
+		int c, i;
+		int n = esc_char(&c, buf + off + 1) + 1 + 1;
+		for (i = 0; i < n; i++)
+			mem_putc(&tok, (unsigned char) buf[off++]);
+		return 0;
 	}
-	if (cur + 3 <= len && (num = get_tok3(TOK3(buf + cur)))) {
-		cur += 3;
-		return num;
+	if (id_char((unsigned char) buf[off])) {
+		while (off < len && id_char((unsigned char) buf[off]))
+			mem_putc(&tok, (unsigned char) buf[off++]);
+		return 0;
 	}
-	if ((num = get_tok3(TOK2(buf + cur)))) {
-		cur += 2;
-		return num;
+	if (off + 3 <= len && (t3 = find_tok3(buf + off))) {
+		off += strlen(t3);
+		mem_put(&tok, t3, strlen(t3));
+		return 0;
 	}
-	if (strchr(";,{}()[]<>*&!=+-/%?:|^~.", buf[cur]))
-		return buf[cur++];
-	return -1;
+	if (strchr(";,{}()[]<>*&!=+-/%?:|^~.", (unsigned char) buf[off])) {
+		mem_putc(&tok, (unsigned char) buf[off++]);
+		return 0;
+	}
+	return 1;
 }
 
-int tok_see(void)
+char *tok_get(void)
 {
-	if (next == -1)
-		next = tok_get();
-	return next;
+	if (!tok_set)
+		if (tok_read())
+			return "";
+	tok_set = 0;
+	return mem_buf(&tok);
 }
 
-char *tok_id(void)
+char *tok_see(void)
 {
-	return name;
+	if (!tok_set)
+		if (tok_read())
+			return "";
+	tok_set = 1;
+	return mem_buf(&tok);
+}
+
+long tok_len(void)
+{
+	return mem_len(&tok);
 }
 
 long tok_addr(void)
 {
-	return next == -1 ? cur : pre;
+	return tok_set ? off_pre : off;
 }
 
 void tok_jump(long addr)
 {
-	cur = addr;
-	pre = cur - 1;
-	next = -1;
+	off = addr;
+	off_pre = -1;
+	tok_set = 0;
 }

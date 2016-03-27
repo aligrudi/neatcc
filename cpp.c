@@ -9,9 +9,7 @@
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/stat.h>
-#include "mem.h"
 #include "ncc.h"
-#include "tok.h"
 
 static char *buf;
 static int len;
@@ -337,11 +335,11 @@ static int ecur;
 
 static long evalexpr(void);
 
-static int cpp_eval(void)
+static long cpp_eval(void)
 {
 	char evalbuf[MARGLEN];
 	int old_limit;
-	int ret, clen;
+	long ret, clen;
 	char *cbuf;
 	read_tilleol(evalbuf);
 	buf_new(BUF_EVAL, evalbuf, strlen(evalbuf));
@@ -545,7 +543,7 @@ static char seen_name[NAMELEN];	/* the name of the last macro */
 static int hunk_off;
 static int hunk_len;
 
-int cpp_read(char **obuf, int *olen)
+int cpp_read(char **obuf, long *olen)
 {
 	int old, end;
 	int jump_name = 0;
@@ -558,7 +556,7 @@ int cpp_read(char **obuf, int *olen)
 	if (cur == len) {
 		struct buf *cbuf = &bufs[nbufs - 1];
 		if (nbufs < bufs_limit + 1)
-			return -1;
+			return 1;
 		if (cbuf->type == BUF_FILE)
 			free(buf);
 		buf_pop();
@@ -621,6 +619,11 @@ int cpp_read(char **obuf, int *olen)
 }
 
 /* preprocessor constant expression evaluation */
+
+#define TOK2(a)		((a)[0] << 16 | (a)[1] << 8)
+#define TOK_NAME	256
+#define TOK_NUM		257
+#define TOK_EOF		-1
 
 static char etok[NAMELEN];
 static int enext;

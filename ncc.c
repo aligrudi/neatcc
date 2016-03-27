@@ -1,7 +1,7 @@
 /*
- * neatcc - the neatcc compiler
+ * THE NEATCC C COMPILER
  *
- * Copyright (C) 2010-2015 Ali Gholami Rudi
+ * Copyright (C) 2010-2016 Ali Gholami Rudi
  *
  * This program is released under the Modified BSD license.
  */
@@ -20,6 +20,7 @@
  * (ts_binop()).
  *
  */
+#include <ctype.h>
 #include <fcntl.h>
 #include <unistd.h>
 #include <stdarg.h>
@@ -28,43 +29,14 @@
 #include <stdio.h>
 #include <sys/stat.h>
 #include <sys/types.h>
-#include "gen.h"
 #include "ncc.h"
-#include "out.h"
-#include "tok.h"
-
-static int nogen;		/* do not generate code, if set */
-#define o_bop(op)		{if (!nogen) o_bop(op);}
-#define o_uop(op)		{if (!nogen) o_uop(op);}
-#define o_cast(bt)		{if (!nogen) o_cast(bt);}
-#define o_memcpy()		{if (!nogen) o_memcpy();}
-#define o_memset()		{if (!nogen) o_memset();}
-#define o_call(argc, ret)	{if (!nogen) o_call(argc, ret);}
-#define o_ret(ret)		{if (!nogen) o_ret(ret);}
-#define o_assign(bt)		{if (!nogen) o_assign(bt);}
-#define o_deref(bt)		{if (!nogen) o_deref(bt);}
-#define o_load()		{if (!nogen) o_load();}
-#define o_popnum(c)		(nogen ? 0 : o_popnum(c))
-#define o_num(n)		{if (!nogen) o_num(n);}
-#define o_local(addr)		{if (!nogen) o_local(addr);}
-#define o_sym(sym)		{if (!nogen) o_sym(sym);}
-#define o_tmpdrop(n)		{if (!nogen) o_tmpdrop(n);}
-#define o_tmpswap()		{if (!nogen) o_tmpswap();}
-#define o_tmpcopy()		{if (!nogen) o_tmpcopy();}
-#define o_label(id)		{if (!nogen) o_label(id);}
-#define o_jz(id)		{if (!nogen) o_jz(id);}
-#define o_jnz(id)		{if (!nogen) o_jnz(id);}
-#define o_jmp(id)		{if (!nogen) o_jmp(id);}
-#define o_fork()		{if (!nogen) o_fork();}
-#define o_forkpush()		{if (!nogen) o_forkpush();}
-#define o_forkjoin()		{if (!nogen) o_forkjoin();}
 
 #define ALIGN(x, a)		(((x) + (a) - 1) & ~((a) - 1))
 #define MIN(a, b)		((a) < (b) ? (a) : (b))
 #define MAX(a, b)		((a) < (b) ? (b) : (a))
 
-#define TYPE_BT(t)		((t)->ptr ? LONGSZ : (t)->bt)
-#define TYPE_SZ(t)		((t)->ptr ? LONGSZ : (t)->bt & BT_SZMASK)
+#define TYPE_BT(t)		((t)->ptr ? ULNG : (t)->bt)
+#define TYPE_SZ(t)		((t)->ptr ? ULNG : (t)->bt & BT_SZMASK)
 #define TYPE_VOID(t)		(!(t)->bt && !(t)->flags && !(t)->ptr)
 
 /* type->flag values */
@@ -126,6 +98,15 @@ void err(char *fmt, ...)
 	vsprintf(msg, fmt, ap);
 	va_end(ap);
 	die("%s: %s", cpp_loc(tok_addr()), msg);
+}
+
+void *mextend(void *old, long oldsz, long newsz, long memsz)
+{
+	void *new = malloc(newsz * memsz);
+	memcpy(new, old, oldsz * memsz);
+	memset(new + oldsz * memsz, 0, (newsz - oldsz) * memsz);
+	free(old);
+	return new;
 }
 
 struct name {
@@ -292,7 +273,7 @@ static struct name *struct_field(int id, char *name)
 static int type_totsz(struct type *t)
 {
 	if (t->ptr)
-		return LONGSZ;
+		return ULNG;
 	if (t->flags & T_ARRAY)
 		return arrays[t->id].n * type_totsz(&arrays[t->id].type);
 	return t->flags & T_STRUCT ? structs[t->id].size : BT_SZ(t->bt);
@@ -333,31 +314,57 @@ static void ts_pop_de2(struct type *t1, struct type *t2)
 	o_tmpswap();
 }
 
-static int tok_jmp(int tok)
+/* the previous identifier; to handle labels */
+static char tok_previden[NAMELEN];
+
+static char *tok_iden(void)
 {
-	if (tok_see() != tok)
+	snprintf(tok_previden, sizeof(tok_previden), "%s", tok_get());
+	return tok_previden;
+}
+
+static int tok_jmp(char *tok)
+{
+	if (strcmp(tok, tok_see()))
 		return 1;
 	tok_get();
 	return 0;
 }
 
-static void tok_expect(int tok)
+static int tok_comes(char *tok)
 {
-	if (tok_get() != tok)
+	return !strcmp(tok, tok_see());
+}
+
+static void tok_req(char *tok)
+{
+	if (strcmp(tok, tok_get()))
 		err("syntax error\n");
+}
+
+static int tok_grp(void)
+{
+	int c = (unsigned char) tok_see()[0];
+	if (c == '"')
+		return '"';
+	if (c == '\'' || isdigit(c))
+		return '0';
+	if (c == '_' || isalpha(c))
+		return 'a';
+	return 0;
 }
 
 /* the result of a binary operation on variables of type bt1 and bt2 */
 static unsigned bt_op(unsigned bt1, unsigned bt2)
 {
 	int sz = MAX(BT_SZ(bt1), BT_SZ(bt2));
-	return ((bt1 | bt2) & BT_SIGNED) | MAX(sz, 4);
+	return ((bt1 | bt2) & BT_SIGNED) | MAX(sz, UINT);
 }
 
 /* the result of a unary operation on variables of bt */
 static unsigned bt_uop(unsigned bt)
 {
-	return bt_op(bt, 4);
+	return bt_op(bt, UINT);
 }
 
 /* push the result of a binary operation on the type stack */
@@ -401,7 +408,7 @@ static void ts_addop(int op)
 			o_num(sz);
 			o_bop(O_DIV);
 		}
-		ts_push_bt(LONGSZ | BT_SIGNED);
+		ts_push_bt(SLNG);
 	} else {
 		ts_push(t1.ptr ? &t1 : &t2);
 	}
@@ -426,7 +433,7 @@ static int type_alignment(struct type *t)
 		return type_alignment(&arrays[t->id].type);
 	if (t->flags & T_STRUCT && !t->ptr)
 		return type_alignment(&structs[t->id].fields[0].type);
-	return MIN(LONGSZ, type_totsz(t));
+	return MIN(ULNG, type_totsz(t));
 }
 
 static void structdef(void *data, struct name *name, unsigned flags)
@@ -440,7 +447,7 @@ static void structdef(void *data, struct name *name, unsigned flags)
 		struct type *t = &name->type;
 		int alignment = type_alignment(t);
 		if (t->flags & T_ARRAY && !t->ptr)
-			alignment = MIN(LONGSZ, type_totsz(&arrays[t->id].type));
+			alignment = MIN(ULNG, type_totsz(&arrays[t->id].type));
 		si->size = ALIGN(si->size, alignment);
 		name->addr = si->size;
 		si->size += type_totsz(&name->type);
@@ -452,10 +459,10 @@ static int struct_create(char *name, int isunion)
 {
 	int id = struct_find(name, isunion);
 	struct structinfo *si = &structs[id];
-	tok_expect('{');
-	while (tok_jmp('}')) {
+	tok_req("{");
+	while (tok_jmp("}")) {
 		readdefs(structdef, si);
-		tok_expect(';');
+		tok_req(";");
 	}
 	return id;
 }
@@ -465,19 +472,18 @@ static void readexpr(void);
 static void enum_create(void)
 {
 	long n = 0;
-	tok_expect('{');
-	while (tok_jmp('}')) {
+	tok_req("{");
+	while (tok_jmp("}")) {
 		char name[NAMELEN];
-		tok_expect(TOK_NAME);
-		strcpy(name, tok_id());
-		if (!tok_jmp('=')) {
+		strcpy(name, tok_get());
+		if (!tok_jmp("=")) {
 			readexpr();
 			ts_pop_de(NULL);
 			if (o_popnum(&n))
 				err("const expr expected!\n");
 		}
 		enum_add(name, n++);
-		tok_jmp(',');
+		tok_jmp(",");
 	}
 }
 
@@ -492,39 +498,39 @@ static char *tmp_str(char *buf, int len)
 	static char name[NAMELEN];
 	static int id;
 	sprintf(name, "__neatcc.s%d", id++);
-	o_dscpy(o_dsnew(name, len, 0), buf, len);
+	buf[len] = '\0';
+	o_dscpy(o_dsnew(name, len + 1, 0), buf, len + 1);
 	return name;
 }
 
 static void readprimary(void)
 {
-	if (!tok_jmp(TOK_NUM)) {
+	if (tok_grp() == '0') {
 		long n;
-		int bt = tok_num(&n);
+		int bt = tok_num(tok_get(), &n);
 		o_num(n);
 		ts_push_bt(bt);
 		return;
 	}
-	if (!tok_jmp(TOK_STR)) {
+	if (tok_grp() == '"') {
 		struct type t = {};	/* char type inside the arrays */
 		struct type a = {};	/* the char array type */
-		char *buf;
-		int len;
-		tok_str(&buf, &len);
+		char *buf = tok_get() + 1;
+		int len = tok_len() - 2;
 		t.bt = 1 | BT_SIGNED;
-		a.id = array_add(&t, len);
+		a.id = array_add(&t, len + 1);
 		a.flags = T_ARRAY;
 		o_sym(tmp_str(buf, len));
 		ts_push(&a);
 		return;
 	}
-	if (!tok_jmp(TOK_NAME)) {
+	if (tok_grp() == 'a') {
 		struct name unkn = {""};
 		char *name = unkn.name;
 		int n;
-		strcpy(name, tok_id());
+		strcpy(name, tok_iden());
 		/* don't search for labels here */
-		if (!ncexpr && !caseexpr && tok_see() == ':')
+		if (!ncexpr && !caseexpr && tok_comes(":"))
 			return;
 		if ((n = local_find(name)) != -1) {
 			struct name *l = &locals[n];
@@ -540,21 +546,21 @@ static void readprimary(void)
 		}
 		if (!enum_find(&n, name)) {
 			o_num(n);
-			ts_push_bt(4 | BT_SIGNED);
+			ts_push_bt(SINT);
 			return;
 		}
-		if (tok_see() != '(')
+		if (!tok_comes("("))
 			err("unknown symbol <%s>\n", name);
 		global_add(&unkn);
 		o_sym(unkn.name);
-		ts_push_bt(LONGSZ);
+		ts_push_bt(ULNG);
 		return;
 	}
-	if (!tok_jmp('(')) {
+	if (!tok_jmp("(")) {
 		struct type t;
 		if (!readtype(&t)) {
 			struct type o;
-			tok_expect(')');
+			tok_req(")");
 			readpre();
 			ts_pop_de(&o);
 			ts_push(&t);
@@ -562,8 +568,8 @@ static void readprimary(void)
 				o_cast(TYPE_BT(&t));
 		} else {
 			readexpr();
-			while (tok_jmp(')')) {
-				tok_expect(',');
+			while (tok_jmp(")")) {
+				tok_req(",");
 				ts_pop(NULL);
 				o_tmpdrop(1);
 				readexpr();
@@ -602,7 +608,6 @@ static void inc_post(int op)
 	/* pushing the value before inc */
 	o_tmpcopy();
 	ts_de(1);
-	o_load();
 	o_tmpswap();
 
 	/* increment by 1 or pointer size */
@@ -621,10 +626,9 @@ static void readfield(void)
 {
 	struct name *field;
 	struct type t;
-	tok_expect(TOK_NAME);
 	ts_pop(&t);
 	array2ptr(&t);
-	field = struct_field(t.id, tok_id());
+	field = struct_field(t.id, tok_get());
 	if (field->addr) {
 		o_num(field->addr);
 		o_bop(O_ADD);
@@ -668,23 +672,23 @@ static void readcall(void)
 	int argc = 0;
 	ts_pop(&t);
 	if (t.flags & T_FUNC && t.ptr > 0)
-		o_deref(LONGSZ);
+		o_deref(ULNG);
 	fi = t.flags & T_FUNC ? &funcs[t.id] : NULL;
-	if (tok_see() != ')') {
+	if (!tok_comes(")")) {
 		do {
 			readexpr();
 			ts_pop_de(NULL);
 			argc++;
-		} while (!tok_jmp(','));
+		} while (!tok_jmp(","));
 	}
-	tok_expect(')');
-	o_call(argc, fi ? TYPE_BT(&fi->ret) : 4 | BT_SIGNED);
+	tok_req(")");
+	o_call(argc, fi ? TYPE_BT(&fi->ret) : SINT);
 	if (fi) {
 		if (TYPE_BT(&fi->ret))
 			o_cast(TYPE_BT(&fi->ret));
 		ts_push(&fi->ret);
 	} else {
-		ts_push_bt(4 | BT_SIGNED);
+		ts_push_bt(SINT);
 	}
 }
 
@@ -692,29 +696,29 @@ static void readpost(void)
 {
 	readprimary();
 	while (1) {
-		if (!tok_jmp('[')) {
+		if (!tok_jmp("[")) {
 			readexpr();
-			tok_expect(']');
+			tok_req("]");
 			arrayderef();
 			continue;
 		}
-		if (!tok_jmp('(')) {
+		if (!tok_jmp("(")) {
 			readcall();
 			continue;
 		}
-		if (!tok_jmp(TOK2("++"))) {
+		if (!tok_jmp("++")) {
 			inc_post(O_ADD);
 			continue;
 		}
-		if (!tok_jmp(TOK2("--"))) {
+		if (!tok_jmp("--")) {
 			inc_post(O_SUB);
 			continue;
 		}
-		if (!tok_jmp('.')) {
+		if (!tok_jmp(".")) {
 			readfield();
 			continue;
 		}
-		if (!tok_jmp(TOK2("->"))) {
+		if (!tok_jmp("->")) {
 			ts_de(1);
 			readfield();
 			continue;
@@ -742,7 +746,7 @@ static void inc_pre(int op)
 static void readpre(void)
 {
 	struct type t;
-	if (!tok_jmp('&')) {
+	if (!tok_jmp("&")) {
 		readpre();
 		ts_pop(&t);
 		if (!t.addr)
@@ -752,7 +756,7 @@ static void readpre(void)
 		ts_push(&t);
 		return;
 	}
-	if (!tok_jmp('*')) {
+	if (!tok_jmp("*")) {
 		readpre();
 		ts_pop(&t);
 		array2ptr(&t);
@@ -765,21 +769,21 @@ static void readpre(void)
 		ts_push(&t);
 		return;
 	}
-	if (!tok_jmp('!')) {
+	if (!tok_jmp("!")) {
 		readpre();
 		ts_pop_de(NULL);
 		o_uop(O_LNOT);
-		ts_push_bt(4 | BT_SIGNED);
+		ts_push_bt(SINT);
 		return;
 	}
-	if (!tok_jmp('+')) {
+	if (!tok_jmp("+")) {
 		readpre();
 		ts_de(1);
 		ts_pop(&t);
 		ts_push_bt(bt_uop(TYPE_BT(&t)));
 		return;
 	}
-	if (!tok_jmp('-')) {
+	if (!tok_jmp("-")) {
 		readpre();
 		ts_de(1);
 		ts_pop(&t);
@@ -787,7 +791,7 @@ static void readpre(void)
 		ts_push_bt(bt_uop(TYPE_BT(&t)));
 		return;
 	}
-	if (!tok_jmp('~')) {
+	if (!tok_jmp("~")) {
 		readpre();
 		ts_de(1);
 		ts_pop(&t);
@@ -795,30 +799,31 @@ static void readpre(void)
 		ts_push_bt(bt_uop(TYPE_BT(&t)));
 		return;
 	}
-	if (!tok_jmp(TOK2("++"))) {
+	if (!tok_jmp("++")) {
 		inc_pre(O_ADD);
 		return;
 	}
-	if (!tok_jmp(TOK2("--"))) {
+	if (!tok_jmp("--")) {
 		inc_pre(O_SUB);
 		return;
 	}
-	if (!tok_jmp(TOK_SIZEOF)) {
+	if (!tok_jmp("sizeof")) {
 		struct type t;
-		int op = !tok_jmp('(');
+		int op = !tok_jmp("(");
 		if (readtype(&t)) {
-			nogen++;
+			long m = o_mark();
 			if (op)
 				readexpr();
 			else
 				readpre();
-			nogen--;
+			o_back(m);
 			ts_pop(&t);
+			o_tmpdrop(1);
 		}
 		o_num(type_totsz(&t));
-		ts_push_bt(LONGSZ);
+		ts_push_bt(ULNG);
 		if (op)
-			tok_expect(')');
+			tok_req(")");
 		return;
 	}
 	readpost();
@@ -828,17 +833,17 @@ static void readmul(void)
 {
 	readpre();
 	while (1) {
-		if (!tok_jmp('*')) {
+		if (!tok_jmp("*")) {
 			readpre();
 			ts_binop(O_MUL);
 			continue;
 		}
-		if (!tok_jmp('/')) {
+		if (!tok_jmp("/")) {
 			readpre();
 			ts_binop(O_DIV);
 			continue;
 		}
-		if (!tok_jmp('%')) {
+		if (!tok_jmp("%")) {
 			readpre();
 			ts_binop(O_MOD);
 			continue;
@@ -851,12 +856,12 @@ static void readadd(void)
 {
 	readmul();
 	while (1) {
-		if (!tok_jmp('+')) {
+		if (!tok_jmp("+")) {
 			readmul();
 			ts_addop(O_ADD);
 			continue;
 		}
-		if (!tok_jmp('-')) {
+		if (!tok_jmp("-")) {
 			readmul();
 			ts_addop(O_SUB);
 			continue;
@@ -878,11 +883,11 @@ static void readshift(void)
 {
 	readadd();
 	while (1) {
-		if (!tok_jmp(TOK2("<<"))) {
+		if (!tok_jmp("<<")) {
 			shift(O_SHL);
 			continue;
 		}
-		if (!tok_jmp(TOK2(">>"))) {
+		if (!tok_jmp(">>")) {
 			shift(O_SHR);
 			continue;
 		}
@@ -898,26 +903,26 @@ static void cmp(int op)
 	ts_pop_de2(&t1, &t2);
 	bt = bt_op(TYPE_BT(&t1), TYPE_BT(&t2));
 	o_bop(op | (bt & BT_SIGNED ? O_SIGNED : 0));
-	ts_push_bt(4 | BT_SIGNED);
+	ts_push_bt(SINT);
 }
 
 static void readcmp(void)
 {
 	readshift();
 	while (1) {
-		if (!tok_jmp('<')) {
+		if (!tok_jmp("<")) {
 			cmp(O_LT);
 			continue;
 		}
-		if (!tok_jmp('>')) {
+		if (!tok_jmp(">")) {
 			cmp(O_GT);
 			continue;
 		}
-		if (!tok_jmp(TOK2("<="))) {
+		if (!tok_jmp("<=")) {
 			cmp(O_LE);
 			continue;
 		}
-		if (!tok_jmp(TOK2(">="))) {
+		if (!tok_jmp(">=")) {
 			cmp(O_GE);
 			continue;
 		}
@@ -930,18 +935,18 @@ static void eq(int op)
 	readcmp();
 	ts_pop_de2(NULL, NULL);
 	o_bop(op);
-	ts_push_bt(4 | BT_SIGNED);
+	ts_push_bt(SINT);
 }
 
 static void readeq(void)
 {
 	readcmp();
 	while (1) {
-		if (!tok_jmp(TOK2("=="))) {
+		if (!tok_jmp("==")) {
 			eq(O_EQ);
 			continue;
 		}
-		if (!tok_jmp(TOK2("!="))) {
+		if (!tok_jmp("!=")) {
 			eq(O_NEQ);
 			continue;
 		}
@@ -952,7 +957,7 @@ static void readeq(void)
 static void readbitand(void)
 {
 	readeq();
-	while (!tok_jmp('&')) {
+	while (!tok_jmp("&")) {
 		readeq();
 		ts_binop(O_AND);
 	}
@@ -961,7 +966,7 @@ static void readbitand(void)
 static void readxor(void)
 {
 	readbitand();
-	while (!tok_jmp('^')) {
+	while (!tok_jmp("^")) {
 		readbitand();
 		ts_binop(O_XOR);
 	}
@@ -970,100 +975,123 @@ static void readxor(void)
 static void readbitor(void)
 {
 	readxor();
-	while (!tok_jmp('|')) {
+	while (!tok_jmp("|")) {
 		readxor();
 		ts_binop(O_OR);
 	}
 }
 
+static void savelocal(long val, int bt)
+{
+	o_local(val);
+	o_tmpswap();
+	o_assign(UINT);
+	o_tmpdrop(1);
+}
+
+static void loadlocal(long val, int bt)
+{
+	o_local(val);
+	o_deref(bt);
+	o_rmlocal(val, bt);
+}
+
 static void readand(void)
 {
 	int l_out, l_fail;
+	long val;
 	readbitor();
-	if (tok_see() != TOK2("&&"))
+	if (!tok_comes("&&"))
 		return;
+	val = o_mklocal(UINT);
 	l_out = LABEL();
 	l_fail = LABEL();
-	o_fork();
 	ts_pop_de(NULL);
 	o_jz(l_fail);
-	while (!tok_jmp(TOK2("&&"))) {
+	while (!tok_jmp("&&")) {
 		readbitor();
 		ts_pop_de(NULL);
 		o_jz(l_fail);
 	}
 	o_num(1);
-	o_forkpush();
+	savelocal(val, UINT);
 	o_jmp(l_out);
 	o_label(l_fail);
 	o_num(0);
-	o_forkpush();
-	o_forkjoin();
+	savelocal(val, UINT);
 	o_label(l_out);
-	ts_push_bt(4 | BT_SIGNED);
+	loadlocal(val, SINT);
+	ts_push_bt(SINT);
 }
 
 static void reador(void)
 {
 	int l_pass, l_end;
+	long val;
 	readand();
-	if (tok_see() != TOK2("||"))
+	if (!tok_comes("||"))
 		return;
+	val = o_mklocal(UINT);
 	l_pass = LABEL();
 	l_end = LABEL();
-	o_fork();
 	ts_pop_de(NULL);
-	o_jnz(l_pass);
-	while (!tok_jmp(TOK2("||"))) {
+	o_uop(O_LNOT);
+	o_jz(l_pass);
+	while (!tok_jmp("||")) {
 		readand();
 		ts_pop_de(NULL);
-		o_jnz(l_pass);
+		o_uop(O_LNOT);
+		o_jz(l_pass);
 	}
 	o_num(0);
-	o_forkpush();
+	savelocal(val, SINT);
 	o_jmp(l_end);
 	o_label(l_pass);
 	o_num(1);
-	o_forkpush();
-	o_forkjoin();
+	savelocal(val, SINT);
 	o_label(l_end);
-	ts_push_bt(4 | BT_SIGNED);
+	loadlocal(val, SINT);
+	ts_push_bt(SINT);
 }
 
 static void readcexpr(void);
 
 static int readcexpr_const(void)
 {
-	long c;
+	long c, m = 0;
 	if (o_popnum(&c))
 		return -1;
 	if (!c)
-		nogen++;
+		m = o_mark();
 	readcexpr();
 	/* both branches yield the same type; so ignore the first */
 	ts_pop_de(NULL);
-	tok_expect(':');
+	tok_req(":");
+	if (!c) {
+		o_back(m);
+		o_tmpdrop(1);
+	}
 	if (c)
-		nogen++;
-	else
-		nogen--;
+		m = o_mark();
 	readcexpr();
 	/* making sure t->addr == 0 on both branches */
 	ts_de(1);
-	if (c)
-		nogen--;
+	if (c) {
+		o_back(m);
+		o_tmpdrop(1);
+	}
 	return 0;
 }
 
 static void readcexpr(void)
 {
 	reador();
-	if (tok_jmp('?'))
+	if (tok_jmp("?"))
 		return;
 	ncexpr++;
 	ts_pop_de(NULL);
-	o_fork();
 	if (readcexpr_const()) {
+		long val = 0;
 		int l_fail = LABEL();
 		int l_end = LABEL();
 		struct type ret;
@@ -1071,20 +1099,24 @@ static void readcexpr(void)
 		readcexpr();
 		/* both branches yield the same type; so ignore the first */
 		ts_pop_de(&ret);
-		if (!TYPE_VOID(&ret))
-			o_forkpush();
+		if (!TYPE_VOID(&ret)) {
+			val = o_mklocal(ULNG);
+			savelocal(val, ULNG);
+		}
 		o_jmp(l_end);
 
-		tok_expect(':');
+		tok_req(":");
 		o_label(l_fail);
 		readcexpr();
 		/* making sure t->addr == 0 on both branches */
 		ts_de(1);
 		if (!TYPE_VOID(&ret)) {
-			o_forkpush();
-			o_forkjoin();
+			savelocal(val, ULNG);
 		}
 		o_label(l_end);
+		if (!TYPE_VOID(&ret)) {
+			loadlocal(val, ULNG);
+		}
 	}
 	ncexpr--;
 }
@@ -1121,48 +1153,48 @@ static void doassign(void)
 static void readexpr(void)
 {
 	readcexpr();
-	if (!tok_jmp('=')) {
+	if (!tok_jmp("=")) {
 		readexpr();
 		doassign();
 		return;
 	}
-	if (!tok_jmp(TOK2("+="))) {
+	if (!tok_jmp("+=")) {
 		opassign(O_ADD, 1);
 		return;
 	}
-	if (!tok_jmp(TOK2("-="))) {
+	if (!tok_jmp("-=")) {
 		opassign(O_SUB, 1);
 		return;
 	}
-	if (!tok_jmp(TOK2("*="))) {
+	if (!tok_jmp("*=")) {
 		opassign(O_MUL, 0);
 		return;
 	}
-	if (!tok_jmp(TOK2("/="))) {
+	if (!tok_jmp("/=")) {
 		opassign(O_DIV, 0);
 		return;
 	}
-	if (!tok_jmp(TOK2("%="))) {
+	if (!tok_jmp("%=")) {
 		opassign(O_MOD, 0);
 		return;
 	}
-	if (!tok_jmp(TOK3("<<="))) {
+	if (!tok_jmp("<<=")) {
 		opassign(O_SHL, 0);
 		return;
 	}
-	if (!tok_jmp(TOK3(">>="))) {
+	if (!tok_jmp(">>=")) {
 		opassign(O_SHR, 0);
 		return;
 	}
-	if (!tok_jmp(TOK3("&="))) {
+	if (!tok_jmp("&=")) {
 		opassign(O_AND, 0);
 		return;
 	}
-	if (!tok_jmp(TOK3("|="))) {
+	if (!tok_jmp("|=")) {
 		opassign(O_OR, 0);
 		return;
 	}
-	if (!tok_jmp(TOK3("^="))) {
+	if (!tok_jmp("^=")) {
 		opassign(O_XOR, 0);
 		return;
 	}
@@ -1174,7 +1206,7 @@ static void readestmt(void)
 		o_tmpdrop(-1);
 		nts = 0;
 		readexpr();
-	} while (!tok_jmp(','));
+	} while (!tok_jmp(","));
 }
 
 #define F_GLOBAL(flags)		(!((flags) & F_STATIC))
@@ -1183,14 +1215,13 @@ static void globalinit(void *obj, int off, struct type *t)
 {
 	struct name *name = obj;
 	char *elfname = *name->elfname ? name->elfname : name->name;
-	if (t->flags & T_ARRAY && tok_see() == TOK_STR) {
+	if (t->flags & T_ARRAY && tok_grp() == '"') {
 		struct type *t_de = &arrays[t->id].type;
 		if (!t_de->ptr && !t_de->flags && TYPE_SZ(t_de) == 1) {
-			char *buf;
-			int len;
-			tok_expect(TOK_STR);
-			tok_str(&buf, &len);
-			o_dscpy(name->addr + off, buf, len);
+			char *buf = tok_get() + 1;
+			int len = tok_len() - 2;
+			buf[len] = '\0';
+			o_dscpy(name->addr + off, buf, len + 1);
 			return;
 		}
 	}
@@ -1211,15 +1242,15 @@ static void globaldef(void *data, struct name *name, unsigned flags)
 			arrays[t->id].n = initsize();
 	sz = type_totsz(t);
 	if (!(flags & F_EXTERN) && (!(t->flags & T_FUNC) || t->ptr)) {
-		if (tok_see() == '=')
+		if (tok_comes("="))
 			name->addr = o_dsnew(elfname, sz, F_GLOBAL(flags));
 		else
 			o_bsnew(elfname, sz, F_GLOBAL(flags));
 	}
 	global_add(name);
-	if (!tok_jmp('='))
+	if (!tok_jmp("="))
 		initexpr(t, 0, name, globalinit);
-	if (tok_see() == '{' && name->type.flags & T_FUNC)
+	if (tok_comes("{") && name->type.flags & T_FUNC)
 		readfunc(name, flags);
 }
 
@@ -1236,16 +1267,14 @@ static void o_localoff(long addr, int off)
 static void localinit(void *obj, int off, struct type *t)
 {
 	long addr = *(long *) obj;
-	if (t->flags & T_ARRAY && tok_see() == TOK_STR) {
+	if (t->flags & T_ARRAY && tok_grp() == '"') {
 		struct type *t_de = &arrays[t->id].type;
 		if (!t_de->ptr && !t_de->flags && TYPE_SZ(t_de) == 1) {
-			char *buf;
-			int len;
-			tok_expect(TOK_STR);
-			tok_str(&buf, &len);
+			char *buf = tok_get() + 1;
+			int len = tok_len() - 2;
 			o_localoff(addr, off);
 			o_sym(tmp_str(buf, len));
-			o_num(len);
+			o_num(len + 1);
 			o_memcpy();
 			o_tmpdrop(1);
 			return;
@@ -1278,7 +1307,7 @@ static void localdef(void *data, struct name *name, unsigned flags)
 		arrays[t->id].n = initsize();
 	name->addr = o_mklocal(type_totsz(&name->type));
 	local_add(name);
-	if (!tok_jmp('=')) {
+	if (!tok_jmp("=")) {
 		if (t->flags & (T_ARRAY | T_STRUCT) && !t->ptr) {
 			o_local(name->addr);
 			o_num(0);
@@ -1300,14 +1329,14 @@ static void readstmt(void);
 static void readswitch(void)
 {
 	int o_break = l_break;
-	long val_addr = o_mklocal(LONGSZ);
+	long val_addr = o_mklocal(ULNG);
 	struct type t;
 	int ncases = 0;			/* number of case labels */
 	int l_failed = LABEL();		/* address of last failed jmp */
 	int l_matched = LABEL();	/* address of last walk through jmp */
 	int l_default = 0;		/* default case label */
 	l_break = LABEL();
-	tok_expect('(');
+	tok_req("(");
 	readexpr();
 	ts_pop_de(&t);
 	o_local(val_addr);
@@ -1315,16 +1344,16 @@ static void readswitch(void)
 	o_assign(TYPE_BT(&t));
 	ts_de(0);
 	o_tmpdrop(1);
-	tok_expect(')');
-	tok_expect('{');
-	while (tok_jmp('}')) {
-		if (tok_see() != TOK_CASE && tok_see() != TOK_DEFAULT) {
+	tok_req(")");
+	tok_req("{");
+	while (tok_jmp("}")) {
+		if (!tok_comes("case") && !tok_comes("default")) {
 			readstmt();
 			continue;
 		}
 		if (ncases)
 			o_jmp(l_matched);
-		if (tok_get() == TOK_CASE) {
+		if (!strcmp("case", tok_get())) {
 			o_label(l_failed);
 			l_failed = LABEL();
 			caseexpr = 1;
@@ -1342,12 +1371,12 @@ static void readswitch(void)
 			l_default = LABEL();
 			o_label(l_default);
 		}
-		tok_expect(':');
+		tok_req(":");
 		o_label(l_matched);
 		l_matched = LABEL();
 		ncases++;
 	}
-	o_rmlocal(val_addr, LONGSZ);
+	o_rmlocal(val_addr, ULNG);
 	o_jmp(l_break);
 	o_label(l_failed);
 	if (l_default)
@@ -1375,7 +1404,7 @@ static void readstmt(void)
 {
 	o_tmpdrop(-1);
 	nts = 0;
-	if (!tok_jmp('{')) {
+	if (!tok_jmp("{")) {
 		int _nlocals = nlocals;
 		int _nglobals = nglobals;
 		int _nenums = nenums;
@@ -1383,7 +1412,7 @@ static void readstmt(void)
 		int _nstructs = nstructs;
 		int _nfuncs = nfuncs;
 		int _narrays = narrays;
-		while (tok_jmp('}'))
+		while (tok_jmp("}"))
 			readstmt();
 		nlocals = _nlocals;
 		nenums = _nenums;
@@ -1395,24 +1424,24 @@ static void readstmt(void)
 		return;
 	}
 	if (!readdefs(localdef, NULL)) {
-		tok_expect(';');
+		tok_req(";");
 		return;
 	}
-	if (!tok_jmp(TOK_TYPEDEF)) {
+	if (!tok_jmp("typedef")) {
 		readdefs(typedefdef, NULL);
-		tok_expect(';');
+		tok_req(";");
 		return;
 	}
-	if (!tok_jmp(TOK_IF)) {
+	if (!tok_jmp("if")) {
 		int l_fail = LABEL();
 		int l_end = LABEL();
-		tok_expect('(');
+		tok_req("(");
 		readestmt();
-		tok_expect(')');
+		tok_req(")");
 		ts_pop_de(NULL);
 		o_jz(l_fail);
 		readstmt();
-		if (!tok_jmp(TOK_ELSE)) {
+		if (!tok_jmp("else")) {
 			o_jmp(l_end);
 			o_label(l_fail);
 			readstmt();
@@ -1422,15 +1451,15 @@ static void readstmt(void)
 		}
 		return;
 	}
-	if (!tok_jmp(TOK_WHILE)) {
+	if (!tok_jmp("while")) {
 		int o_break = l_break;
 		int o_cont = l_cont;
 		l_break = LABEL();
 		l_cont = LABEL();
 		o_label(l_cont);
-		tok_expect('(');
+		tok_req("(");
 		readestmt();
-		tok_expect(')');
+		tok_req(")");
 		ts_pop_de(NULL);
 		o_jz(l_break);
 		readstmt();
@@ -1440,7 +1469,7 @@ static void readstmt(void)
 		l_cont = o_cont;
 		return;
 	}
-	if (!tok_jmp(TOK_DO)) {
+	if (!tok_jmp("do")) {
 		int o_break = l_break;
 		int o_cont = l_cont;
 		int l_beg = LABEL();
@@ -1448,42 +1477,43 @@ static void readstmt(void)
 		l_cont = LABEL();
 		o_label(l_beg);
 		readstmt();
-		tok_expect(TOK_WHILE);
-		tok_expect('(');
+		tok_req("while");
+		tok_req("(");
 		o_label(l_cont);
 		readexpr();
 		ts_pop_de(NULL);
-		o_jnz(l_beg);
-		tok_expect(')');
+		o_uop(O_LNOT);
+		o_jz(l_beg);
+		tok_req(")");
 		o_label(l_break);
-		tok_expect(';');
+		tok_req(";");
 		l_break = o_break;
 		l_cont = o_cont;
 		return;
 	}
-	if (!tok_jmp(TOK_FOR)) {
+	if (!tok_jmp("for")) {
 		int o_break = l_break;
 		int o_cont = l_cont;
 		int l_check = LABEL();	/* for condition label */
 		int l_body = LABEL();	/* for block label */
 		l_cont = LABEL();
 		l_break = LABEL();
-		tok_expect('(');
-		if (tok_see() != ';')
+		tok_req("(");
+		if (!tok_comes(";"))
 			readestmt();
-		tok_expect(';');
+		tok_req(";");
 		o_label(l_check);
-		if (tok_see() != ';') {
+		if (!tok_comes(";")) {
 			readestmt();
 			ts_pop_de(NULL);
 			o_jz(l_break);
 		}
-		tok_expect(';');
+		tok_req(";");
 		o_jmp(l_body);
 		o_label(l_cont);
-		if (tok_see() != ')')
+		if (!tok_comes(")"))
 			readestmt();
-		tok_expect(')');
+		tok_req(")");
 		o_jmp(l_check);
 		o_label(l_body);
 		readstmt();
@@ -1493,49 +1523,47 @@ static void readstmt(void)
 		l_cont = o_cont;
 		return;
 	}
-	if (!tok_jmp(TOK_SWITCH)) {
+	if (!tok_jmp("switch")) {
 		readswitch();
 		return;
 	}
-	if (!tok_jmp(TOK_RETURN)) {
-		int ret = tok_see() != ';';
+	if (!tok_jmp("return")) {
+		int ret = !tok_comes(";");
 		if (ret) {
 			readexpr();
 			ts_pop_de(NULL);
 		}
-		tok_expect(';');
+		tok_req(";");
 		o_ret(ret);
 		return;
 	}
-	if (!tok_jmp(TOK_BREAK)) {
-		tok_expect(';');
+	if (!tok_jmp("break")) {
+		tok_req(";");
 		o_jmp(l_break);
 		return;
 	}
-	if (!tok_jmp(TOK_CONTINUE)) {
-		tok_expect(';');
+	if (!tok_jmp("continue")) {
+		tok_req(";");
 		o_jmp(l_cont);
 		return;
 	}
-	if (!tok_jmp(TOK_GOTO)) {
-		tok_expect(TOK_NAME);
-		o_jmp(label_id(tok_id()));
-		tok_expect(';');
+	if (!tok_jmp("goto")) {
+		o_jmp(label_id(tok_get()));
+		tok_req(";");
 		return;
 	}
 	readestmt();
 	/* labels */
-	if (!tok_jmp(':')) {
-		o_label(label_id(tok_id()));
+	if (!tok_jmp(":")) {
+		o_label(label_id(tok_previden));
 		return;
 	}
-	tok_expect(';');
+	tok_req(";");
 }
 
 static void readfunc(struct name *name, int flags)
 {
 	struct funcinfo *fi = &funcs[name->type.id];
-	long beg = tok_addr();
 	int i;
 	strcpy(func_name, fi->name);
 	o_func_beg(func_name, fi->nargs, F_GLOBAL(flags), fi->varg);
@@ -1544,16 +1572,8 @@ static void readfunc(struct name *name, int flags)
 		strcpy(arg.name, fi->argnames[i]);
 		local_add(&arg);
 	}
-	/* first pass: collecting statistics */
 	label = 0;
 	nlabels = 0;
-	o_pass1();
-	readstmt();
-	tok_jump(beg);
-	/* second pass: generating code */
-	label = 0;
-	nlabels = 0;
-	o_pass2();
 	readstmt();
 	o_func_end();
 	func_name[0] = '\0';
@@ -1562,18 +1582,18 @@ static void readfunc(struct name *name, int flags)
 
 static void readdecl(void)
 {
-	if (!tok_jmp(TOK_TYPEDEF)) {
+	if (!tok_jmp("typedef")) {
 		readdefs(typedefdef, NULL);
-		tok_expect(';');
+		tok_req(";");
 		return;
 	}
 	readdefs_int(globaldef, NULL);
-	tok_jmp(';');
+	tok_jmp(";");
 }
 
 static void parse(void)
 {
-	while (tok_see() != TOK_EOF)
+	while (tok_jmp(""))
 		readdecl();
 }
 
@@ -1640,7 +1660,7 @@ int main(int argc, char *argv[])
 static int basetype(struct type *type, unsigned *flags)
 {
 	int sign = 1;
-	int size = 4;
+	int size = UINT;
 	int done = 0;
 	int i = 0;
 	int isunion;
@@ -1650,58 +1670,48 @@ static int basetype(struct type *type, unsigned *flags)
 	type->ptr = 0;
 	type->addr = 0;
 	while (!done) {
-		switch (tok_see()) {
-		case TOK_STATIC:
+		if (!tok_jmp("static")) {
 			*flags |= F_STATIC;
-			break;
-		case TOK_EXTERN:
+		} else if (!tok_jmp("extern")) {
 			*flags |= F_EXTERN;
-			break;
-		case TOK_VOID:
+		} else if (!tok_jmp("void")) {
 			sign = 0;
 			size = 0;
 			done = 1;
-			break;
-		case TOK_INT:
+		} else if (!tok_jmp("int")) {
 			done = 1;
-			break;
-		case TOK_CHAR:
-			size = 1;
+		} else if (!tok_jmp("char")) {
+			size = UCHR;
 			done = 1;
-			break;
-		case TOK_SHORT:
-			size = 2;
-			break;
-		case TOK_LONG:
-			size = LONGSZ;
-			break;
-		case TOK_SIGNED:
-			break;
-		case TOK_UNSIGNED:
+		} else if (!tok_jmp("short")) {
+			size = USHT;
+		} else if (!tok_jmp("long")) {
+			size = ULNG;
+		} else if (!tok_jmp("signed")) {
+			sign = 1;
+		} else if (!tok_jmp("unsigned")) {
 			sign = 0;
-			break;
-		case TOK_UNION:
-		case TOK_STRUCT:
-			isunion = tok_get() == TOK_UNION;
-			if (!tok_jmp(TOK_NAME))
-				strcpy(name, tok_id());
-			if (tok_see() == '{')
+		} else if (tok_comes("union") || tok_comes("struct")) {
+			isunion = !strcmp("union", tok_get());
+			if (tok_grp() == 'a')
+				strcpy(name, tok_get());
+			if (tok_comes("{"))
 				type->id = struct_create(name, isunion);
 			else
 				type->id = struct_find(name, isunion);
 			type->flags |= T_STRUCT;
-			type->bt = LONGSZ;
+			type->bt = ULNG;
 			return 0;
-		case TOK_ENUM:
-			tok_get();
-			tok_jmp(TOK_NAME);
-			if (tok_see() == '{')
+		} else if (!tok_jmp("enum")) {
+			if (tok_grp() == 'a')
+				tok_get();
+			if (tok_comes("{"))
 				enum_create();
-			type->bt = 4 | BT_SIGNED;
+			type->bt = SINT;
 			return 0;
-		default:
-			if (tok_see() == TOK_NAME) {
-				int id = typedef_find(tok_id());
+		} else {
+			if (tok_grp() == 'a') {
+				int id = typedef_find(tok_see());
 				if (id != -1) {
 					tok_get();
 					memcpy(type, &typedefs[id].type,
@@ -1715,7 +1725,6 @@ static int basetype(struct type *type, unsigned *flags)
 			continue;
 		}
 		i++;
-		tok_get();
 	}
 	type->bt = size | (sign ? BT_SIGNED : 0);
 	return 0;
@@ -1723,7 +1732,7 @@ static int basetype(struct type *type, unsigned *flags)
 
 static void readptrs(struct type *type)
 {
-	while (!tok_jmp('*')) {
+	while (!tok_jmp("*")) {
 		type->ptr++;
 		if (!type->bt)
 			type->bt = 1;
@@ -1734,27 +1743,26 @@ static void readptrs(struct type *type)
 static int readargs(struct type *args, char argnames[][NAMELEN], int *varg)
 {
 	int nargs = 0;
-	tok_expect('(');
+	tok_req("(");
 	*varg = 0;
-	while (tok_see() != ')') {
-		if (!tok_jmp(TOK3("..."))) {
+	while (!tok_comes(")")) {
+		if (!tok_jmp("...")) {
 			*varg = 1;
 			break;
 		}
 		if (readname(&args[nargs], argnames[nargs], NULL)) {
 			/* argument has no type, assume int */
-			tok_expect(TOK_NAME);
 			memset(&args[nargs], 0, sizeof(struct type));
-			args[nargs].bt = 4 | BT_SIGNED;
-			strcpy(argnames[nargs], tok_id());
+			args[nargs].bt = SINT;
+			strcpy(argnames[nargs], tok_get());
 		}
 		/* argument arrays are pointers */
 		array2ptr(&args[nargs]);
 		nargs++;
-		if (tok_jmp(','))
+		if (tok_jmp(","))
 			break;
 	}
-	tok_expect(')');
+	tok_req(")");
 	/* void argument */
 	if (nargs == 1 && !TYPE_BT(&args[0]))
 		return 0;
@@ -1787,14 +1795,14 @@ static struct type *readarrays(struct type *type)
 	struct type *inner = NULL;
 	int nar = 0;
 	int i;
-	while (!tok_jmp('[')) {
+	while (!tok_jmp("[")) {
 		long n = 0;
-		if (tok_jmp(']')) {
+		if (tok_jmp("]")) {
 			readexpr();
 			ts_pop_de(NULL);
 			if (o_popnum(&n))
 				err("const expr expected\n");
-			tok_expect(']');
+			tok_req("]");
 		}
 		arsz[nar++] = n;
 	}
@@ -1803,7 +1811,7 @@ static struct type *readarrays(struct type *type)
 		if (!inner)
 			inner = &arrays[type->id].type;
 		type->flags = T_ARRAY;
-		type->bt = LONGSZ;
+		type->bt = ULNG;
 		type->ptr = 0;
 	}
 	return inner;
@@ -1837,20 +1845,20 @@ static int readname(struct type *main, char *name, struct type *base)
 		memcpy(type, base, sizeof(*base));
 	}
 	readptrs(type);
-	if (!tok_jmp('(')) {
+	if (!tok_jmp("(")) {
 		btype = type;
 		type = &tpool[npool++];
 		ptype = type;
 		readptrs(type);
 	}
-	if (!tok_jmp(TOK_NAME) && name)
-		strcpy(name, tok_id());
+	if (tok_grp() == 'a' && name)
+		strcpy(name, tok_get());
 	inner = readarrays(type);
 	if (ptype && inner)
 		ptype = inner;
 	if (ptype)
-		tok_expect(')');
-	if (tok_see() == '(') {
+		tok_req(")");
+	if (tok_comes("(")) {
 		struct type args[NARGS];
 		char argnames[NARGS][NAMELEN];
 		int varg = 0;
@@ -1861,11 +1869,11 @@ static int readname(struct type *main, char *name, struct type *base)
 			ptype = type;
 		}
 		ptype->flags = T_FUNC;
-		ptype->bt = LONGSZ;
+		ptype->bt = ULNG;
 		ptype->id = func_create(btype, name, argnames, args, nargs, varg);
-		if (tok_see() != ';')
-			while (tok_see() != '{' && !readdefs(krdef, &funcs[ptype->id]))
-				tok_expect(';');
+		if (!tok_comes(";"))
+			while (!tok_comes("{") && !readdefs(krdef, &funcs[ptype->id]))
+				tok_req(";");
 	} else {
 		if (ptype && readarrays(type))
 			array2ptr(type);
@@ -1880,8 +1888,8 @@ static int readtype(struct type *type)
 }
 
 /*
- * readdef() reads a variable definitions statement.  The definition
- * statement can appear in anywhere: global variables, function
+ * readdef() reads a variable definition statement.  The definition
+ * can appear in different contexts: global variables, function
  * local variables, struct fields, and typedefs.  For each defined
  * variable, def() callback is called with the appropriate name
  * struct and flags; the callback should finish parsing the definition
@@ -1895,14 +1903,14 @@ static int readdefs(void (*def)(void *data, struct name *name, unsigned flags),
 	unsigned base_flags;
 	if (basetype(&base, &base_flags))
 		return 1;
-	if (tok_see() == ';' || tok_see() == '{')
+	if (tok_comes(";") || tok_comes("{"))
 		return 0;
 	do {
 		struct name name = {{""}};
 		if (readname(&name.type, name.name, &base))
 			break;
 		def(data, &name, base_flags);
-	} while (!tok_jmp(','));
+	} while (!tok_jmp(","));
 	return 0;
 }
 
@@ -1913,18 +1921,18 @@ static int readdefs_int(void (*def)(void *data, struct name *name, unsigned flag
 	struct type base;
 	unsigned flags = 0;
 	if (basetype(&base, &flags)) {
-		if (tok_see() != TOK_NAME)
+		if (tok_grp() != 'a')
 			return 1;
 		memset(&base, 0, sizeof(base));
-		base.bt = 4 | BT_SIGNED;
+		base.bt = SINT;
 	}
-	if (tok_see() != ';') {
+	if (!tok_comes(";")) {
 		do {
 			struct name name = {{""}};
 			if (readname(&name.type, name.name, &base))
 				break;
 			def(data, &name, flags);
-		} while (!tok_jmp(','));
+		} while (!tok_jmp(","));
 	}
 	return 0;
 }
@@ -1935,10 +1943,10 @@ static int readdefs_int(void (*def)(void *data, struct name *name, unsigned flag
 static void jumpbrace(void)
 {
 	int depth = 0;
-	while (tok_see() != '}' || depth--)
-		if (tok_get() == '{')
+	while (!tok_comes("}") || depth--)
+		if (!strcmp("{", tok_get()))
 			depth++;
-	tok_expect('}');
+	tok_req("}");
 }
 
 /* compute the size of the initializer expression */
@@ -1946,29 +1954,30 @@ static int initsize(void)
 {
 	long addr = tok_addr();
 	int n = 0;
-	if (tok_jmp('='))
+	if (tok_jmp("="))
 		return 0;
-	if (!tok_jmp(TOK_STR)) {
-		tok_str(NULL, &n);
+	if (tok_grp() == '"') {
+		tok_get();
+		n = tok_len() - 2 + 1;
 		tok_jump(addr);
 		return n;
 	}
-	tok_expect('{');
-	while (tok_jmp('}')) {
+	tok_req("{");
+	while (tok_jmp("}")) {
 		long idx = n;
-		if (!tok_jmp('[')) {
+		if (!tok_jmp("[")) {
 			readexpr();
 			ts_pop_de(NULL);
 			o_popnum(&idx);
-			tok_expect(']');
-			tok_expect('=');
+			tok_req("]");
+			tok_req("=");
 		}
 		if (n < idx + 1)
 			n = idx + 1;
-		while (tok_see() != '}' && tok_see() != ',')
-			if (tok_get() == '{')
+		while (!tok_comes("}") && !tok_comes(","))
+			if (!strcmp("{", tok_get()))
 				jumpbrace();
-		tok_jmp(',');
+		tok_jmp(",");
 	}
 	tok_jump(addr);
 	return n;
@@ -1985,50 +1994,49 @@ static struct type *innertype(struct type *t)
 static void initexpr(struct type *t, int off, void *obj,
 		void (*set)(void *obj, int off, struct type *t))
 {
-	if (tok_jmp('{')) {
+	if (tok_jmp("{")) {
 		set(obj, off, t);
 		return;
 	}
 	if (!t->ptr && t->flags & T_STRUCT) {
 		struct structinfo *si = &structs[t->id];
 		int i;
-		for (i = 0; i < si->nfields && tok_see() != '}'; i++) {
+		for (i = 0; i < si->nfields && !tok_comes("}"); i++) {
 			struct name *field = &si->fields[i];
-			if (!tok_jmp('.')) {
-				tok_expect(TOK_NAME);
-				field = struct_field(t->id, tok_id());
-				tok_expect('=');
+			if (!tok_jmp(".")) {
+				field = struct_field(t->id, tok_get());
+				tok_req("=");
 			}
 			initexpr(&field->type, off + field->addr, obj, set);
-			if (tok_jmp(','))
+			if (tok_jmp(","))
 				break;
 		}
 	} else if (t->flags & T_ARRAY) {
 		struct type *t_de = &arrays[t->id].type;
 		int i;
 		/* handling extra braces as in: char s[] = {"sth"} */
-		if (TYPE_SZ(t_de) == 1 && tok_see() == TOK_STR) {
+		if (TYPE_SZ(t_de) == 1 && tok_grp() == '"') {
 			set(obj, off, t);
-			tok_expect('}');
+			tok_req("}");
 			return;
 		}
-		for (i = 0; tok_see() != '}'; i++) {
+		for (i = 0; !tok_comes("}"); i++) {
 			long idx = i;
 			struct type *it = t_de;
-			if (!tok_jmp('[')) {
+			if (!tok_jmp("[")) {
 				readexpr();
 				ts_pop_de(NULL);
 				o_popnum(&idx);
-				tok_expect(']');
-				tok_expect('=');
+				tok_req("]");
+				tok_req("=");
 			}
-			if (tok_see() != '{' && (tok_see() != TOK_STR ||
+			if (!tok_comes("{") && (tok_grp() != '"' ||
 						!(it->flags & T_ARRAY)))
 				it = innertype(t_de);
 			initexpr(it, off + type_totsz(it) * idx, obj, set);
-			if (tok_jmp(','))
+			if (tok_jmp(","))
 				break;
 		}
 	}
-	tok_expect('}');
+	tok_req("}");
 }
