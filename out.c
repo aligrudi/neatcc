@@ -1,10 +1,10 @@
 /* neatcc ELF object generation */
 #include <elf.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include "gen.h"
 #include "ncc.h"
-#include "out.h"
 
 #define ALIGN(x, a)		(((x) + (a) - 1) & ~((a) - 1))
 
@@ -44,34 +44,36 @@
 
 static Elf_Ehdr ehdr;
 static Elf_Shdr shdr[NSECS];
-static Elf_Sym syms[NSYMS];
-static int nsyms = 1;
-static char symstr[NSYMS * 8];
-static int nsymstr = 1;
+static Elf_Sym *syms;
+static long syms_n, syms_sz;
+static char *symstr;
+static long symstr_n, symstr_sz;
 
-static Elf_Rel dsrels[NRELS];
-static int ndsrels;
-static Elf_Rel rels[NRELS];
-static int nrels;
+static Elf_Rel *dsrel;
+static long dsrel_n, dsrel_sz;
+static Elf_Rel *csrel;
+static long csrel_n, csrel_sz;
 
 void err(char *msg, ...);
 static int rel_type(int flags);
 static void ehdr_init(Elf_Ehdr *ehdr);
 
-static int symstr_add(char *name)
+static long symstr_add(char *name)
 {
-	int len = strlen(name) + 1;
-	if (nsymstr + len >= sizeof(symstr))
-		err("nomem: NSYMS reached!\n");
-	strcpy(symstr + nsymstr, name);
-	nsymstr += len;
-	return nsymstr - len;
+	long len = strlen(name) + 1;
+	if (symstr_n + len >= symstr_sz) {
+		symstr_sz = MAX(512, symstr_sz * 2);
+		symstr = mextend(symstr, symstr_n, symstr_sz, sizeof(symstr[0]));
+	}
+	strcpy(symstr + symstr_n, name);
+	symstr_n += len;
+	return symstr_n - len;
 }
 
-static int sym_find(char *name)
+static long sym_find(char *name)
 {
 	int i;
-	for (i = 0; i < nsyms; i++)
+	for (i = 0; i < syms_n; i++)
 		if (!strcmp(name, symstr + syms[i].st_name))
 			return i;
 	return -1;
@@ -79,12 +81,15 @@ static int sym_find(char *name)
 
 static Elf_Sym *put_sym(char *name)
 {
-	int found = sym_find(name);
-	Elf_Sym *sym = found != -1 ? &syms[found] : &syms[nsyms++];
+	long found = sym_find(name);
+	Elf_Sym *sym;
 	if (found >= 0)
-		return sym;
-	if (nsyms >= NSYMS)
-		err("nomem: NSYMS reached!\n");
+		return &syms[found];
+	if (syms_n >= syms_sz) {
+		syms_sz = MAX(128, syms_sz * 2);
+		syms = mextend(syms, syms_n, syms_sz, sizeof(syms[0]));
+	}
+	sym = &syms[syms_n++];
 	sym->st_name = symstr_add(name);
 	sym->st_shndx = SHN_UNDEF;
 	sym->st_info = ELF_ST_INFO(STB_GLOBAL, STT_FUNC);
@@ -93,10 +98,10 @@ static Elf_Sym *put_sym(char *name)
 
 #define SYMLOCAL(i)		(ELF_ST_BIND(syms[i].st_info) == STB_LOCAL)
 
-static void mvrela(int *mv, Elf_Rel *rels, int nrels)
+static void mvrela(long *mv, Elf_Rel *rels, long n)
 {
-	int i;
-	for (i = 0; i < nrels; i++) {
+	long i;
+	for (i = 0; i < n; i++) {
 		int sym = ELF_R_SYM(rels[i].r_info);
 		int type = ELF_R_TYPE(rels[i].r_info);
 		rels[i].r_info = ELF_R_INFO(mv[sym], type);
@@ -105,13 +110,14 @@ static void mvrela(int *mv, Elf_Rel *rels, int nrels)
 
 static int syms_sort(void)
 {
-	int mv[NSYMS];
+	long *mv;
 	int i, j;
 	int glob_beg = 1;
-	for (i = 0; i < nsyms; i++)
+	mv = malloc(syms_n * sizeof(mv[0]));
+	for (i = 0; i < syms_n; i++)
 		mv[i] = i;
 	i = 1;
-	j = nsyms - 1;
+	j = syms_n - 1;
 	while (1) {
 		Elf_Sym t;
 		while (i < j && SYMLOCAL(i))
@@ -127,16 +133,19 @@ static int syms_sort(void)
 		mv[j] = i;
 	}
 	glob_beg = j + 1;
-	mvrela(mv, rels, nrels);
-	mvrela(mv, dsrels, ndsrels);
+	mvrela(mv, csrel, csrel_n);
+	mvrela(mv, dsrel, dsrel_n);
+	free(mv);
 	return glob_beg;
 }
 
-void out_init(int flags)
+void out_init(long flags)
 {
+	put_sym("");
 }
 
-void out_sym(char *name, int flags, int off, int len)
+/* return a symbol identifier */
+void out_def(char *name, long flags, long off, long len)
 {
 	Elf_Sym *sym = put_sym(name);
 	int type = (flags & OUT_CS) ? STT_FUNC : STT_OBJECT;
@@ -152,40 +161,49 @@ void out_sym(char *name, int flags, int off, int len)
 	sym->st_size = len;
 }
 
-static void out_csrel(int idx, int off, int flags)
+long out_sym(char *name)
 {
-	Elf_Rel *r = &rels[nrels++];
-	if (nrels >= NRELS)
-		err("nomem: NRELS reached!\n");
+	return put_sym(name) - syms;
+}
+
+static void out_csrel(long idx, long off, int flags)
+{
+	Elf_Rel *r;
+	if (csrel_n >= csrel_sz) {
+		csrel_sz = MAX(128, csrel_sz * 2);
+		csrel = mextend(csrel, csrel_n, csrel_sz, sizeof(csrel[0]));
+	}
+	r = &csrel[csrel_n++];
 	r->r_offset = off;
 	r->r_info = ELF_R_INFO(idx, rel_type(flags));
 }
 
-static void out_dsrel(int idx, int off, int flags)
+static void out_dsrel(long idx, long off, int flags)
 {
-	Elf_Rel *r = &dsrels[ndsrels++];
-	if (ndsrels >= NRELS)
-		err("nomem: NRELS reached!\n");
+	Elf_Rel *r;
+	if (dsrel_n >= dsrel_sz) {
+		dsrel_sz = MAX(128, dsrel_sz * 2);
+		dsrel = mextend(dsrel, dsrel_n, dsrel_sz, sizeof(dsrel[0]));
+	}
+	r = &dsrel[dsrel_n++];
 	r->r_offset = off;
 	r->r_info = ELF_R_INFO(idx, rel_type(flags));
 }
 
-void out_rel(char *name, int flags, int off)
+void out_rel(long idx, long flags, long off)
 {
-	Elf_Sym *sym = put_sym(name);
-	int idx = sym - syms;
 	if (flags & OUT_DS)
 		out_dsrel(idx, off, flags);
 	else
 		out_csrel(idx, off, flags);
 }
 
-static int bss_len(void)
+static long bss_len(void)
 {
-	int len = 0;
+	long len = 0;
 	int i;
-	for (i = 0; i < nsyms; i++) {
-		int end = syms[i].st_value + syms[i].st_size;
+	for (i = 0; i < syms_n; i++) {
+		long end = syms[i].st_value + syms[i].st_size;
 		if (syms[i].st_shndx == SEC_BSS)
 			if (len < end)
 				len = end;
@@ -193,7 +211,7 @@ static int bss_len(void)
 	return len;
 }
 
-void out_write(int fd, char *cs, int cslen, char *ds, int dslen)
+void out_write(int fd, char *cs, long cslen, char *ds, long dslen)
 {
 	Elf_Shdr *text_shdr = &shdr[SEC_TEXT];
 	Elf_Shdr *rela_shdr = &shdr[SEC_REL];
@@ -239,13 +257,13 @@ void out_write(int fd, char *cs, int cslen, char *ds, int dslen)
 	rela_shdr->sh_link = SEC_SYMS;
 	rela_shdr->sh_info = SEC_TEXT;
 	rela_shdr->sh_offset = offset;
-	rela_shdr->sh_size = nrels * sizeof(rels[0]);
-	rela_shdr->sh_entsize = sizeof(rels[0]);
+	rela_shdr->sh_size = csrel_n * sizeof(csrel[0]);
+	rela_shdr->sh_entsize = sizeof(csrel[0]);
 	offset += rela_shdr->sh_size;
 
 	syms_shdr->sh_type = SHT_SYMTAB;
 	syms_shdr->sh_offset = offset;
-	syms_shdr->sh_size = nsyms * sizeof(syms[0]);
+	syms_shdr->sh_size = syms_n * sizeof(syms[0]);
 	syms_shdr->sh_entsize = sizeof(syms[0]);
 	syms_shdr->sh_link = SEC_SYMSTR;
 	syms_shdr->sh_info = syms_sort();
@@ -261,8 +279,8 @@ void out_write(int fd, char *cs, int cslen, char *ds, int dslen)
 
 	datrel_shdr->sh_type = USERELA ? SHT_RELA : SHT_REL;
 	datrel_shdr->sh_offset = offset;
-	datrel_shdr->sh_size = ndsrels * sizeof(dsrels[0]);
-	datrel_shdr->sh_entsize = sizeof(dsrels[0]);
+	datrel_shdr->sh_size = dsrel_n * sizeof(dsrel[0]);
+	datrel_shdr->sh_entsize = sizeof(dsrel[0]);
 	datrel_shdr->sh_link = SEC_SYMS;
 	datrel_shdr->sh_info = SEC_DAT;
 	offset += datrel_shdr->sh_size;
@@ -276,18 +294,23 @@ void out_write(int fd, char *cs, int cslen, char *ds, int dslen)
 
 	symstr_shdr->sh_type = SHT_STRTAB;
 	symstr_shdr->sh_offset = offset;
-	symstr_shdr->sh_size = nsymstr;
+	symstr_shdr->sh_size = symstr_n;
 	symstr_shdr->sh_entsize = 1;
 	offset += symstr_shdr->sh_size;
 
 	write(fd, &ehdr, sizeof(ehdr));
 	write(fd, shdr,  NSECS * sizeof(shdr[0]));
 	write(fd, cs, cslen);
-	write(fd, rels, nrels * sizeof(rels[0]));
-	write(fd, syms, nsyms * sizeof(syms[0]));
+	write(fd, csrel, csrel_n * sizeof(csrel[0]));
+	write(fd, syms, syms_n * sizeof(syms[0]));
 	write(fd, ds, dslen);
-	write(fd, dsrels, ndsrels * sizeof(dsrels[0]));
-	write(fd, symstr, nsymstr);
+	write(fd, dsrel, dsrel_n * sizeof(dsrel[0]));
+	write(fd, symstr, symstr_n);
+
+	free(syms);
+	free(symstr);
+	free(csrel);
+	free(dsrel);
 }
 
 /* architecture dependent functions */

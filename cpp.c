@@ -9,13 +9,11 @@
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/stat.h>
-#include "mem.h"
 #include "ncc.h"
-#include "tok.h"
 
 static char *buf;
-static int len;
-static int cur;
+static long len;
+static long cur;
 
 static struct macro {
 	char name[NAMELEN];	/* macro name */
@@ -38,8 +36,8 @@ static int mnext[NDEFS];	/* macro hash table next entries */
 /* preprocessing input buffers for files, macros and macro arguments */
 static struct buf {
 	char *buf;
-	int len;
-	int cur;
+	long len;
+	long cur;
 	int type;
 	/* for BUF_FILE */
 	char path[NAMELEN];
@@ -49,8 +47,8 @@ static struct buf {
 	/* for BUF_ARG */
 	int arg_buf;			/* the bufs index of the owning macro */
 } bufs[NBUFS];
-static int nbufs;
-static int bufs_limit = 1;		/* cpp_read() limit; useful in cpp_eval() */
+static int bufs_n;
+static int bufs_limit = 0;		/* cpp_read() limit; useful in cpp_eval() */
 
 void die(char *fmt, ...)
 {
@@ -63,54 +61,56 @@ void die(char *fmt, ...)
 	exit(1);
 }
 
-static void buf_new(int type, char *dat, int dlen)
+static void buf_new(int type, char *dat, long dlen)
 {
-	if (nbufs) {
-		bufs[nbufs - 1].buf = buf;
-		bufs[nbufs - 1].cur = cur;
-		bufs[nbufs - 1].len = len;
+	if (bufs_n) {
+		bufs[bufs_n - 1].buf = buf;
+		bufs[bufs_n - 1].cur = cur;
+		bufs[bufs_n - 1].len = len;
 	}
-	if (nbufs >= NBUFS)
+	if (bufs_n >= NBUFS)
 		die("nomem: NBUFS reached!\n");
-	nbufs++;
+	bufs_n++;
 	cur = 0;
 	buf = dat;
 	len = dlen;
-	bufs[nbufs - 1].type = type;
+	bufs[bufs_n - 1].type = type;
 }
 
 static void buf_file(char *path, char *dat, int dlen)
 {
 	buf_new(BUF_FILE, dat, dlen);
-	strcpy(bufs[nbufs - 1].path, path ? path : "");
+	strcpy(bufs[bufs_n - 1].path, path ? path : "");
 }
 
 static void buf_macro(struct macro *m)
 {
 	buf_new(BUF_MACRO, m->def, strlen(m->def));
-	bufs[nbufs - 1].macro = m;
+	bufs[bufs_n - 1].macro = m;
 }
 
 static void buf_arg(char *arg, int mbuf)
 {
 	buf_new(BUF_ARG, arg, strlen(arg));
-	bufs[nbufs - 1].arg_buf = mbuf;
+	bufs[bufs_n - 1].arg_buf = mbuf;
 }
 
 static void buf_pop(void)
 {
-	nbufs--;
-	if (nbufs) {
-		cur = bufs[nbufs - 1].cur;
-		len = bufs[nbufs - 1].len;
-		buf = bufs[nbufs - 1].buf;
+	bufs_n--;
+	if (bufs[bufs_n].type == BUF_FILE)
+		free(buf);
+	if (bufs_n) {
+		cur = bufs[bufs_n - 1].cur;
+		len = bufs[bufs_n - 1].len;
+		buf = bufs[bufs_n - 1].buf;
 	}
 }
 
 static int buf_iseval(void)
 {
 	int i;
-	for (i = nbufs - 1; i >= 0; i--)
+	for (i = bufs_n - 1; i >= 0; i--)
 		if (bufs[i].type == BUF_EVAL)
 			return 1;
 	return 0;
@@ -226,7 +226,8 @@ static void read_tilleol(char *dst)
 static char *locs[NLOCS] = {};
 static int nlocs = 0;
 
-void cpp_addpath(char *s)
+/* header directory */
+void cpp_path(char *s)
 {
 	locs[nlocs++] = s;
 }
@@ -337,18 +338,18 @@ static int ecur;
 
 static long evalexpr(void);
 
-static int cpp_eval(void)
+static long cpp_eval(void)
 {
 	char evalbuf[MARGLEN];
 	int old_limit;
-	int ret, clen;
+	long ret, clen;
 	char *cbuf;
 	read_tilleol(evalbuf);
 	buf_new(BUF_EVAL, evalbuf, strlen(evalbuf));
 	elen = 0;
 	ecur = 0;
 	old_limit = bufs_limit;
-	bufs_limit = nbufs;
+	bufs_limit = bufs_n;
 	while (!cpp_read(&cbuf, &clen)) {
 		memcpy(ebuf + elen, cbuf, clen);
 		elen += clen;
@@ -458,7 +459,7 @@ static int macro_arg(struct macro *m, char *arg)
 static int buf_arg_find(char *name)
 {
 	int i;
-	for (i = nbufs - 1; i >= 0; i--) {
+	for (i = bufs_n - 1; i >= 0; i--) {
 		struct buf *mbuf = &bufs[i];
 		struct macro *m = mbuf->macro;
 		if (mbuf->type == BUF_MACRO && macro_arg(m, name) >= 0)
@@ -487,7 +488,7 @@ static void macro_expand(char *name)
 	jumpws();
 	if (buf[cur] == '(') {
 		int i = 0;
-		struct buf *mbuf = &bufs[nbufs];
+		struct buf *mbuf = &bufs[bufs_n];
 		cur++;
 		jumpws();
 		while (cur < len && buf[cur] != ')') {
@@ -508,7 +509,7 @@ static void macro_expand(char *name)
 static int buf_expanding(char *macro)
 {
 	int i;
-	for (i = nbufs - 1; i >= 0; i--) {
+	for (i = bufs_n - 1; i >= 0; i--) {
 		if (bufs[i].type == BUF_ARG)
 			return 0;
 		if (bufs[i].type == BUF_MACRO &&
@@ -545,7 +546,7 @@ static char seen_name[NAMELEN];	/* the name of the last macro */
 static int hunk_off;
 static int hunk_len;
 
-int cpp_read(char **obuf, int *olen)
+int cpp_read(char **obuf, long *olen)
 {
 	int old, end;
 	int jump_name = 0;
@@ -556,15 +557,12 @@ int cpp_read(char **obuf, int *olen)
 		seen_macro = 0;
 	}
 	if (cur == len) {
-		struct buf *cbuf = &bufs[nbufs - 1];
-		if (nbufs < bufs_limit + 1)
-			return -1;
-		if (cbuf->type == BUF_FILE)
-			free(buf);
+		if (bufs_n < bufs_limit + 1)
+			return 1;
 		buf_pop();
 	}
 	old = cur;
-	if (buf[cur] == '#')
+	if (cur < len && buf[cur] == '#')
 		if (!cpp_cmd())
 			return 0;
 	while (cur < len) {
@@ -621,6 +619,11 @@ int cpp_read(char **obuf, int *olen)
 }
 
 /* preprocessor constant expression evaluation */
+
+#define TOK2(a)		((a)[0] << 16 | (a)[1] << 8)
+#define TOK_NAME	256
+#define TOK_NUM		257
+#define TOK_EOF		-1
 
 static char etok[NAMELEN];
 static int enext;
@@ -915,10 +918,10 @@ char *cpp_loc(long addr)
 	static char loc[256];
 	int line = -1;
 	int i;
-	for (i = nbufs - 1; i > 0; i--)
+	for (i = bufs_n - 1; i > 0; i--)
 		if (bufs[i].type == BUF_FILE)
 			break;
-	if (addr >= hunk_off && i == nbufs - 1)
+	if (addr >= hunk_off && i == bufs_n - 1)
 		line = buf_loc(buf, (cur - hunk_len) + (addr - hunk_off));
 	else
 		line = buf_loc(bufs[i].buf, bufs[i].cur);
