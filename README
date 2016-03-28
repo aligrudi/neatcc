@@ -1,24 +1,6 @@
 NEATCC
 ======
 
-neatcc is a simple ARM/x86(_64) C compiler.  I wrote it to complete my
-development toolchain (see http://litcave.rudi.ir/):
-
-* cc:	git://repo.or.cz/neatcc.git
-* ld:	git://repo.or.cz/ld.git
-* as:	git://repo.or.cz/neatas.git
-* libc:	git://repo.or.cz/neatlibc.git
-* gdb:	http://litcave.rudi.ir/coredump.tar.gz
-  	http://litcave.rudi.ir/elfloc.tar.gz
-
-neatcc supports a large subset of C language but lacks some of the
-features that I didn't use much myself.  The most important missing
-features are struct bitfields, inline asms and floating point and
-long long types.
-
-USAGE
-=====
-
-neatcc has been tested with neatlibc and dietlibc.  It can compile
-itself and neat* toolchain.  The included neatcc script could be
-used to invoke ncc with neatlibc library.
+Neatcc is an ARM/x86(-64) C compiler.  It supports a large subset of
+ANSI C but lacks some of its features, the most important of which are
+struct bitfields, inline assembly, and floating point types.
