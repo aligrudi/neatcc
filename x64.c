@@ -46,7 +46,7 @@ int argregs[] = {7, 6, 2, 1, 8, 9};
 
 static void op_x(int op, int r1, int r2, int bt)
 {
-	int sz = BT_SZ(bt);
+	int sz = T_SZ(bt);
 	int rex = 0;
 	if (sz == 8)
 		rex |= 8;
@@ -92,19 +92,19 @@ static void op_rr(int op, int src, int dst, int bt)
 
 static int movrx_op(int bt, int mov)
 {
-	int sz = BT_SZ(bt);
+	int sz = T_SZ(bt);
 	if (sz == 4)
-		return bt & BT_SIGNED ? I_MOVSXD : mov;
+		return bt & T_MSIGN ? I_MOVSXD : mov;
 	if (sz == 2)
-		return OP2(0x0f, bt & BT_SIGNED ? 0xbf : 0xb7);
+		return OP2(0x0f, bt & T_MSIGN ? 0xbf : 0xb7);
 	if (sz == 1)
-		return OP2(0x0f, bt & BT_SIGNED ? 0xbe : 0xb6);
+		return OP2(0x0f, bt & T_MSIGN ? 0xbe : 0xb6);
 	return mov;
 }
 
 static void mov_r2r(int rd, int r1, unsigned bt)
 {
-	if (rd != r1 || BT_SZ(bt) != LONGSZ)
+	if (rd != r1 || T_SZ(bt) != LONGSZ)
 		op_rr(movrx_op(bt, I_MOVR), rd, r1, movrx_bt(bt));
 }
 
@@ -173,12 +173,12 @@ static void i_mul(int rd, int r1, int r2)
 static void i_div(int op, int rd, int r1, int r2)
 {
 	if (r2 != R_RDX) {
-		if (op & O_SIGNED)
+		if (op & O_FSIGN)
 			op_x(I_CQO, R_RAX, R_RDX, LONGSZ);
 		else
 			i_num(R_RDX, 0);
 	}
-	op_rr(I_MUL, op & O_SIGNED ? 7 : 6, r2, LONGSZ);
+	op_rr(I_MUL, op & O_FSIGN ? 7 : 6, r2, LONGSZ);
 }
 
 static void i_tst(int rn, int rm)
@@ -201,13 +201,13 @@ static void i_shl(int op, int rd, int r1, int rs)
 {
 	int sm = 4;
 	if ((op & 0x0f) == 1)
-		sm = op & O_SIGNED ? 7 : 5;
+		sm = op & O_FSIGN ? 7 : 5;
 	op_rr(I_SHX, sm, rd, LONGSZ);
 }
 
 static void i_shl_imm(int op, int rd, int rn, long n)
 {
-	int sm = (op & 0x1) ? (op & O_SIGNED ? 0xf8 : 0xe8) : 0xe0 ;
+	int sm = (op & 0x1) ? (op & O_FSIGN ? 0xf8 : 0xe8) : 0xe0;
 	char s[4] = {REX(0, rn), 0xc1, sm | (rn & 7), n & 0xff};
 	os(s, 4);
 }
@@ -235,10 +235,10 @@ static void i_not(int rd)
 
 static void i_set(int op, int rd)
 {
-	/* lt, gt, le, ge, eq, neq */
-	static int ucond[] = {0x92, 0x97, 0x96, 0x93, 0x94, 0x95};
-	static int scond[] = {0x9c, 0x9f, 0x9e, 0x9d, 0x94, 0x95};
-	int cond = op & O_SIGNED ? scond[op & 0x0f] : ucond[op & 0x0f];
+	/* lt, ge, eq, ne, le, gt */
+	static int ucond[] = {0x92, 0x93, 0x94, 0x95, 0x96, 0x97};
+	static int scond[] = {0x9c, 0x9d, 0x94, 0x95, 0x9e, 0x9f};
+	int cond = op & O_FSIGN ? scond[op & 0x0f] : ucond[op & 0x0f];
 	char set[] = "\x0f\x00\xc0";
 	set[1] = cond;
 	os(set, 3);			/* setl al */
@@ -296,19 +296,19 @@ static void i_zx(int rd, int r1, int bits)
 
 static void i_sx(int rd, int r1, int bits)
 {
-	mov_r2r(rd, r1, BT_SIGNED | (bits >> 3));
+	mov_r2r(rd, r1, T_MSIGN | (bits >> 3));
 }
 
 static void i_cast(int rd, int rn, int bt)
 {
-	if (BT_SZ(bt) == 8) {
+	if (T_SZ(bt) == 8) {
 		if (rd != rn)
 			i_mov(rd, rn);
 	} else {
-		if (bt & O_SIGNED)
-			i_sx(rd, rn, BT_SZ(bt) * 8);
+		if (bt & T_MSIGN)
+			i_sx(rd, rn, T_SZ(bt) * 8);
 		else
-			i_zx(rd, rn, BT_SZ(bt) * 8);
+			i_zx(rd, rn, T_SZ(bt) * 8);
 	}
 }
 
@@ -319,17 +319,17 @@ static void i_add_anyimm(int rd, int rn, long n)
 
 static void i_op_imm(int op, int rd, int r1, long n)
 {
-	if ((op & 0xf0) == 0x00) {	/* add */
+	if (op & O_FADD) {	/* add */
 		if (rd == r1 && i_imm(O_ADD, n))
 			i_add_imm(op, rd, r1, n);
 		else
 			i_add_anyimm(rd, r1, n);
 	}
-	if ((op & 0xf0) == 0x10)	/* shl */
+	if (op & O_FSHT)	/* shl */
 		i_shl_imm(op, rd, r1, n);
-	if ((op & 0xf0) == 0x20)	/* mul */
+	if (op & O_FMUL)	/* mul */
 		die("mul/imm not implemented");
-	if ((op & 0xf0) == 0x30) {	/* cmp */
+	if (op & O_FCMP) {	/* cmp */
 		i_cmp_imm(r1, n);
 		i_set(op, rd);
 	}
@@ -422,33 +422,33 @@ long i_reg(long op, long *rd, long *r1, long *r2, long *tmp, long bt)
 {
 	*rd = 0;
 	*r1 = R_TMPS;
-	*r2 = op & O_IMM ? 0 : R_TMPS;
+	*r2 = op & O_FNUM ? 0 : R_TMPS;
 	*tmp = 0;
-	if ((op & 0xf0) == 0x00)	/* add */
+	if (op & O_FADD)	/* add */
 		return 0;
-	if ((op & 0xf0) == 0x10) {	/* shl */
-		if (~op & O_IMM) {
+	if (op & O_FSHT) {
+		if (~op & O_FNUM) {
 			*r2 = 1 << R_RCX;
 			*r1 = R_TMPS & ~*r2;
 		}
 		return 0;
 	}
-	if ((op & 0xf0) == 0x20) {	/* mul */
-		*rd = (op & 0xff) == O_MOD ? (1 << R_RDX) : (1 << R_RAX);
+	if (op & O_FMUL) {	/* mul */
+		*rd = (op & ~O_FSIGN) == O_MOD ? (1 << R_RDX) : (1 << R_RAX);
 		*r1 = (1 << R_RAX);
 		*r2 = R_TMPS & ~*rd & ~*r1;
-		if ((op & 0xff) == O_DIV)
+		if ((op & ~O_FSIGN) == O_DIV)
 			*r2 &= ~(1 << R_RDX);
 		*tmp = (1 << R_RDX) | (1 << R_RAX);
 		return 0;
 	}
-	if ((op & 0xf0) == 0x30) {	/* cmp */
+	if (op & O_FCMP) {	/* cmp */
 		*rd = 1 << R_RAX;
 		return 0;
 	}
-	if ((op & 0xf0) == 0x40) {	/* uop */
+	if (op & O_FUOP) {	/* uop */
 		*r2 = 0;
-		if ((op & 0xff) == O_LNOT)
+		if (op == O_LNOT)
 			*r1 = 1 << R_RAX;
 		return 0;
 	}
@@ -492,34 +492,34 @@ long i_reg(long op, long *rd, long *r1, long *r2, long *tmp, long bt)
 
 long i_ins(long op, long r0, long r1, long r2, long bt)
 {
-	if ((op & 0xf0) == 0x00) {
-		if (op & O_IMM)
+	if (op & O_FADD) {
+		if (op & O_FNUM)
 			i_op_imm(O_ADD, r0, r1, r2);
 		else
 			i_add(op, r1, r1, r2);
 	}
-	if ((op & 0xf0) == 0x10)
+	if (op & O_FSHT)
 		i_shl(op, r1, r1, r2);
-	if ((op & 0xf0) == 0x20) {
-		if ((op & 0xff) == O_MUL)
+	if (op & O_FMUL) {
+		if ((op & ~O_FSIGN) == O_MUL)
 			i_mul(R_RAX, r1, r2);
-		if ((op & 0xff) == O_DIV)
+		if ((op & ~O_FSIGN) == O_DIV)
 			i_div(op, R_RAX, r1, r2);
-		if ((op & 0xff) == O_MOD)
+		if ((op & ~O_FSIGN) == O_MOD)
 			i_div(op, R_RDX, r1, r2);
 		return 0;
 	}
-	if ((op & 0xf0) == 0x30) {
+	if (op & O_FCMP) {
 		i_cmp(r1, r2);
 		i_set(op, r0);
 		return 0;
 	}
-	if ((op & 0xf0) == 0x40) {	/* uop */
-		if ((op & 0xff) == O_NEG)
+	if (op & O_FUOP) {	/* uop */
+		if (op == O_NEG)
 			i_neg(r1);
-		if ((op & 0xff) == O_NOT)
+		if (op == O_NOT)
 			i_not(r1);
-		if ((op & 0xff) == O_LNOT)
+		if (op == O_LNOT)
 			i_lnot(r1);
 		return 0;
 	}
@@ -527,7 +527,7 @@ long i_ins(long op, long r0, long r1, long r2, long bt)
 		op_rr(I_CALL, 2, r1, LONGSZ);
 		return 0;
 	}
-	if (op == O_CALLSYM) {
+	if (op == (O_CALL | O_FSYM)) {
 		os("\xe8", 1);		/* call $x */
 		out_rel(r2, OUT_CS | OUT_RLREL, opos());
 		oi(-4 + r1, 4);

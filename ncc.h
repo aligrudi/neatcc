@@ -77,63 +77,80 @@ char *cpp_loc(long addr);
 int cpp_read(char **buf, long *len);
 
 /* SECTION TWO: Intermediate Code Generation */
-/* basic types */
-#define BT_SZMASK	0x00ff
-#define BT_SIGNED	0x0100
-#define BT_SZ(bt)	((bt) & BT_SZMASK)
-#define BT(sign, size)	(((sign) & BT_SIGNED) | ((size) & BT_SZMASK))
+/* basic type meaning */
+#define T_MSIZE		0x00ff
+#define T_MSIGN		0x0100
+#define T_SZ(bt)	((bt) & T_MSIZE)
+#define T_MK(sign, size)	(((sign) & T_MSIGN) | ((size) & T_MSIZE))
 
 /* number of bytes in basic types */
 #define ULNG		(LONGSZ)
 #define UINT		(4)
 #define USHT		(2)
 #define UCHR		(1)
-/* type of basic types */
-#define SLNG		(ULNG | BT_SIGNED)
-#define SINT		(UINT | BT_SIGNED)
-#define SSHT		(USHT | BT_SIGNED)
-#define SCHR		(UCHR | BT_SIGNED)
+/* basic types */
+#define SLNG		(ULNG | T_MSIGN)
+#define SINT		(UINT | T_MSIGN)
+#define SSHT		(USHT | T_MSIGN)
+#define SCHR		(UCHR | T_MSIGN)
 
-/* operation flags */
-#define O_SIGNED	0x100	/* mask for signed instructions */
-#define O_IMM		0x200	/* mask for immediate instructions */
+/* instruction flags */
+#define O_FADD		0x000010	/* addition group */
+#define O_FSHT		0x000020	/* shift group */
+#define O_FMUL		0x000040	/* multiplication group */
+#define O_FCMP		0x000080	/* comparison group */
+#define O_FUOP		0x000100	/* jump group */
+#define O_FCALL		0x000200	/* call group */
+#define O_FRET		0x000400	/* return group */
+#define O_FJMP		0x000800	/* jump group */
+#define O_FIO		0x001000	/* load/store */
+#define O_FMEM		0x002000	/* memory operation */
+#define O_FMOV		0x004000	/* mov or cast */
+#define O_FSIGN		0x008000	/* for both signed and unsigned */
+#define O_FSYM		0x010000	/* symbol address */
+#define O_FLOC		0x020000	/* local address */
+#define O_FNUM		0x040000	/* number */
+#define O_FVAL		0x080000	/* load a value */
+/* instruction masks */
+#define O_MBOP		(O_FADD | O_FMUL | O_FCMP | O_FSHT)
+#define O_MUOP		(O_FUOP)
+#define O_MOUT		(O_MBOP | O_MUOP | O_FCALL | O_FMOV | O_FVAL)
 
 /* binary instructions for o_bop() */
-#define O_ADD		0x00
-#define O_SUB		0x01
-#define O_AND		0x02
-#define O_OR		0x03
-#define O_XOR		0x04
-#define O_SHL		0x10
-#define O_SHR		0x11
-#define O_MUL		0x20
-#define O_DIV		0x21
-#define O_MOD		0x22
-#define O_LT		0x30
-#define O_GT		0x31
-#define O_LE		0x32
-#define O_GE		0x33
-#define O_EQ		0x34
-#define O_NEQ		0x35
+#define O_ADD		(0 | O_FADD | O_FSIGN)
+#define O_SUB		(1 | O_FADD | O_FSIGN)
+#define O_AND		(2 | O_FADD | O_FSIGN)
+#define O_OR		(3 | O_FADD | O_FSIGN)
+#define O_XOR		(4 | O_FADD | O_FSIGN)
+#define O_SHL		(0 | O_FSHT | O_FSIGN)
+#define O_SHR		(1 | O_FSHT)
+#define O_MUL		(0 | O_FMUL)
+#define O_DIV		(1 | O_FMUL)
+#define O_MOD		(2 | O_FMUL)
+#define O_LT		(0 | O_FCMP)
+#define O_GE		(1 | O_FCMP)
+#define O_EQ		(2 | O_FCMP | O_FSIGN)
+#define O_NE		(3 | O_FCMP | O_FSIGN)
+#define O_LE		(4 | O_FCMP)
+#define O_GT		(5 | O_FCMP)
 /* unary instructions for o_uop() */
-#define O_NEG		0x40
-#define O_NOT		0x41
-#define O_LNOT		0x42
+#define O_NEG		(0 | O_FUOP | O_FSIGN)
+#define O_NOT		(1 | O_FUOP | O_FSIGN)
+#define O_LNOT		(2 | O_FUOP | O_FSIGN)
 /* other instructions */
-#define O_CALL		0x50
-#define O_CALLSYM	0x51
-#define O_RET		0x52
-#define O_JMP		0x53
-#define O_JZ		0x54
-#define O_MSET		0x55	/* memset() */
-#define O_MCPY		0x56	/* memcpy() */
-#define O_MOV		0x58
-#define O_LOAD		0x59
-#define O_SAVE		0x5a
-/* operands */
-#define O_NUM		0x60
-#define O_LOC		0x61
-#define O_SYM		0x62
+#define O_CALL		(0 | O_FCALL | O_FSIGN)
+#define O_JMP		(0 | O_FJMP | O_FSIGN)
+#define O_JZ		(1 | O_FJMP | O_FSIGN)
+#define O_RET		(0 | O_FRET | O_FSIGN)
+#define O_MSET		(0 | O_FMEM | O_FSIGN)
+#define O_MCPY		(1 | O_FMEM | O_FSIGN)
+#define O_LOAD		(0 | O_FIO | O_FVAL | O_FSIGN)
+#define O_SAVE		(1 | O_FIO | O_FSIGN)
+#define O_MOV		(0 | O_FMOV | O_FSIGN)
+/* loading values */
+#define O_NUM		(0 | O_FNUM | O_FVAL | O_FSIGN)
+#define O_LOC		(0 | O_FLOC | O_FVAL | O_FSIGN)
+#define O_SYM		(0 | O_FSYM | O_FVAL | O_FSIGN)
 
 /* operations on the stack */
 void o_bop(long op);		/* binary operation */

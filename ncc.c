@@ -36,7 +36,7 @@
 #define MAX(a, b)		((a) < (b) ? (b) : (a))
 
 #define TYPE_BT(t)		((t)->ptr ? ULNG : (t)->bt)
-#define TYPE_SZ(t)		((t)->ptr ? ULNG : (t)->bt & BT_SZMASK)
+#define TYPE_SZ(t)		((t)->ptr ? ULNG : (t)->bt & T_MSIZE)
 #define TYPE_VOID(t)		(!(t)->bt && !(t)->flags && !(t)->ptr)
 
 /* type->flag values */
@@ -276,7 +276,7 @@ static int type_totsz(struct type *t)
 		return ULNG;
 	if (t->flags & T_ARRAY)
 		return arrays[t->id].n * type_totsz(&arrays[t->id].type);
-	return t->flags & T_STRUCT ? structs[t->id].size : BT_SZ(t->bt);
+	return t->flags & T_STRUCT ? structs[t->id].size : T_SZ(t->bt);
 }
 
 /* return t's dereferenced size */
@@ -357,8 +357,8 @@ static int tok_grp(void)
 /* the result of a binary operation on variables of type bt1 and bt2 */
 static unsigned bt_op(unsigned bt1, unsigned bt2)
 {
-	int sz = MAX(BT_SZ(bt1), BT_SZ(bt2));
-	return ((bt1 | bt2) & BT_SIGNED) | MAX(sz, UINT);
+	int sz = MAX(T_SZ(bt1), T_SZ(bt2));
+	return ((bt1 | bt2) & T_MSIGN) | MAX(sz, UINT);
 }
 
 /* the result of a unary operation on variables of bt */
@@ -377,8 +377,8 @@ static void ts_binop(int op)
 	bt2 = TYPE_BT(&t2);
 	bt = bt_op(bt1, bt2);
 	if (op == O_DIV || op == O_MOD)
-		bt = BT(bt2 & BT_SIGNED, bt);
-	o_bop(op | (bt & BT_SIGNED ? O_SIGNED : 0));
+		bt = T_MK(bt2 & T_MSIGN, bt);
+	o_bop(op | (bt & T_MSIGN ? O_FSIGN : 0));
 	ts_push_bt(bt);
 }
 
@@ -517,7 +517,7 @@ static void readprimary(void)
 		struct type a = {};	/* the char array type */
 		char *buf = tok_get() + 1;
 		int len = tok_len() - 2;
-		t.bt = 1 | BT_SIGNED;
+		t.bt = 1 | T_MSIGN;
 		a.id = array_add(&t, len + 1);
 		a.flags = T_ARRAY;
 		o_sym(tmp_str(buf, len));
@@ -875,7 +875,7 @@ static void shift(int op)
 	struct type t;
 	readadd();
 	ts_pop_de2(NULL, &t);
-	o_bop(op | (BT_SIGNED & TYPE_BT(&t) ? O_SIGNED : 0));
+	o_bop(op | (T_MSIGN & TYPE_BT(&t) ? O_FSIGN : 0));
 	ts_push_bt(bt_uop(TYPE_BT(&t)));
 }
 
@@ -902,7 +902,7 @@ static void cmp(int op)
 	readshift();
 	ts_pop_de2(&t1, &t2);
 	bt = bt_op(TYPE_BT(&t1), TYPE_BT(&t2));
-	o_bop(op | (bt & BT_SIGNED ? O_SIGNED : 0));
+	o_bop(op | (bt & T_MSIGN ? O_FSIGN : 0));
 	ts_push_bt(SINT);
 }
 
@@ -947,7 +947,7 @@ static void readeq(void)
 			continue;
 		}
 		if (!tok_jmp("!=")) {
-			eq(O_NEQ);
+			eq(O_NE);
 			continue;
 		}
 		break;
@@ -1726,7 +1726,7 @@ static int basetype(struct type *type, unsigned *flags)
 		}
 		i++;
 	}
-	type->bt = size | (sign ? BT_SIGNED : 0);
+	type->bt = size | (sign ? T_MSIGN : 0);
 	return 0;
 }
 

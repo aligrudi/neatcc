@@ -86,12 +86,12 @@ void o_dsset(char *name, long off, long bt)
 	long sym_off = dat_off(name) + off;
 	long num, roff, rsym;
 	if (!o_popnum(&num)) {
-		mem_cpy(&ds, sym_off, &num, BT_SZ(bt));
+		mem_cpy(&ds, sym_off, &num, T_SZ(bt));
 		return;
 	}
 	if (!o_popsym(&rsym, &roff)) {
 		out_rel(rsym, OUT_DS, sym_off);
-		mem_cpy(&ds, sym_off, &roff, BT_SZ(bt));
+		mem_cpy(&ds, sym_off, &roff, T_SZ(bt));
 	}
 }
 
@@ -119,7 +119,7 @@ static void ic_map(struct ic *ic, int *r0, int *r1, int *r2)
 		all |= (1 << *r1);
 	}
 	if (m0) {
-		int wop = (ic->op & 0xff) <= 0x40;
+		int wop = ic->op & (O_MBOP | O_MUOP);
 		if (wop && m2 && m0 & (1 << *r2))
 			*r0 = *r2;
 		else if (wop && m1 && m0 & (1 << *r1))
@@ -186,21 +186,19 @@ static void ic_info(struct ic *ic, long **w, long **r1, long **r2, long **r3)
 	*r2 = NULL;
 	*r3 = NULL;
 	*w = NULL;
-	if ((o & 0xf0) == 0x60 || (o & 0xf0) <= 0x40 || o == O_CALL || o == O_MOV)
+	if (o & O_MOUT)
 		*w = &ic->arg0;
-	if ((o & 0xf0) <= 0x40 || o == O_SAVE || o == O_LOAD || o == O_MOV ||
-			o == O_MCPY || o == O_MSET || o == O_CALL)
+	if (o & (O_MBOP | O_MUOP | O_FIO | O_FMEM | O_FCALL | O_FMOV))
 		*r1 = &ic->arg1;
-	if ((o & 0xf0) <= 0x30 || o == O_MCPY || o == O_MSET)
+	if (o & (O_MBOP | O_FMEM))
 		*r2 = &ic->arg2;
-	if (o == O_SAVE || o == O_LOAD || o == O_RET || o == O_JZ ||
-			o == O_MCPY || o == O_MSET)
+	if (o & (O_FIO | O_FRET | O_FMEM) || o == O_JZ)
 		*r3 = &ic->arg0;
 }
 
 static long cb(int op, long a, long b)
 {
-	switch (op & 0xff) {
+	switch (op) {
 	case O_ADD:
 		return a + b;
 	case O_SUB:
@@ -219,22 +217,25 @@ static long cb(int op, long a, long b)
 		return a % b;
 	case O_SHL:
 		return a << b;
+	case O_SHR | O_FSIGN:
+		return a >> b;
 	case O_SHR:
-		if (op & O_SIGNED)
-			return a >> b;
-		else
-			return (unsigned long) a >> b;
+		return (unsigned long) a >> b;
 	case O_LT:
+	case O_LT | O_FSIGN:
 		return a < b;
 	case O_GT:
+	case O_GT | O_FSIGN:
 		return a > b;
 	case O_LE:
+	case O_LE | O_FSIGN:
 		return a <= b;
 	case O_GE:
+	case O_GE | O_FSIGN:
 		return a >= b;
 	case O_EQ:
 		return a == b;
-	case O_NEQ:
+	case O_NE:
 		return a != b;
 	}
 	return 0;
@@ -242,7 +243,7 @@ static long cb(int op, long a, long b)
 
 static long cu(int op, long i)
 {
-	switch (op & 0xff) {
+	switch (op) {
 	case O_NEG:
 		return -i;
 	case O_NOT:
@@ -255,11 +256,11 @@ static long cu(int op, long i)
 
 static long c_cast(long n, unsigned bt)
 {
-	if (!(bt & BT_SIGNED) && BT_SZ(bt) != ULNG)
-		n &= ((1l << (long) (BT_SZ(bt) * 8)) - 1);
-	if (bt & BT_SIGNED && BT_SZ(bt) != ULNG &&
-				n > (1l << (BT_SZ(bt) * 8 - 1)))
-		n = -((1l << (BT_SZ(bt) * 8)) - n);
+	if (!(bt & T_MSIGN) && T_SZ(bt) != ULNG)
+		n &= ((1l << (long) (T_SZ(bt) * 8)) - 1);
+	if (bt & T_MSIGN && T_SZ(bt) != ULNG &&
+				n > (1l << (T_SZ(bt) * 8 - 1)))
+		n = -((1l << (T_SZ(bt) * 8)) - n);
 	return n;
 }
 
@@ -270,7 +271,7 @@ int ic_num(struct ic *ic, long iv, long *n)
 		*n = ic[iv].arg2;
 		return 0;
 	}
-	if ((ic[iv].op & 0xf0) <= 0x30) {
+	if (ic[iv].op & O_MBOP) {
 		if (ic_num(ic, ic[iv].arg1, &n1))
 			return 1;
 		if (ic_num(ic, ic[iv].arg2, &n2))
@@ -278,7 +279,7 @@ int ic_num(struct ic *ic, long iv, long *n)
 		*n = cb(ic[iv].op, n1, n2);
 		return 0;
 	}
-	if ((ic[iv].op & 0xf0) == 0x40) {
+	if (ic[iv].op & O_MUOP) {
 		if (ic_num(ic, ic[iv].arg1, &n1))
 			return 1;
 		*n = cu(ic[iv].op, n1);
@@ -301,7 +302,7 @@ int ic_sym(struct ic *ic, long iv, long *sym, long *off)
 		*off = 0;
 		return 0;
 	}
-	if ((ic[iv].op & 0xff) == O_ADD) {
+	if (ic[iv].op == O_ADD) {
 		if ((ic_sym(ic, ic[iv].arg1, sym, off) ||
 				ic_num(ic, ic[iv].arg2, &n)) &&
 			(ic_sym(ic, ic[iv].arg2, sym, off) ||
@@ -310,7 +311,7 @@ int ic_sym(struct ic *ic, long iv, long *sym, long *off)
 		*off += n;
 		return 0;
 	}
-	if ((ic[iv].op & 0xff) == O_SUB) {
+	if (ic[iv].op == O_SUB) {
 		if (ic_sym(ic, ic[iv].arg1, sym, off) ||
 				ic_num(ic, ic[iv].arg2, &n))
 			return 1;
@@ -352,14 +353,14 @@ static void o_gencode(struct ic *ic, int ic_n)
 		pos[i] = mem_len(&cs);
 		if (!use[i])
 			continue;
-		if ((op & 0xf0) < 0x40) {
+		if (op & O_MBOP) {
 			ic_map(ic + i, &r0, &r1, &r2);
 			iv_load(ic[i].arg1, r1);
 			iv_load(ic[i].arg2, r2);
 			i_ins(op, r0, r1, r2, ULNG);
 			iv_save(ic[i].arg0, r0);
 		}
-		if ((op & 0xf0) == 0x40) {
+		if (op & O_MUOP) {
 			ic_map(ic + i, &r0, &r1, &r2);
 			iv_load(ic[i].arg1, r1);
 			i_ins(op, r0, r1, r2, ULNG);
@@ -372,7 +373,7 @@ static void o_gencode(struct ic *ic, int ic_n)
 		}
 		if (op == O_LOC) {
 			ic_map(ic + i, &r0, &r1, &r2);
-			i_ins(O_ADD | O_IMM, r0, REG_FP,
+			i_ins(O_ADD | O_FNUM, r0, REG_FP,
 				-loc_off[ic[i].arg2], ULNG);
 			iv_save(ic[i].arg0, r0);
 		}
@@ -401,7 +402,7 @@ static void o_gencode(struct ic *ic, int ic_n)
 		if (op == O_MOV) {
 			ic_map(ic + i, &r0, &r1, &r2);
 			iv_load(ic[i].arg1, r0);
-			if (BT_SZ(ic[i].arg2) != ULNG)
+			if (T_SZ(ic[i].arg2) != ULNG)
 				i_ins(O_MOV, r0, r0, 0, ic[i].arg2);
 			iv_save(ic[i].arg0, r0);
 		}

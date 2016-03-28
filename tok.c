@@ -67,9 +67,9 @@ static int esc_char(int *c, char *s)
 long tok_num(char *tok, long *num)
 {
 	int base = 10;
-	long num_bt = 4 | BT_SIGNED;
+	long num_bt = 4 | T_MSIGN;
 	if (tok[0] == '0' && tolower(tok[1]) == 'x') {
-		num_bt &= ~BT_SIGNED;
+		num_bt &= ~T_MSIGN;
 		base = 16;
 		tok += 2;
 	}
@@ -89,9 +89,9 @@ long tok_num(char *tok, long *num)
 			if (c != 'u' && c != 'l')
 				break;
 			if (c == 'u')
-				num_bt &= ~BT_SIGNED;
+				num_bt &= ~T_MSIGN;
 			if (c == 'l')
-				num_bt = (num_bt & BT_SIGNED) | LONGSZ;
+				num_bt = (num_bt & T_MSIGN) | LONGSZ;
 			tok++;
 		}
 		return num_bt;

@@ -122,7 +122,7 @@ void o_deref(long bt)
 
 void o_cast(long bt)
 {
-	if (BT_SZ(bt) != LONGSZ) {
+	if (T_SZ(bt) != ULNG) {
 		int r1 = iv_pop();
 		ic_put(O_MOV, iv_new(), r1, bt);
 	}
