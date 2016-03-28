@@ -11,6 +11,8 @@ static long iv_n;		/* number of values in iv[] */
 static long *lab_loc;		/* label locations */
 static long lab_n, lab_sz;	/* number of labels in lab_loc[] */
 
+static int io_num(void);
+
 static struct ic *ic_new(void)
 {
 	if (ic_n == ic_sz) {
@@ -99,12 +101,14 @@ void o_bop(long op)
 	int r1 = iv_pop();
 	int r2 = iv_pop();
 	ic_put(op, iv_new(), r2, r1);
+	io_num();
 }
 
 void o_uop(long op)
 {
 	int r1 = iv_pop();
 	ic_put(op, iv_new(), r1, 0);
+	io_num();
 }
 
 void o_assign(long bt)
@@ -125,6 +129,7 @@ void o_cast(long bt)
 	if (T_SZ(bt) != ULNG) {
 		int r1 = iv_pop();
 		ic_put(O_MOV, iv_new(), r1, bt);
+		io_num();
 	}
 }
 
@@ -234,4 +239,147 @@ void ic_get(struct ic **c, long *n)
 	lab_loc = NULL;
 	lab_n = 0;
 	lab_sz = 0;
+}
+
+/* intermediate code queries */
+
+static long cb(int op, long a, long b)
+{
+	switch (op) {
+	case O_ADD:
+		return a + b;
+	case O_SUB:
+		return a - b;
+	case O_AND:
+		return a & b;
+	case O_OR:
+		return a | b;
+	case O_XOR:
+		return a ^ b;
+	case O_MUL | O_FSIGN:
+	case O_MUL:
+		return a * b;
+	case O_DIV | O_FSIGN:
+	case O_DIV:
+		return a / b;
+	case O_MOD | O_FSIGN:
+	case O_MOD:
+		return a % b;
+	case O_SHL:
+		return a << b;
+	case O_SHR | O_FSIGN:
+		return a >> b;
+	case O_SHR:
+		return (unsigned long) a >> b;
+	case O_LT:
+	case O_LT | O_FSIGN:
+		return a < b;
+	case O_GT:
+	case O_GT | O_FSIGN:
+		return a > b;
+	case O_LE:
+	case O_LE | O_FSIGN:
+		return a <= b;
+	case O_GE:
+	case O_GE | O_FSIGN:
+		return a >= b;
+	case O_EQ:
+		return a == b;
+	case O_NE:
+		return a != b;
+	}
+	return 0;
+}
+
+static long cu(int op, long i)
+{
+	switch (op) {
+	case O_NEG:
+		return -i;
+	case O_NOT:
+		return ~i;
+	case O_LNOT:
+		return !i;
+	}
+	return 0;
+}
+
+static long c_cast(long n, unsigned bt)
+{
+	if (!(bt & T_MSIGN) && T_SZ(bt) != ULNG)
+		n &= ((1l << (long) (T_SZ(bt) * 8)) - 1);
+	if (bt & T_MSIGN && T_SZ(bt) != ULNG &&
+				n > (1l << (T_SZ(bt) * 8 - 1)))
+		n = -((1l << (T_SZ(bt) * 8)) - n);
+	return n;
+}
+
+int ic_num(struct ic *ic, long iv, long *n)
+{
+	long n1, n2;
+	if (ic[iv].op == O_NUM) {
+		*n = ic[iv].arg2;
+		return 0;
+	}
+	if (ic[iv].op & O_MBOP) {
+		if (ic_num(ic, ic[iv].arg1, &n1))
+			return 1;
+		if (ic_num(ic, ic[iv].arg2, &n2))
+			return 1;
+		*n = cb(ic[iv].op, n1, n2);
+		return 0;
+	}
+	if (ic[iv].op & O_MUOP) {
+		if (ic_num(ic, ic[iv].arg1, &n1))
+			return 1;
+		*n = cu(ic[iv].op, n1);
+		return 0;
+	}
+	if (ic[iv].op == O_MOV) {
+		if (ic_num(ic, ic[iv].arg1, &n1))
+			return 1;
+		*n = c_cast(n1, ic[iv].arg2);
+		return 0;
+	}
+	return 1;
+}
+
+int ic_sym(struct ic *ic, long iv, long *sym, long *off)
+{
+	long n;
+	if (ic[iv].op == O_SYM) {
+		*sym = ic[iv].arg2;
+		*off = 0;
+		return 0;
+	}
+	if (ic[iv].op == O_ADD) {
+		if ((ic_sym(ic, ic[iv].arg1, sym, off) ||
+				ic_num(ic, ic[iv].arg2, &n)) &&
+			(ic_sym(ic, ic[iv].arg2, sym, off) ||
+				ic_num(ic, ic[iv].arg1, &n)))
+			return 1;
+		*off += n;
+		return 0;
+	}
+	if (ic[iv].op == O_SUB) {
+		if (ic_sym(ic, ic[iv].arg1, sym, off) ||
+				ic_num(ic, ic[iv].arg2, &n))
+			return 1;
+		*off -= n;
+		return 0;
+	}
+	return 1;
+}
+
+/* intermediate code optimizations */
+
+static int io_num(void)
+{
+	long n;
+	if (!ic_num(ic, iv_get(0), &n)) {
+		iv_drop(1);
+		o_num(n);
+		return 0;
+	}
+	return 1;
 }
