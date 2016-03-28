@@ -13,6 +13,8 @@ static long lab_n, lab_sz;	/* number of labels in lab_loc[] */
 
 static int io_num(void);
 static int io_mul2(void);
+static int io_cmp(void);
+static int io_jmp(void);
 
 static struct ic *ic_new(void)
 {
@@ -31,6 +33,15 @@ static struct ic *ic_put(long op, long arg0, long arg1, long arg2)
 	c->arg1 = arg1;
 	c->arg2 = arg2;
 	return c;
+}
+
+static void ic_back(long pos)
+{
+	int i;
+	for (i = pos; i < ic_n; i++)
+		if (ic[i].op == O_CALL)
+			free(ic[i].args);
+	ic_n = pos;
 }
 
 static long iv_pop(void)
@@ -115,7 +126,8 @@ void o_uop(long op)
 {
 	int r1 = iv_pop();
 	ic_put(op, iv_new(), r1, 0);
-	io_num();
+	if (io_num())
+		io_cmp();
 }
 
 void o_assign(long bt)
@@ -195,6 +207,7 @@ void o_jmp(long id)
 void o_jz(long id)
 {
 	ic_put(O_JZ, iv_pop(), 0, id);
+	io_jmp();
 }
 
 int o_popnum(long *n)
@@ -220,11 +233,7 @@ long o_mark(void)
 
 void o_back(long mark)
 {
-	int i;
-	for (i = mark; i < ic_n; i++)
-		if (ic[i].op == O_CALL)
-			free(ic[i].args);
-	ic_n = mark;
+	ic_back(mark);
 }
 
 void ic_get(struct ic **c, long *n)
@@ -234,7 +243,7 @@ void ic_get(struct ic **c, long *n)
 		o_ret(0);
 	/* filling jump destinations */
 	for (i = 0; i < ic_n; i++)
-		if (ic[i].op == O_JMP || ic[i].op == O_JZ)
+		if (ic[i].op & O_FJMP)
 			ic[i].arg2 = lab_loc[ic[i].arg2];
 	*c = ic;
 	*n = ic_n;
@@ -378,7 +387,7 @@ int ic_sym(struct ic *ic, long iv, long *sym, long *off)
 	return 1;
 }
 
-/* intermediate code optimizations */
+/* intermediate code optimisations */
 
 static int io_num(void)
 {
@@ -408,7 +417,7 @@ static long iv_num(long n)
 	return iv_pop();
 }
 
-/* optimized multiplication operations for powers of two */
+/* optimised multiplication operations for powers of two */
 static int io_mul2(void)
 {
 	struct ic *c = &ic[iv_get(0)];
@@ -461,6 +470,40 @@ static int io_mul2(void)
 		r1 = iv_pop();
 		r2 = iv_num(LONGSZ * 8 - p);
 		ic_put(O_SHR, iv_new(), r1, r2);
+		return 0;
+	}
+	return 1;
+}
+
+/* optimise comparison */
+static int io_cmp(void)
+{
+	struct ic *c = &ic[iv_get(0)];
+	long cmp = c->arg1;
+	if (c->op == O_LNOT && ic[cmp].op & O_FCMP) {
+		iv_drop(1);
+		ic[cmp].op ^= 1;
+		iv_put(ic[cmp].arg0);
+		return 0;
+	}
+	return 1;
+}
+
+static int io_jmp(void)
+{
+	struct ic *c = &ic[ic_n - 1];
+	if (c->op == O_JZ && ic[c->arg0].op == O_LNOT) {
+		c->arg0 = ic[c->arg0].arg1;
+		c->op = O_JN;
+		return 0;
+	}
+	if ((c->op == O_JZ || c->op == O_JN) && ic[c->arg0].op & O_FCMP) {
+		long jop = c->op;
+		long cop = (ic[c->arg0].op & ~O_FCMP) | O_FJCMP | O_FJMP | O_FJIF;
+		long r2 = c->arg2;
+		c = &ic[c->arg0];
+		o_back(ic_n - 1);
+		ic_put(jop == O_JZ ? cop ^ 1 : cop, c->arg1, c->arg2, r2);
 		return 0;
 	}
 	return 1;

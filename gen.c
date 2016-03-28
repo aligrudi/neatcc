@@ -104,18 +104,45 @@ static long reg_get(long mask)
 	return 0;
 }
 
+/* number of register arguments */
+static int ic_regcnt(struct ic *ic)
+{
+	long o = ic->op;
+	if (o & O_MBOP)
+		return o & O_FNUM ? 2 : 3;
+	if (o & O_MUOP)
+		return o & O_FNUM ? 1 : 2;
+	if (o & O_FCALL)
+		return o & O_FSYM ? 1 : 2;
+	if (o & O_FIO)
+		return o & (O_FSYM | O_FLOC) ? 1 : 2;
+	if (o & (O_FNUM | O_FLOC | O_FSYM | O_FJX | O_FRET))
+		return 1;
+	if (o & (O_FJCMP | O_FMOV))
+		return 2;
+	if (o & O_FMEM)
+		return 3;
+	return 0;
+}
+
+static long iv_map(long iv, long mask)
+{
+	return reg_get(mask);
+}
+
 /* allocate registers for a 3 operand instruction */
 static void ic_map(struct ic *ic, int *r0, int *r1, int *r2)
 {
 	long m0, m1, m2, mt;
 	long all = 0;
-	i_reg(ic->op, &m0, &m1, &m2, &mt, ULNG);
+	if (i_reg(ic->op, &m0, &m1, &m2, &mt, ULNG))
+		die("ncc: instruction %06lx not supported\n", ic->op);
 	if (m2) {
-		*r2 = reg_get(m2);
+		*r2 = iv_map(ic->arg2, m2);
 		all |= (1 << *r2);
 	}
 	if (m1) {
-		*r1 = reg_get(m1 & ~all);
+		*r1 = iv_map(ic->arg1, m1 & ~all);
 		all |= (1 << *r1);
 	}
 	if (m0) {
@@ -125,7 +152,7 @@ static void ic_map(struct ic *ic, int *r0, int *r1, int *r2)
 		else if (wop && m1 && m0 & (1 << *r1))
 			*r0 = *r1;
 		else
-			*r0 = reg_get(m0 & ~all);
+			*r0 = iv_map(ic->arg0, m0 & ~all);
 	} else {
 		*r0 = *r1;
 	}
@@ -181,19 +208,21 @@ long opos(void)
 
 static void ic_info(struct ic *ic, long **w, long **r1, long **r2, long **r3)
 {
-	int o = ic->op;
+	long n = ic_regcnt(ic);
+	long o = ic->op & O_MOUT;
 	*r1 = NULL;
 	*r2 = NULL;
 	*r3 = NULL;
 	*w = NULL;
-	if (o & O_MOUT)
+	if (o) {
 		*w = &ic->arg0;
-	if (o & (O_MBOP | O_MUOP | O_FIO | O_FMEM | O_FCALL | O_FMOV))
-		*r1 = &ic->arg1;
-	if (o & (O_MBOP | O_FMEM))
-		*r2 = &ic->arg2;
-	if (o & (O_FIO | O_FRET | O_FMEM) || o == O_JZ)
-		*r3 = &ic->arg0;
+		*r1 = n >= 2 ? &ic->arg1 : NULL;
+		*r2 = n >= 3 ? &ic->arg2 : NULL;
+	} else {
+		*r1 = n >= 1 ? &ic->arg0 : NULL;
+		*r2 = n >= 2 ? &ic->arg1 : NULL;
+		*r3 = n >= 3 ? &ic->arg2 : NULL;
+	}
 }
 
 static void o_gencode(struct ic *ic, int ic_n)
@@ -207,7 +236,7 @@ static void o_gencode(struct ic *ic, int ic_n)
 	for (i = ic_n - 1; i >= 0; --i) {
 		long *w, *r1, *r2, *r3;
 		ic_info(ic + i, &w, &r1, &r2, &r3);
-		if (!w || ic[i].op == O_CALL)
+		if (!w || ic[i].op & O_FCALL)
 			use[i]++;
 		if (!use[i])
 			continue;
@@ -247,7 +276,7 @@ static void o_gencode(struct ic *ic, int ic_n)
 			iv_save(ic[i].arg0, r0);
 		}
 		if (op == O_LOC) {
-			ic_map(ic + i, &r0, &r1, &r2);
+			r0 = iv_map(ic[i].arg0, ~0);
 			i_ins(O_ADD | O_FNUM, r0, REG_FP,
 				-loc_off[ic[i].arg2], ULNG);
 			iv_save(ic[i].arg0, r0);
@@ -299,10 +328,16 @@ static void o_gencode(struct ic *ic, int ic_n)
 		if (op == O_JMP) {
 			pos_jmp[i] = i_ins(O_JMP, 0, 0, 4, ULNG);
 		}
-		if (op == O_JZ) {
+		if (op == O_JZ || op == O_JN) {
 			ic_map(ic + i, &r0, &r1, &r2);
 			iv_load(ic[i].arg0, r0);
-			pos_jmp[i] = i_ins(O_JZ, r0, 0, 4, ULNG);
+			pos_jmp[i] = i_ins(op, r0, 0, 4, ULNG);
+		}
+		if (op & O_FJCMP) {
+			ic_map(ic + i, &r0, &r1, &r2);
+			iv_load(ic[i].arg0, r0);
+			iv_load(ic[i].arg1, r1);
+			pos_jmp[i] = i_ins(op, r0, r1, 4, ULNG);
 		}
 		if (op == O_MSET) {
 			ic_map(ic + i, &r0, &r1, &r2);
@@ -320,7 +355,7 @@ static void o_gencode(struct ic *ic, int ic_n)
 		}
 	}
 	for (i = 0; i < ic_n; i++)
-		if (ic[i].op == O_JMP || ic[i].op == O_JZ)
+		if (ic[i].op & O_FJMP)
 			i_fill(pos_jmp[i], pos[ic[i].arg2], 4);
 	free(use);
 	free(pos);

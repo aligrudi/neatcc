@@ -111,6 +111,9 @@ int cpp_read(char **buf, long *len);
 #define O_FLOC		0x020000	/* local address */
 #define O_FNUM		0x040000	/* number */
 #define O_FVAL		0x080000	/* load a value */
+#define O_FJIF		0x100000	/* conditional jump */
+#define O_FJX		0x200000	/* jump if zero or nonzero */
+#define O_FJCMP		0x400000	/* conditional jump with comparison */
 /* instruction masks */
 #define O_MBOP		(O_FADD | O_FMUL | O_FCMP | O_FSHT)
 #define O_MUOP		(O_FUOP)
@@ -140,7 +143,8 @@ int cpp_read(char **buf, long *len);
 /* other instructions */
 #define O_CALL		(0 | O_FCALL | O_FSIGN)
 #define O_JMP		(0 | O_FJMP | O_FSIGN)
-#define O_JZ		(1 | O_FJMP | O_FSIGN)
+#define O_JZ		(1 | O_FJMP | O_FJIF | O_FJX | O_FSIGN)
+#define O_JN		(2 | O_FJMP | O_FJIF | O_FJX | O_FSIGN)
 #define O_RET		(0 | O_FRET | O_FSIGN)
 #define O_MSET		(0 | O_FMEM | O_FSIGN)
 #define O_MCPY		(1 | O_FMEM | O_FSIGN)
