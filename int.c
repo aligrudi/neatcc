@@ -12,6 +12,7 @@ static long *lab_loc;		/* label locations */
 static long lab_n, lab_sz;	/* number of labels in lab_loc[] */
 
 static int io_num(void);
+static int io_mul2(void);
 
 static struct ic *ic_new(void)
 {
@@ -46,6 +47,11 @@ static long iv_new(void)
 {
 	iv[iv_n] = ic_n;
 	return iv[iv_n++];
+}
+
+static void iv_put(long n)
+{
+	iv[iv_n++] = n;
 }
 
 static void iv_drop(int n)
@@ -101,7 +107,8 @@ void o_bop(long op)
 	int r1 = iv_pop();
 	int r2 = iv_pop();
 	ic_put(op, iv_new(), r2, r1);
-	io_num();
+	if (io_num())
+		io_mul2();
 }
 
 void o_uop(long op)
@@ -379,6 +386,81 @@ static int io_num(void)
 	if (!ic_num(ic, iv_get(0), &n)) {
 		iv_drop(1);
 		o_num(n);
+		return 0;
+	}
+	return 1;
+}
+
+static int log2a(unsigned long n)
+{
+	int i = 0;
+	for (i = 0; i < LONGSZ * 8; i++)
+		if (n & (1u << i))
+			break;
+	if (i == LONGSZ * 8 || !(n >> (i + 1)))
+		return i;
+	return -1;
+}
+
+static long iv_num(long n)
+{
+	o_num(n);
+	return iv_pop();
+}
+
+/* optimized multiplication operations for powers of two */
+static int io_mul2(void)
+{
+	struct ic *c = &ic[iv_get(0)];
+	long n, p;
+	long r1, r2;
+	if (!(c->op & O_FMUL))
+		return 1;
+	if ((c->op & ~O_FSIGN) == O_MUL && ic_num(ic, c->arg1, &n)) {
+		long t = c->arg1;
+		c->arg1 = c->arg2;
+		c->arg2 = t;
+	}
+	if (ic_num(ic, c->arg2, &n))
+		return 1;
+	p = log2a(n);
+	if (n && p < 0)
+		return 1;
+	if ((c->op & ~O_FSIGN) == O_MUL) {
+		iv_drop(1);
+		if (n == 1) {
+			iv_put(c->arg1);
+			return 0;
+		}
+		if (n == 0) {
+			o_num(0);
+			return 0;
+		}
+		r2 = iv_num(p);
+		ic_put(O_SHL, iv_new(), c->arg1, r2);
+		return 0;
+	}
+	if (c->op == O_DIV) {
+		iv_drop(1);
+		if (n == 1) {
+			iv_put(c->arg1);
+			return 0;
+		}
+		r2 = iv_num(p);
+		ic_put(O_SHR, iv_new(), c->arg1, r2);
+		return 0;
+	}
+	if (c->op == O_MOD) {
+		iv_drop(1);
+		if (n == 1) {
+			o_num(0);
+			return 0;
+		}
+		r2 = iv_num(LONGSZ * 8 - p);
+		ic_put(O_SHL, iv_new(), c->arg1, r2);
+		r1 = iv_pop();
+		r2 = iv_num(LONGSZ * 8 - p);
+		ic_put(O_SHR, iv_new(), r1, r2);
 		return 0;
 	}
 	return 1;
