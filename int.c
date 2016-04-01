@@ -239,7 +239,8 @@ void o_back(long mark)
 void ic_get(struct ic **c, long *n)
 {
 	int i;
-	if (!ic_n || ic[ic_n - 1].op != O_RET)
+	if (!ic_n || ic[ic_n - 1].op != O_RET ||
+			(lab_n && lab_loc[lab_n - 1] == ic_n))
 		o_ret(0);
 	/* filling jump destinations */
 	for (i = 0; i < ic_n; i++)
