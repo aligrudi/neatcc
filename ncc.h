@@ -214,50 +214,50 @@ int ic_sym(struct ic *ic, long iv, long *sym, long *off);
 
 /* SECTION FOUR: Final Code Generation */
 /*
- * neatcc architecture-dependent code-generation interface
- *
  * To make maintaining different architectures easier and to unify the
- * optimizations, code generation for different architectures
- * have been merged.  The i_*() functions are now the low level
+ * optimizations, I have merged the code generation for different
+ * architectures.  The i_*() functions are now the low level
  * architecture-specific code generation entry points.  The
  * differences between RISC and CISC architectures, actually the
- * annoying asymmetry in CISC architecture, made this interface a
- * bit more complex than it could have ideally been.  Nevertheless,
- * the benefits of extracting gen.c and the cleaner design, especially
- * with the presence of the optimizations, outweighs the added complexity.
- *
- * I tried to make the interface as small as possible.  I'll describe the
- * key functions and macros here.  Overall, there were many challenges for
+ * annoying asymmetry in CISC architecture, has made this interface
+ * more complex than it could have ideally been.  Nevertheless,
+ * the benefits of extracting gen.c and the cleaner design,
+ * especially with the presence of the optimizations, outweighs the
+ * added complexity.  Overall, there were many challenges for
  * extracting gen.c including:
  * + Different register sets; caller/callee saved and argument registers
  * + CISC-style instructions that work on limited registers and parameters
  * + Different instruction formats and immediate value limitations
- * + Producing epilog, prolog, and local variable addresses when optimizing
+ * + Generating epilog, prolog, and local variable addresses when optimizing
  *
- * Instructions:
- * + i_reg(): The mask of allowed registers for each operand of an instruction.
- *   If md is zero, we assume the destination register should be equal to the
- *   first register, as in CISC architectures.  m2 can be zero which means
- *   the instruction doesn't have three operands.  mt denotes the mask of
- *   registers that may lose their contents after the instruction.
- * + i_load(), i_save(), i_mov(), i_num(), i_sym(): The name is clear.
- * + i_imm(): Specifies if the given immediate can be encoded for the given
- *   instruction.
- * + i_jmp(), i_fill(): Branching instructions.  If rn >= 0, the branch is
- *   a conditional branch: jump only the register rn is zero (or nonzero if
- *   jc is nonzero).  nbytes specifies the number of bytes necessary for
- *   holding the jump distance; useful if the architecture supports short
- *   branching instructions.  i_fill() actually fills the jump at src in
- *   code segment.  It returns the amount of bytes jumped.
- * + i_args(): The offset of the first argument from the frame pointer.
- *   It is probably positive.
- * + i_sp(): The offset of the first local from the frame pointer.
- *   It is probably negative.
- * + tmpregs: Register that can be used for holding temporaries.
- * + argregs: Register for holding the first N_ARGS arguments.
+ * I tried to make this interface as small as possible.  The key
+ * functions and macros described next.
  *
- * There are a few other macros defined in arch headers.  See x64.h as
- * an example.
+ * i_reg() returns the mask of allowed registers for each
+ * operand of an instruction.  The first argument op, specifies
+ * the instruction (O_* macros); i_reg() sets the value r0, r1,
+ * and r2 to indicate the mask of acceptable registers for the
+ * first, second, and third operands of the instruction.
+ * The value of these masks may be changed to zero to indicate
+ * fewer than three operands.  If md is zero while m1 is not,
+ * the destination register should be equal to the first register,
+ * as in CISC architectures.  mt denotes the mask of registers
+ * that may lose their contents after the instruction.
+ *
+ * i_ins() generates code for the given instruction.  The arguments
+ * indicate the instruction and its operands.  The code is generated
+ * by calling os() and oi() functions and the current position in
+ * the code segment is obtained by calling opos().  For branch
+ * instructions, i_ins() returns the position of branch offset in
+ * code segment, to be filled later with i_fill().
+ *
+ * Some macros should be defined in architecture-dependent headers
+ * and a few variables should be defined for each architecture,
+ * such as tmpregs, which is an array of register numbers that
+ * can be used for holding temporaries and argregs, which is an
+ * array of register numbers for holding the first N_ARGS arguments.
+ * Consult x64.h as an example, for the macros defined for each
+ * architecture.
  *
  */
 #ifdef NEATCC_ARM
