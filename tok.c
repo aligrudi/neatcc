@@ -249,3 +249,9 @@ void tok_jump(long addr)
 	off_pre = -1;
 	tok_set = 0;
 }
+
+void tok_done(void)
+{
+	mem_done(&tok);
+	mem_done(&tok_mem);
+}

@@ -64,6 +64,7 @@ void *mem_get(struct mem *mem);
 
 /* SECTION ONE: Tokenisation */
 void tok_init(char *path);
+void tok_done(void);
 char *tok_see(void);		/* return the current token; a static buffer */
 char *tok_get(void);		/* return and consume the current token */
 long tok_len(void);		/* the length of the last token */
@@ -72,7 +73,7 @@ long tok_addr(void);
 void tok_jump(long addr);
 
 int cpp_init(char *path);
-void cpp_addpath(char *s);
+void cpp_path(char *s);
 void cpp_define(char *name, char *def);
 char *cpp_loc(long addr);
 int cpp_read(char **buf, long *len);

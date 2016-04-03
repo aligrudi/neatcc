@@ -1623,7 +1623,7 @@ int main(int argc, char *argv[])
 	compat_macros();
 	while (i < argc && argv[i][0] == '-') {
 		if (argv[i][1] == 'I')
-			cpp_addpath(argv[i][2] ? argv[i] + 2 : argv[++i]);
+			cpp_path(argv[i][2] ? argv[i] + 2 : argv[++i]);
 		if (argv[i][1] == 'D') {
 			char *name = argv[i] + 2;
 			char *def = "";
@@ -1647,6 +1647,7 @@ int main(int argc, char *argv[])
 		strcpy(obj, argv[i]);
 		obj[strlen(obj) - 1] = 'o';
 	}
+	tok_done();
 	ofd = open(obj, O_WRONLY | O_TRUNC | O_CREAT, 0600);
 	o_write(ofd);
 	close(ofd);
