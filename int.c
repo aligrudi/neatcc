@@ -39,7 +39,7 @@ static void ic_back(long pos)
 {
 	int i;
 	for (i = pos; i < ic_n; i++)
-		if (ic[i].op == O_CALL)
+		if (O_C(ic[i].op) == O_CALL)
 			free(ic[i].args);
 	ic_n = pos;
 }
@@ -132,7 +132,7 @@ void o_uop(long op)
 
 void o_assign(long bt)
 {
-	ic_put(O_SAVE, iv_get(1), iv_get(0), bt);
+	ic_put(O_MK(O_SAVE, bt), iv_get(1), iv_get(0), 0);
 	iv_swap(0, 1);
 	iv_pop();
 }
@@ -140,14 +140,14 @@ void o_assign(long bt)
 void o_deref(long bt)
 {
 	int r1 = iv_pop();
-	ic_put(O_LOAD, iv_new(), r1, bt);
+	ic_put(O_MK(O_LOAD, bt), iv_new(), r1, 0);
 }
 
 void o_cast(long bt)
 {
 	if (T_SZ(bt) != ULNG) {
 		int r1 = iv_pop();
-		ic_put(O_MOV, iv_new(), r1, bt);
+		ic_put(O_MK(O_MOV, bt), iv_new(), r1, 0);
 		io_num();
 	}
 }
@@ -239,7 +239,7 @@ void o_back(long mark)
 void ic_get(struct ic **c, long *n)
 {
 	int i;
-	if (!ic_n || ic[ic_n - 1].op != O_RET ||
+	if (!ic_n || O_C(ic[ic_n - 1].op) != O_RET ||
 			(lab_n && lab_loc[lab_n - 1] == ic_n))
 		o_ret(0);
 	/* filling jump destinations */
@@ -260,9 +260,9 @@ void ic_get(struct ic **c, long *n)
 
 /* intermediate code queries */
 
-static long cb(int op, long a, long b)
+static long cb(long op, long a, long b)
 {
-	switch (op) {
+	switch (O_C(op)) {
 	case O_ADD:
 		return a + b;
 	case O_SUB:
@@ -273,32 +273,23 @@ static long cb(int op, long a, long b)
 		return a | b;
 	case O_XOR:
 		return a ^ b;
-	case O_MUL | O_FSIGN:
 	case O_MUL:
 		return a * b;
-	case O_DIV | O_FSIGN:
 	case O_DIV:
 		return a / b;
-	case O_MOD | O_FSIGN:
 	case O_MOD:
 		return a % b;
 	case O_SHL:
 		return a << b;
-	case O_SHR | O_FSIGN:
-		return a >> b;
 	case O_SHR:
-		return (unsigned long) a >> b;
+		return O_T(op) & T_MSIGN ? a >> b : (unsigned long) a >> b;
 	case O_LT:
-	case O_LT | O_FSIGN:
 		return a < b;
 	case O_GT:
-	case O_GT | O_FSIGN:
 		return a > b;
 	case O_LE:
-	case O_LE | O_FSIGN:
 		return a <= b;
 	case O_GE:
-	case O_GE | O_FSIGN:
 		return a >= b;
 	case O_EQ:
 		return a == b;
@@ -310,7 +301,7 @@ static long cb(int op, long a, long b)
 
 static long cu(int op, long i)
 {
-	switch (op) {
+	switch (O_C(op)) {
 	case O_NEG:
 		return -i;
 	case O_NOT:
@@ -334,11 +325,13 @@ static long c_cast(long n, unsigned bt)
 int ic_num(struct ic *ic, long iv, long *n)
 {
 	long n1, n2;
-	if (ic[iv].op == O_NUM) {
+	long oc = O_C(ic[iv].op);
+	long bt = O_T(ic[iv].op);
+	if (oc == O_NUM) {
 		*n = ic[iv].arg2;
 		return 0;
 	}
-	if (ic[iv].op & O_MBOP) {
+	if (oc & O_MBOP) {
 		if (ic_num(ic, ic[iv].arg1, &n1))
 			return 1;
 		if (ic_num(ic, ic[iv].arg2, &n2))
@@ -346,16 +339,16 @@ int ic_num(struct ic *ic, long iv, long *n)
 		*n = cb(ic[iv].op, n1, n2);
 		return 0;
 	}
-	if (ic[iv].op & O_MUOP) {
+	if (oc & O_MUOP) {
 		if (ic_num(ic, ic[iv].arg1, &n1))
 			return 1;
 		*n = cu(ic[iv].op, n1);
 		return 0;
 	}
-	if (ic[iv].op == O_MOV) {
+	if (oc == O_MOV) {
 		if (ic_num(ic, ic[iv].arg1, &n1))
 			return 1;
-		*n = c_cast(n1, ic[iv].arg2);
+		*n = c_cast(n1, bt);
 		return 0;
 	}
 	return 1;
@@ -364,12 +357,13 @@ int ic_num(struct ic *ic, long iv, long *n)
 int ic_sym(struct ic *ic, long iv, long *sym, long *off)
 {
 	long n;
-	if (ic[iv].op == O_SYM) {
+	long oc = O_C(ic[iv].op);
+	if (oc == O_SYM) {
 		*sym = ic[iv].arg2;
 		*off = 0;
 		return 0;
 	}
-	if (ic[iv].op == O_ADD) {
+	if (oc == O_ADD) {
 		if ((ic_sym(ic, ic[iv].arg1, sym, off) ||
 				ic_num(ic, ic[iv].arg2, &n)) &&
 			(ic_sym(ic, ic[iv].arg2, sym, off) ||
@@ -378,7 +372,7 @@ int ic_sym(struct ic *ic, long iv, long *sym, long *off)
 		*off += n;
 		return 0;
 	}
-	if (ic[iv].op == O_SUB) {
+	if (oc == O_SUB) {
 		if (ic_sym(ic, ic[iv].arg1, sym, off) ||
 				ic_num(ic, ic[iv].arg2, &n))
 			return 1;
@@ -424,9 +418,11 @@ static int io_mul2(void)
 	struct ic *c = &ic[iv_get(0)];
 	long n, p;
 	long r1, r2;
-	if (!(c->op & O_FMUL))
+	long oc = O_C(c->op);
+	long bt = O_T(c->op);
+	if (!(oc & O_FMUL))
 		return 1;
-	if ((c->op & ~O_FSIGN) == O_MUL && ic_num(ic, c->arg1, &n)) {
+	if (oc == O_MUL && ic_num(ic, c->arg1, &n)) {
 		long t = c->arg1;
 		c->arg1 = c->arg2;
 		c->arg2 = t;
@@ -436,7 +432,7 @@ static int io_mul2(void)
 	p = log2a(n);
 	if (n && p < 0)
 		return 1;
-	if ((c->op & ~O_FSIGN) == O_MUL) {
+	if (oc == O_MUL) {
 		iv_drop(1);
 		if (n == 1) {
 			iv_put(c->arg1);
@@ -447,30 +443,30 @@ static int io_mul2(void)
 			return 0;
 		}
 		r2 = iv_num(p);
-		ic_put(O_SHL, iv_new(), c->arg1, r2);
+		ic_put(O_MK(O_SHL, ULNG), iv_new(), c->arg1, r2);
 		return 0;
 	}
-	if (c->op == O_DIV) {
+	if (oc == O_DIV && ~bt & T_MSIGN) {
 		iv_drop(1);
 		if (n == 1) {
 			iv_put(c->arg1);
 			return 0;
 		}
 		r2 = iv_num(p);
-		ic_put(O_SHR, iv_new(), c->arg1, r2);
+		ic_put(O_MK(O_SHR, ULNG), iv_new(), c->arg1, r2);
 		return 0;
 	}
-	if (c->op == O_MOD) {
+	if (oc == O_MOD && ~bt & T_MSIGN) {
 		iv_drop(1);
 		if (n == 1) {
 			o_num(0);
 			return 0;
 		}
 		r2 = iv_num(LONGSZ * 8 - p);
-		ic_put(O_SHL, iv_new(), c->arg1, r2);
+		ic_put(O_MK(O_SHL, ULNG), iv_new(), c->arg1, r2);
 		r1 = iv_pop();
 		r2 = iv_num(LONGSZ * 8 - p);
-		ic_put(O_SHR, iv_new(), r1, r2);
+		ic_put(O_MK(O_SHR, ULNG), iv_new(), r1, r2);
 		return 0;
 	}
 	return 1;
@@ -481,7 +477,7 @@ static int io_cmp(void)
 {
 	struct ic *c = &ic[iv_get(0)];
 	long cmp = c->arg1;
-	if (c->op == O_LNOT && ic[cmp].op & O_FCMP) {
+	if (O_C(c->op) == O_LNOT && ic[cmp].op & O_FCMP) {
 		iv_drop(1);
 		ic[cmp].op ^= 1;
 		iv_put(ic[cmp].arg0);
@@ -493,12 +489,13 @@ static int io_cmp(void)
 static int io_jmp(void)
 {
 	struct ic *c = &ic[ic_n - 1];
-	if (c->op == O_JZ && ic[c->arg0].op == O_LNOT) {
+	long oc = O_C(c->op);
+	if (oc == O_JZ && O_C(ic[c->arg0].op) == O_LNOT) {
 		c->arg0 = ic[c->arg0].arg1;
 		c->op = O_JN;
 		return 0;
 	}
-	if ((c->op == O_JZ || c->op == O_JN) && ic[c->arg0].op & O_FCMP) {
+	if ((oc == O_JZ || oc == O_JN) && O_C(ic[c->arg0].op) & O_FCMP) {
 		long jop = c->op;
 		long cop = (ic[c->arg0].op & ~O_FCMP) | O_FJCMP | O_FJMP | O_FJIF;
 		long r2 = c->arg2;

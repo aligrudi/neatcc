@@ -207,13 +207,14 @@ static void i_mul(int rd, int r1, int r2)
 
 static void i_div(int op, int rd, int r1, int r2)
 {
+	long bt = O_T(op);
 	if (r2 != R_RDX) {
-		if (op & O_FSIGN)
+		if (bt & T_MSIGN)
 			op_x(I_CQO, R_RAX, R_RDX, LONGSZ);
 		else
 			i_num(R_RDX, 0);
 	}
-	op_rr(I_MUL, op & O_FSIGN ? 7 : 6, r2, LONGSZ);
+	op_rr(I_MUL, bt & T_MSIGN ? 7 : 6, r2, LONGSZ);
 }
 
 static void i_tst(int rn, int rm)
@@ -234,15 +235,17 @@ static void i_cmp_imm(int rn, long n)
 
 static void i_shl(int op, int rd, int r1, int rs)
 {
+	long bt = O_T(op);
 	int sm = 4;
 	if ((op & 0x0f) == 1)
-		sm = op & O_FSIGN ? 7 : 5;
+		sm = bt & T_MSIGN ? 7 : 5;
 	op_rr(I_SHX, sm, rd, LONGSZ);
 }
 
 static void i_shl_imm(int op, int rd, int rn, long n)
 {
-	int sm = (op & 0x1) ? (op & O_FSIGN ? 0xf8 : 0xe8) : 0xe0;
+	long bt = O_T(op);
+	int sm = (op & 0x1) ? (bt & T_MSIGN ? 0xf8 : 0xe8) : 0xe0;
 	char s[4] = {REX(0, rn), 0xc1, sm | (rn & 7), n & 0xff};
 	os(s, 4);
 }
@@ -262,7 +265,8 @@ static int i_cond(long op)
 	/* lt, ge, eq, ne, le, gt */
 	static int ucond[] = {0x92, 0x93, 0x94, 0x95, 0x96, 0x97};
 	static int scond[] = {0x9c, 0x9d, 0x94, 0x95, 0x9e, 0x9f};
-	return op & O_FSIGN ? scond[op & 0x0f] : ucond[op & 0x0f];
+	long bt = O_T(op);
+	return bt & T_MSIGN ? scond[op & 0x0f] : ucond[op & 0x0f];
 }
 
 static void i_set(long op, int rd)
@@ -538,23 +542,24 @@ void i_done(void)
 	free(lab_loc);
 }
 
-long i_reg(long op, long *rd, long *r1, long *r2, long *tmp, long bt)
+long i_reg(long op, long *rd, long *r1, long *r2, long *tmp)
 {
+	int oc = O_C(op);
 	*rd = 0;
 	*r1 = 0;
 	*r2 = 0;
 	*tmp = 0;
-	if (op == O_NUM || op == O_SYM) {
+	if (oc == O_NUM || oc == O_SYM) {
 		*rd = R_TMPS;
 		return 0;
 	}
-	if (op & O_FADD) {
+	if (oc & O_FADD) {
 		*r1 = R_TMPS;
-		*r2 = op & O_FNUM ? 0 : R_TMPS;
+		*r2 = oc & O_FNUM ? 0 : R_TMPS;
 		return 0;
 	}
-	if (op & O_FSHT) {
-		if (op & O_FNUM) {
+	if (oc & O_FSHT) {
+		if (oc & O_FNUM) {
 			*r1 = R_TMPS;
 			*r2 = 0;
 		} else {
@@ -563,150 +568,147 @@ long i_reg(long op, long *rd, long *r1, long *r2, long *tmp, long bt)
 		}
 		return 0;
 	}
-	if (op & O_FMUL) {
-		*rd = (op & ~O_FSIGN) == O_MOD ? (1 << R_RDX) : (1 << R_RAX);
+	if (oc & O_FMUL) {
+		*rd = oc == O_MOD ? (1 << R_RDX) : (1 << R_RAX);
 		*r1 = (1 << R_RAX);
 		*r2 = R_TMPS & ~*rd & ~*r1;
-		if ((op & ~O_FSIGN) == O_DIV)
+		if (oc == O_DIV)
 			*r2 &= ~(1 << R_RDX);
 		*tmp = (1 << R_RDX) | (1 << R_RAX);
 		return 0;
 	}
-	if (op & O_FCMP) {
+	if (oc & O_FCMP) {
 		*rd = 1 << R_RAX;
 		*r1 = R_TMPS;
-		*r2 = op & O_FNUM ? 0 : R_TMPS;
+		*r2 = oc & O_FNUM ? 0 : R_TMPS;
 		return 0;
 	}
-	if (op & O_FUOP) {
+	if (oc & O_FUOP) {
 		*rd = R_TMPS;
-		if (op == O_LNOT)
+		if (oc == O_LNOT)
 			*r1 = 1 << R_RAX;
 		else
 			*r1 = R_TMPS;
 		return 0;
 	}
-	if (op == O_MSET) {
+	if (oc == O_MSET) {
 		*rd = 1 << R_RDI;
 		*r1 = 1 << R_RAX;
 		*r2 = 1 << R_RCX;
 		return 0;
 	}
-	if (op == O_MCPY) {
+	if (oc == O_MCPY) {
 		*rd = 1 << R_RDI;
 		*r1 = 1 << R_RSI;
 		*r2 = 1 << R_RCX;
 		return 0;
 	}
-	if (op == O_MOV) {
-		*rd = R_TMPS;
-		*r1 = R_TMPS;
-		return 0;
-	}
-	if (op == O_RET) {
+	if (oc == O_RET) {
 		*rd = (1 << REG_RET);
 		return 0;
 	}
-	if (op == O_CALL) {
+	if (oc == O_CALL) {
 		*rd = (1 << REG_RET);
 		*r1 = R_TMPS;
 		return 0;
 	}
-	if (op == O_SAVE || op == O_LOAD || op == O_MOV) {
+	if (oc == O_SAVE || oc == O_LOAD || oc == O_MOV) {
 		*rd = R_TMPS;
 		*r1 = R_TMPS;
 		return 0;
 	}
-	if (op == O_JZ || op == O_JN || op == O_SYM) {
+	if (oc == O_JZ || oc == O_JN || oc == O_SYM) {
 		*rd = R_TMPS;
 		return 0;
 	}
-	if (op & O_FJCMP) {
+	if (oc & O_FJCMP) {
 		*rd = R_TMPS;
 		*r1 = R_TMPS;
 		return 0;
 	}
-	if (op == O_JMP)
+	if (oc == O_JMP)
 		return 0;
 	return 1;
 }
 
-long i_ins(long op, long r0, long r1, long r2, long bt)
+long i_ins(long op, long r0, long r1, long r2)
 {
-	if (op & O_FADD) {
-		if (op & O_FNUM)
+	long oc = O_C(op);
+	long bt = O_T(op);
+	if (oc & O_FADD) {
+		if (oc & O_FNUM)
 			i_op_imm(O_ADD, r0, r1, r2);
 		else
 			i_add(op, r1, r1, r2);
 	}
-	if (op & O_FSHT)
+	if (oc & O_FSHT)
 		i_shl(op, r1, r1, r2);
-	if (op & O_FMUL) {
-		if ((op & ~O_FSIGN) == O_MUL)
+	if (oc & O_FMUL) {
+		if (oc == O_MUL)
 			i_mul(R_RAX, r1, r2);
-		if ((op & ~O_FSIGN) == O_DIV)
+		if (oc == O_DIV)
 			i_div(op, R_RAX, r1, r2);
-		if ((op & ~O_FSIGN) == O_MOD)
+		if (oc == O_MOD)
 			i_div(op, R_RDX, r1, r2);
 		return 0;
 	}
-	if (op & O_FCMP) {
+	if (oc & O_FCMP) {
 		i_cmp(r1, r2);
 		i_set(op, r0);
 		return 0;
 	}
-	if (op & O_FUOP) {	/* uop */
-		if (op == O_NEG)
+	if (oc & O_FUOP) {	/* uop */
+		if (oc == O_NEG)
 			i_neg(r1);
-		if (op == O_NOT)
+		if (oc == O_NOT)
 			i_not(r1);
-		if (op == O_LNOT)
+		if (oc == O_LNOT)
 			i_lnot(r1);
 		return 0;
 	}
-	if (op == O_CALL) {
+	if (oc == O_CALL) {
 		op_rr(I_CALL, 2, r1, LONGSZ);
 		return 0;
 	}
-	if (op == (O_CALL | O_FSYM)) {
+	if (oc == (O_CALL | O_FSYM)) {
 		os("\xe8", 1);		/* call $x */
 		i_rel(r2, OUT_CS | OUT_RLREL, opos());
 		oi(-4 + r1, 4);
 		return 0;
 	}
-	if (op == O_SYM) {
+	if (oc == O_SYM) {
 		i_sym(r0, r2, r1);
 		return 0;
 	}
-	if (op == O_NUM) {
+	if (oc == O_NUM) {
 		i_num(r0, r2);
 		return 0;
 	}
-	if (op == O_MSET) {
+	if (oc == O_MSET) {
 		os("\xfc\xf3\xaa", 3);		/* cld; rep stosb */
 		return 0;
 	}
-	if (op == O_MCPY) {
+	if (oc == O_MCPY) {
 		os("\xfc\xf3\xa4", 3);		/* cld; rep movs */
 		return 0;
 	}
-	if (op == O_RET) {
+	if (oc == O_RET) {
 		jmp_add(i_jmp(O_JMP, 0, 0, 4), 0);
 		return 0;
 	}
-	if (op == O_LOAD) {
+	if (oc == O_LOAD) {
 		op_rm(movrx_op(bt, I_MOVR), r0, r1, r2, movrx_bt(bt));
 		return 0;
 	}
-	if (op == O_SAVE) {
+	if (oc == O_SAVE) {
 		op_rm(I_MOV, r0, r1, r2, bt);
 		return 0;
 	}
-	if (op == O_MOV) {
+	if (oc == O_MOV) {
 		i_cast(r0, r1, bt);
 		return 0;
 	}
-	if (op & O_FJMP) {
+	if (oc & O_FJMP) {
 		jmp_add(i_jmp(op, r0, r1, 4), r2 + 1);
 		return 0;
 	}

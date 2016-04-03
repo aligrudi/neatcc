@@ -153,18 +153,18 @@ static void ic_map(struct ic *ic, int *r0, int *r1, int *r2, long *mt)
 {
 	long m0, m1, m2;
 	long all = 0;
-	int op = ic->op;
+	int oc = O_C(ic->op);
 	int i;
-	if (op == O_CALL)
+	if (oc == O_CALL)
 		for (i = 0; i < MIN(ic->arg2, N_ARGS); i++)
 			all |= (1 << argregs[i]);
-	if (op == O_LOC) {
+	if (oc == O_LOC) {
 		m0 = ~0;
 		m1 = 0;
 		m2 = 0;
 		*mt = 0;
-	} else if (i_reg(op, &m0, &m1, &m2, mt, ULNG)) {
-		die("neatcc: instruction %06lx not supported\n", op);
+	} else if (i_reg(ic->op, &m0, &m1, &m2, mt)) {
+		die("neatcc: instruction %08lx not supported\n", ic->op);
 	}
 	if (m2) {
 		*r2 = iv_map(ic->arg2, m2, m2, all);
@@ -175,7 +175,7 @@ static void ic_map(struct ic *ic, int *r0, int *r1, int *r2, long *mt)
 		all |= (1 << *r1);
 	}
 	if (m0) {
-		int wop = op & O_MOUT;
+		int wop = ic->op & O_MOUT;
 		if (wop && m2 && m0 & (1 << *r2))
 			*r0 = *r2;
 		else if (wop && m1 && m0 & (1 << *r1))
@@ -211,7 +211,7 @@ static void iv_spill(long iv)
 	if (iv_pos[iv] >= 0) {
 		long rank = iv_rank(iv);
 		iv_maxlive = MAX(iv_maxlive, rank + 1);
-		i_ins(O_SAVE, iv_pos[iv], REG_FP, -iv_addr(rank), ULNG);
+		i_ins(O_MK(O_SAVE, ULNG), iv_pos[iv], REG_FP, -iv_addr(rank));
 		iv_regmap[iv_pos[iv]] = -1;
 		iv_pos[iv] = -1;
 	}
@@ -240,9 +240,9 @@ static void iv_load(long iv, int reg)
 		iv_spill(iv_regmap[reg]);
 	if (iv_pos[iv] >= 0) {
 		iv_regmap[iv_pos[iv]] = -1;
-		i_ins(O_MOV, reg, iv_pos[iv], 0, ULNG);
+		i_ins(O_MK(O_MOV, ULNG), reg, iv_pos[iv], 0);
 	} else {
-		i_ins(O_LOAD, reg, REG_FP, -iv_addr(iv_rank(iv)), ULNG);
+		i_ins(O_MK(O_LOAD, ULNG), reg, REG_FP, -iv_addr(iv_rank(iv)));
 	}
 	iv_regmap[reg] = iv;
 	iv_pos[iv] = reg;
@@ -304,7 +304,7 @@ static void iv_init(struct ic *ic, int ic_n)
 			iv_use[*r2] = i;
 		if (r3 && !iv_use[*r3])
 			iv_use[*r3] = i;
-		if (ic[i].op == O_CALL)
+		if (ic[i].op & O_FCALL)
 			for (j = 0; j < ic[i].arg2; j++)
 				if (!iv_use[ic[i].args[j]])
 					iv_use[ic[i].args[j]] = i;
@@ -315,7 +315,7 @@ static void iv_init(struct ic *ic, int ic_n)
 		int op = ic->op;
 		if (!iv_use[i])
 			continue;
-		i_reg(op, &m0, &m1, &m2, &mt, ULNG);
+		i_reg(op, &m0, &m1, &m2, &mt);
 		if (n >= 1 && !(op & O_MOUT))
 			iv_gmask[ic[i].arg0] = m0;
 		if (n >= 2)
@@ -362,21 +362,22 @@ static void ic_gencode(struct ic *ic, int ic_n)
 	int i, j;
 	iv_init(ic, ic_n);
 	for (i = 0; i < ic_n; i++) {
-		int op = ic[i].op;
+		long op = ic[i].op;
+		long oc = O_C(op);
 		int n = ic_regcnt(ic + i);
 		i_label(i);
 		if (!iv_use[i])
 			continue;
 		ic_map(ic + i, &r0, &r1, &r2, &mt);
-		if (op & O_FCALL) {
+		if (oc & O_FCALL) {
 			int argc = ic[i].arg2;
 			int aregs = MIN(N_ARGS, argc);
 			/* arguments passed via stack */
 			for (j = argc - 1; j >= aregs; --j) {
 				int v = ic[i].args[j];
 				iv_load(v, r0);
-				i_ins(O_SAVE, r0, REG_SP,
-					(j - aregs) * ULNG, ULNG);
+				i_ins(O_MK(O_SAVE, ULNG), r0, REG_SP,
+					(j - aregs) * ULNG);
 				iv_drop(v);
 			}
 			/* arguments passed via registers */
@@ -384,7 +385,7 @@ static void ic_gencode(struct ic *ic, int ic_n)
 				iv_load(ic[i].args[j], argregs[j]);
 		}
 		/* loading the arguments */
-		if (n >= 1 && !(op & O_MOUT))
+		if (n >= 1 && !(oc & O_MOUT))
 			iv_load(ic[i].arg0, r0);
 		if (n >= 2)
 			iv_load(ic[i].arg1, r1);
@@ -395,7 +396,7 @@ static void ic_gencode(struct ic *ic, int ic_n)
 			if (iv_regmap[j] >= 0 && mt & (1 << j))
 				iv_spill(iv_regmap[j]);
 		/* overwriting a value that is needed later */
-		if (n >= 1 && op & O_MOUT && iv_regmap[r0] >= 0)
+		if (n >= 1 && oc & O_MOUT && iv_regmap[r0] >= 0)
 			if (iv_use[iv_regmap[r0]] > i)
 				iv_spill(iv_regmap[r0]);
 		/* dropping values that are no longer used */
@@ -408,38 +409,38 @@ static void ic_gencode(struct ic *ic, int ic_n)
 				if (iv_live[j] >= 0)
 					iv_spill(iv_live[j]);
 		/* performing the instruction */
-		if (op & O_MBOP)
-			i_ins(op, r0, r1, r2, ULNG);
-		if (op & O_MUOP)
-			i_ins(op, r0, r1, r2, ULNG);
-		if (op == O_NUM)
-			i_ins(op, r0, 0, ic[i].arg2, ULNG);
-		if (op == O_LOC)
-			i_ins(O_ADD | O_FNUM, r0, REG_FP, -loc_off[ic[i].arg2], ULNG);
-		if (op == O_SYM)
-			i_ins(O_SYM, r0, 0, ic[i].arg2, ULNG);
-		if (op == O_LOAD)
-			i_ins(O_LOAD, r0, r1, 0, ic[i].arg2);
-		if (op == O_SAVE)
-			i_ins(O_SAVE, r1, r0, 0, ic[i].arg2);
-		if (op == O_RET)
-			i_ins(O_RET, r0, 0, 0, ULNG);
-		if (op == O_MOV)
-			i_ins(O_MOV, r0, r0, 0, ic[i].arg2);
-		if (op == O_CALL)
-			i_ins(O_CALL, r0, r1, 0, ULNG);
-		if (op == O_JMP)
-			i_ins(O_JMP, 0, 0, ic[i].arg2, ULNG);
-		if (op == O_JZ || op == O_JN)
-			i_ins(op, r0, 0, ic[i].arg2, ULNG);
-		if (op & O_FJCMP)
-			i_ins(op, r0, r1, ic[i].arg2, ULNG);
-		if (op == O_MSET)
-			i_ins(O_MSET, r0, r1, r2, 0);
-		if (op == O_MCPY)
-			i_ins(O_MCPY, r0, r1, r2, 0);
+		if (oc & O_MBOP)
+			i_ins(op, r0, r1, r2);
+		if (oc & O_MUOP)
+			i_ins(op, r0, r1, r2);
+		if (oc == O_NUM)
+			i_ins(op, r0, 0, ic[i].arg2);
+		if (oc == O_LOC)
+			i_ins(O_ADD | O_FNUM, r0, REG_FP, -loc_off[ic[i].arg2]);
+		if (oc == O_SYM)
+			i_ins(O_SYM, r0, 0, ic[i].arg2);
+		if (oc == O_LOAD)
+			i_ins(op, r0, r1, 0);
+		if (oc == O_SAVE)
+			i_ins(op, r1, r0, 0);
+		if (oc == O_RET)
+			i_ins(op, r0, 0, 0);
+		if (oc == O_MOV)
+			i_ins(op, r0, r0, 0);
+		if (oc == O_CALL)
+			i_ins(op, r0, r1, 0);
+		if (oc == O_JMP)
+			i_ins(op, 0, 0, ic[i].arg2);
+		if (oc == O_JZ || op == O_JN)
+			i_ins(op, r0, 0, ic[i].arg2);
+		if (oc & O_FJCMP)
+			i_ins(op, r0, r1, ic[i].arg2);
+		if (oc == O_MSET)
+			i_ins(op, r0, r1, r2);
+		if (oc == O_MCPY)
+			i_ins(op, r0, r1, r2);
 		/* saving back the output register */
-		if (op & O_MOUT)
+		if (oc & O_MOUT)
 			iv_save(ic[i].arg0, r0);
 	}
 	iv_done();

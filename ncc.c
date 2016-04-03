@@ -378,7 +378,7 @@ static void ts_binop(int op)
 	bt = bt_op(bt1, bt2);
 	if (op == O_DIV || op == O_MOD)
 		bt = T_MK(bt2 & T_MSIGN, bt);
-	o_bop(op | (bt & T_MSIGN ? O_FSIGN : 0));
+	o_bop(O_MK(op, bt));
 	ts_push_bt(bt);
 }
 
@@ -875,7 +875,7 @@ static void shift(int op)
 	struct type t;
 	readadd();
 	ts_pop_de2(NULL, &t);
-	o_bop(op | (T_MSIGN & TYPE_BT(&t) ? O_FSIGN : 0));
+	o_bop(O_MK(op, TYPE_BT(&t)));
 	ts_push_bt(bt_uop(TYPE_BT(&t)));
 }
 
@@ -902,7 +902,7 @@ static void cmp(int op)
 	readshift();
 	ts_pop_de2(&t1, &t2);
 	bt = bt_op(TYPE_BT(&t1), TYPE_BT(&t2));
-	o_bop(op | (bt & T_MSIGN ? O_FSIGN : 0));
+	o_bop(O_MK(op, bt));
 	ts_push_bt(SINT);
 }
 
