@@ -73,3 +73,13 @@ long mem_len(struct mem *mem)
 {
 	return mem->n;
 }
+
+void *mem_get(struct mem *mem)
+{
+	void *ret;
+	if (!mem->s)
+		mem_extend(mem);
+	ret = mem->s;
+	mem_init(mem);
+	return ret;
+}

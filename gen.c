@@ -122,6 +122,7 @@ static long *iv_bbeg;		/* whether each instruction begins a basic block */
 static long *iv_pos;		/* the current position of each value */
 static long iv_regmap[N_REGS];	/* the value stored in each register */
 static long iv_live[NTMPS];	/* live values */
+static int iv_maxlive;
 
 /* find a register, with the given good, acceptable, and bad registers */
 static long iv_map(long iv, long gmask, long amask, long bmask)
@@ -189,21 +190,28 @@ static void ic_map(struct ic *ic, int *r0, int *r1, int *r2, long *mt)
 	func_regs |= all | *mt;
 }
 
-static long iv_addr(long iv)
+static long iv_rank(long iv)
 {
 	int i;
 	for (i = 0; i < LEN(iv_live); i++)
 		if (iv_live[i] == iv)
-			return loc_pos + i * ULNG + ULNG;
+			return i;
 	die("neatcc: the specified value is not live\n");
 	return 0;
+}
+
+static long iv_addr(long rank)
+{
+	return loc_pos + rank * ULNG + ULNG;
 }
 
 /* move the value to the stack */
 static void iv_spill(long iv)
 {
 	if (iv_pos[iv] >= 0) {
-		i_ins(O_SAVE, iv_pos[iv], REG_FP, -iv_addr(iv), ULNG);
+		long rank = iv_rank(iv);
+		iv_maxlive = MAX(iv_maxlive, rank + 1);
+		i_ins(O_SAVE, iv_pos[iv], REG_FP, -iv_addr(rank), ULNG);
 		iv_regmap[iv_pos[iv]] = -1;
 		iv_pos[iv] = -1;
 	}
@@ -234,7 +242,7 @@ static void iv_load(long iv, int reg)
 		iv_regmap[iv_pos[iv]] = -1;
 		i_ins(O_MOV, reg, iv_pos[iv], 0, ULNG);
 	} else {
-		i_ins(O_LOAD, reg, REG_FP, -iv_addr(iv), ULNG);
+		i_ins(O_LOAD, reg, REG_FP, -iv_addr(iv_rank(iv)), ULNG);
 	}
 	iv_regmap[reg] = iv;
 	iv_pos[iv] = reg;
@@ -336,6 +344,7 @@ static void iv_init(struct ic *ic, int ic_n)
 	/* iv_live */
 	for (i = 0; i < LEN(iv_live); i++)
 		iv_live[i] = -1;
+	iv_maxlive = 0;
 }
 
 static void iv_done(void)
@@ -346,51 +355,16 @@ static void iv_done(void)
 	free(iv_pos);
 }
 
-void os(void *s, int n)
-{
-	mem_put(&cs, s, n);
-}
-
-static char *ointbuf(long n, int l)
-{
-	static char buf[16];
-	int i;
-	for (i = 0; i < l; i++) {
-		buf[i] = n & 0xff;
-		n >>= 8;
-	}
-	return buf;
-}
-
-void oi(long n, int l)
-{
-	mem_put(&cs, ointbuf(n, l), l);
-}
-
-void oi_at(long pos, long n, int l)
-{
-	mem_cpy(&cs, pos, ointbuf(n, l), l);
-}
-
-long opos(void)
-{
-	return mem_len(&cs);
-}
-
 static void ic_gencode(struct ic *ic, int ic_n)
 {
-	int *pos;	/* the position of ic instructions in code segment */
-	int *pos_jmp;	/* the position of jump instruction offsets */
 	int r0, r1, r2;
 	long mt;
 	int i, j;
 	iv_init(ic, ic_n);
-	pos = malloc(ic_n * sizeof(pos[0]));
-	pos_jmp = malloc(ic_n * sizeof(pos_jmp[0]));
 	for (i = 0; i < ic_n; i++) {
 		int op = ic[i].op;
 		int n = ic_regcnt(ic + i);
-		pos[i] = mem_len(&cs);
+		i_label(i);
 		if (!iv_use[i])
 			continue;
 		ic_map(ic + i, &r0, &r1, &r2, &mt);
@@ -455,11 +429,11 @@ static void ic_gencode(struct ic *ic, int ic_n)
 		if (op == O_CALL)
 			i_ins(O_CALL, r0, r1, 0, ULNG);
 		if (op == O_JMP)
-			pos_jmp[i] = i_ins(O_JMP, 0, 0, 4, ULNG);
+			i_ins(O_JMP, 0, 0, ic[i].arg2, ULNG);
 		if (op == O_JZ || op == O_JN)
-			pos_jmp[i] = i_ins(op, r0, 0, 4, ULNG);
+			i_ins(op, r0, 0, ic[i].arg2, ULNG);
 		if (op & O_FJCMP)
-			pos_jmp[i] = i_ins(op, r0, r1, 4, ULNG);
+			i_ins(op, r0, r1, ic[i].arg2, ULNG);
 		if (op == O_MSET)
 			i_ins(O_MSET, r0, r1, r2, 0);
 		if (op == O_MCPY)
@@ -468,12 +442,7 @@ static void ic_gencode(struct ic *ic, int ic_n)
 		if (op & O_MOUT)
 			iv_save(ic[i].arg0, r0);
 	}
-	for (i = 0; i < ic_n; i++)
-		if (ic[i].op & O_FJMP)
-			i_fill(pos_jmp[i], pos[ic[i].arg2], 4);
 	iv_done();
-	free(pos);
-	free(pos_jmp);
 }
 
 static void ic_reset(void)
@@ -495,26 +464,7 @@ void o_func_beg(char *name, int argc, int global, int varg)
 	ic_reset();
 	for (i = 0; i < argc; i++)
 		loc_add((-i - 2) * ULNG);
-	out_def(name, (global ? OUT_GLOB : 0) | OUT_CS, opos(), 0);
-}
-
-static long ic_maxtmp(struct ic *ic, long ic_n)
-{
-	long *w, *r1, *r2, *r3;
-	long max = -1;
-	int i;
-	for (i = 0; i < ic_n; i++) {
-		ic_info(ic + i, &w, &r1, &r2, &r3);
-		if (w && *w > max)
-			max = *w;
-		if (r1 && *r1 > max)
-			max = *r1;
-		if (r2 && *r2 > max)
-			max = *r2;
-		if (r3 && *r3 > max)
-			max = *r3;
-	}
-	return max;
+	out_def(name, (global ? OUT_GLOB : 0) | OUT_CS, mem_len(&cs), 0);
 }
 
 void o_func_end(void)
@@ -522,15 +472,24 @@ void o_func_end(void)
 	struct ic *ic;
 	long ic_n, spsub;
 	long sargs = 0;
-	long sregs = R_PERM & func_regs;
+	char *c;
+	long c_len, *rsym, *rflg, *roff, rcnt;
 	int i;
+	ic_get(&ic, &ic_n);		/* the intermediate code */
+	ic_gencode(ic, ic_n);		/* generating machine code */
+	/* adding function prologue and epilogue */
+	spsub = loc_pos + iv_maxlive * ULNG;
 	for (i = 0; i < MIN(N_ARGS, func_argc); i++)
 		sargs |= 1 << argregs[i];
-	ic_get(&ic, &ic_n);
-	spsub = loc_pos + ic_maxtmp(ic, ic_n) * ULNG;
-	i_prolog(func_argc, func_varg, sargs, sregs, 1, spsub);
-	ic_gencode(ic, ic_n);
-	i_epilog();
+	i_wrap(func_argc, func_varg, sargs, R_PERM & func_regs, 1, spsub);
+	i_code(&c, &c_len, &rsym, &rflg, &roff, &rcnt);
+	for (i = 0; i < rcnt; i++)	/* adding the relocations */
+		out_rel(rsym[i], rflg[i], roff[i] + mem_len(&cs));
+	mem_put(&cs, c, c_len);		/* appending function code */
+	free(c);
+	free(rsym);
+	free(rflg);
+	free(roff);
 	for (i = 0; i < ic_n; i++)
 		if (ic[i].op == O_CALL)
 			free(ic[i].args);

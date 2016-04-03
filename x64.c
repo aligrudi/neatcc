@@ -1,4 +1,5 @@
 /* architecture-dependent code generation for x86_64 */
+#include <stdlib.h>
 #include "ncc.h"
 
 /* x86-64 registers, without r8-r15 */
@@ -43,6 +44,40 @@ int argregs[] = {7, 6, 2, 1, 8, 9};
 #define O1(op)			((op) & 0xff)
 #define MODRM(m, r1, r2)	((m) << 6 | (r1) << 3 | (r2))
 #define REX(r1, r2)		(0x48 | (((r1) & 8) >> 1) | (((r2) & 8) >> 3))
+
+static struct mem cs;		/* generated code */
+
+/* code generation functions */
+void os(void *s, int n)
+{
+	mem_put(&cs, s, n);
+}
+
+static char *ointbuf(long n, int l)
+{
+	static char buf[16];
+	int i;
+	for (i = 0; i < l; i++) {
+		buf[i] = n & 0xff;
+		n >>= 8;
+	}
+	return buf;
+}
+
+void oi(long n, int l)
+{
+	mem_put(&cs, ointbuf(n, l), l);
+}
+
+void oi_at(long pos, long n, int l)
+{
+	mem_cpy(&cs, pos, ointbuf(n, l), l);
+}
+
+long opos(void)
+{
+	return mem_len(&cs);
+}
 
 static void op_x(int op, int r1, int r2, int bt)
 {
@@ -212,17 +247,6 @@ static void i_shl_imm(int op, int rd, int rn, long n)
 	os(s, 4);
 }
 
-static void i_sym(int rd, int sym, int off)
-{
-	int sz = X64_ABS_RL & OUT_RL32 ? 4 : LONGSZ;
-	if (X64_ABS_RL & OUT_RLSX)
-		op_rr(I_MOVI, 0, rd, sz);
-	else
-		op_x(I_MOVIR + (rd & 7), 0, rd, sz);
-	out_rel(sym, OUT_CS | X64_ABS_RL, opos());
-	oi(off, sz);
-}
-
 static void i_neg(int rd)
 {
 	op_rr(I_NOT, 3, rd, LONGSZ);
@@ -349,87 +373,169 @@ static void i_op_imm(int op, int rd, int r1, long n)
 	}
 }
 
-static int func_sargs;		/* saved arguments */
-static int func_sregs;		/* saved registers */
-static int func_initfp;
-static int func_nsregs;		/* number of saved registers */
-static int func_nsargs;		/* number of saved arguments */
-static int func_spsub;		/* stack pointer subtraction */
+static long *rel_sym;		/* relocation symbols */
+static long *rel_flg;		/* relocation flags */
+static long *rel_off;		/* relocation offsets */
+static long rel_n, rel_sz;	/* relocation count */
 
-static void i_saveargs(void)
+static long lab_sz;		/* label count */
+static long *lab_loc;		/* label offsets in cs */
+static long jmp_n, jmp_sz;	/* jump count */
+static long *jmp_off;		/* jump offsets */
+static long *jmp_dst;		/* jump destinations */
+
+static void lab_add(long id)
+{
+	while (id >= lab_sz) {
+		int lab_n = lab_sz;
+		lab_sz = MAX(128, lab_sz * 2);
+		lab_loc = mextend(lab_loc, lab_n, lab_sz, sizeof(*lab_loc));
+	}
+	lab_loc[id] = opos();
+}
+
+static void jmp_add(long off, long dst)
+{
+	if (jmp_n == jmp_sz) {
+		jmp_sz = MAX(128, jmp_sz * 2);
+		jmp_off = mextend(jmp_off, jmp_n, jmp_sz, sizeof(*jmp_off));
+		jmp_dst = mextend(jmp_dst, jmp_n, jmp_sz, sizeof(*jmp_dst));
+	}
+	jmp_off[jmp_n] = off;
+	jmp_dst[jmp_n] = dst;
+	jmp_n++;
+}
+
+void i_label(long id)
+{
+	lab_add(id + 1);
+}
+
+static void i_rel(long sym, long flg, long off)
+{
+	if (rel_n == rel_sz) {
+		rel_sz = MAX(128, rel_sz * 2);
+		rel_sym = mextend(rel_sym, rel_n, rel_sz, sizeof(*rel_sym));
+		rel_flg = mextend(rel_flg, rel_n, rel_sz, sizeof(*rel_flg));
+		rel_off = mextend(rel_off, rel_n, rel_sz, sizeof(*rel_off));
+	}
+	rel_sym[rel_n] = sym;
+	rel_flg[rel_n] = flg;
+	rel_off[rel_n] = off;
+	rel_n++;
+}
+
+static void i_sym(int rd, int sym, int off)
+{
+	int sz = X64_ABS_RL & OUT_RL32 ? 4 : LONGSZ;
+	if (X64_ABS_RL & OUT_RLSX)
+		op_rr(I_MOVI, 0, rd, sz);
+	else
+		op_x(I_MOVIR + (rd & 7), 0, rd, sz);
+	i_rel(sym, OUT_CS | X64_ABS_RL, opos());
+	oi(off, sz);
+}
+
+static void i_saveargs(long sargs)
 {
 	int i;
 	os("\x58", 1);		/* pop rax */
 	for (i = N_ARGS - 1; i >= 0; i--)
-		if ((1 << argregs[i]) & func_sargs)
+		if ((1 << argregs[i]) & sargs)
 			i_push(argregs[i]);
 	os("\x50", 1);		/* push rax */
 }
 
-void i_prolog(int argc, int varg, int sargs, int sregs, int initfp, int spsub)
+void i_wrap(int argc, int varg, int sargs, int sregs, int initfp, int spsub)
 {
+	long body_n;
+	void *body;
+	long diff;		/* prologue length */
+	int nsregs = 0;		/* number of saved registers */
+	int nsargs = 0;		/* number of saved arguments */
+	int mod16;		/* 16-byte alignment */
 	int i;
-	int mod16;
-	int nsregs = 0;
-	int nsargs = 0;
-	func_sargs = sargs;
-	func_sregs = sregs;
-	func_initfp = initfp;
-	func_spsub = 0;
-	if (func_sargs)
-		i_saveargs();
+	lab_add(0);		/* the return label */
+	body_n = mem_len(&cs);
+	body = mem_get(&cs);
+	/* generating function prologue */
+	if (sargs)
+		i_saveargs(sargs);
 	if (initfp) {
 		os("\x55", 1);			/* push rbp */
 		os("\x48\x89\xe5", 3);		/* mov rbp, rsp */
 	}
-	if (func_sregs) {
+	if (sregs) {
 		for (i = N_TMPS - 1; i >= 0; i--)
-			if ((1 << tmpregs[i]) & func_sregs)
+			if ((1 << tmpregs[i]) & sregs)
 				i_push(tmpregs[i]);
 	}
 	for (i = 0; i < N_TMPS; i++)
-		if ((1 << tmpregs[i]) & func_sregs)
+		if ((1 << tmpregs[i]) & sregs)
 			nsregs++;
 	for (i = 0; i < N_ARGS; i++)
-		if ((1 << argregs[i]) & func_sargs)
+		if ((1 << argregs[i]) & sargs)
 			nsargs++;
-	func_nsregs = nsregs;
-	func_nsargs = nsargs;
+	nsargs = nsargs;
 	/* forcing 16-byte alignment */
 	mod16 = (spsub + (nsargs + nsregs) * LONGSZ) % 16;
 	if (spsub) {
 		os("\x48\x81\xec", 3);
-		func_spsub = spsub + (16 - mod16);
-		oi(func_spsub, 4);
+		spsub = spsub + (16 - mod16);
+		oi(spsub, 4);
 	}
-}
-
-static void i_ret(void)
-{
-	int i;
-	if (func_spsub)
-		i_add_anyimm(R_RSP, R_RBP, -func_nsregs * LONGSZ);
-	if (func_sregs) {
+	diff = mem_len(&cs);
+	mem_put(&cs, body, body_n);
+	free(body);
+	/* generating function epilogue */
+	if (spsub)
+		i_add_anyimm(R_RSP, R_RBP, -nsregs * LONGSZ);
+	if (sregs) {
 		for (i = 0; i < N_TMPS; i++)
-			if ((1 << tmpregs[i]) & func_sregs)
+			if ((1 << tmpregs[i]) & sregs)
 				i_pop(tmpregs[i]);
 	}
-	if (func_initfp)
+	if (initfp)
 		os("\xc9", 1);		/* leave */
-	if (func_sargs) {
+	if (sargs) {
 		os("\xc2", 1);		/* ret n */
-		oi(func_nsargs * LONGSZ, 2);
+		oi(nsargs * LONGSZ, 2);
 	} else {
 		os("\xc3", 1);		/* ret */
 	}
+	/* adjusting code offsets */
+	for (i = 0; i < rel_n; i++)
+		rel_off[i] += diff;
+	for (i = 0; i < jmp_n; i++)
+		jmp_off[i] += diff;
+	for (i = 0; i < lab_sz; i++)
+		lab_loc[i] += diff;
 }
 
-void i_epilog(void)
+void i_code(char **c, long *c_len, long **rsym, long **rflg, long **roff, long *rcnt)
 {
+	int i;
+	for (i = 0; i < jmp_n; i++)	/* filling jmp destinations */
+		oi_at(jmp_off[i], lab_loc[jmp_dst[i]] - jmp_off[i] - 4, 4);
+	*c_len = mem_len(&cs);
+	*c = mem_get(&cs);
+	*rsym = rel_sym;
+	*rflg = rel_flg;
+	*roff = rel_off;
+	*rcnt = rel_n;
+	rel_sym = NULL;
+	rel_flg = NULL;
+	rel_off = NULL;
+	rel_n = 0;
+	rel_sz = 0;
+	jmp_n = 0;
 }
 
 void i_done(void)
 {
+	free(jmp_off);
+	free(jmp_dst);
+	free(lab_loc);
 }
 
 long i_reg(long op, long *rd, long *r1, long *r2, long *tmp, long bt)
@@ -564,7 +670,7 @@ long i_ins(long op, long r0, long r1, long r2, long bt)
 	}
 	if (op == (O_CALL | O_FSYM)) {
 		os("\xe8", 1);		/* call $x */
-		out_rel(r2, OUT_CS | OUT_RLREL, opos());
+		i_rel(r2, OUT_CS | OUT_RLREL, opos());
 		oi(-4 + r1, 4);
 		return 0;
 	}
@@ -585,7 +691,7 @@ long i_ins(long op, long r0, long r1, long r2, long bt)
 		return 0;
 	}
 	if (op == O_RET) {
-		i_ret();
+		jmp_add(i_jmp(O_JMP, 0, 0, 4), 0);
 		return 0;
 	}
 	if (op == O_LOAD) {
@@ -601,7 +707,8 @@ long i_ins(long op, long r0, long r1, long r2, long bt)
 		return 0;
 	}
 	if (op & O_FJMP) {
-		return i_jmp(op, r0, r1, r2);
+		jmp_add(i_jmp(op, r0, r1, 4), r2 + 1);
+		return 0;
 	}
 	return 1;
 }

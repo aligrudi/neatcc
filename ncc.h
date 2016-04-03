@@ -60,6 +60,7 @@ void mem_putc(struct mem *mem, int c);
 void mem_putz(struct mem *mem, long sz);
 void mem_cpy(struct mem *mem, long off, void *buf, long len);
 long mem_len(struct mem *mem);
+void *mem_get(struct mem *mem);
 
 /* SECTION ONE: Tokenisation */
 void tok_init(char *path);
@@ -273,20 +274,13 @@ int ic_sym(struct ic *ic, long iv, long *sym, long *off);
 /* architecture-specific operations */
 long i_reg(long op, long *r0, long *r1, long *r2, long *mt, long bt);
 long i_ins(long op, long r0, long r1, long r2, long bt);
-
-void i_fill(long src, long dst, long nbytes);
-void i_prolog(int argc, int varg, int sargs, int sregs, int initfp, int subsp);
-void i_epilog(void);
+void i_label(long id);
+void i_wrap(int argc, int varg, int sargs, int sregs, int initfp, int subsp);
+void i_code(char **c, long *c_len, long **rsym, long **rflg, long **roff, long *rcnt);
 void i_done(void);
 
 extern int tmpregs[];
 extern int argregs[];
-
-/* code generation functions */
-void os(void *s, int n);
-void oi(long n, int l);
-void oi_at(long pos, long n, int l);
-long opos(void);
 
 /* SECTION FIVE: Object File Generation */
 #define OUT_CS		0x0001		/* code segment symbol */

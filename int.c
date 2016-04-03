@@ -191,7 +191,7 @@ void o_ret(int ret)
 void o_label(long id)
 {
 	while (id >= lab_sz) {
-		lab_sz = MAX(128, ic_sz * 2);
+		lab_sz = MAX(128, lab_sz * 2);
 		lab_loc = mextend(lab_loc, lab_n, lab_sz, sizeof(*lab_loc));
 	}
 	while (lab_n <= id)
