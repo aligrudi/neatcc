@@ -96,69 +96,53 @@ int cpp_read(char **buf, long *len);
 #define SSHT		(USHT | T_MSIGN)
 #define SCHR		(UCHR | T_MSIGN)
 
-/* instruction flags */
-#define O_FADD		0x000010	/* addition group */
-#define O_FSHT		0x000020	/* shift group */
-#define O_FMUL		0x000040	/* multiplication group */
-#define O_FCMP		0x000080	/* comparison group */
-#define O_FUOP		0x000100	/* jump group */
-#define O_FCALL		0x000200	/* call group */
-#define O_FRET		0x000400	/* return group */
-#define O_FJMP		0x000800	/* jump group */
-#define O_FIO		0x001000	/* load/store */
-#define O_FMEM		0x002000	/* memory operation */
-#define O_FMOV		0x004000	/* mov or cast */
-#define O_FSYM		0x010000	/* symbol address */
-#define O_FLOC		0x020000	/* local address */
-#define O_FNUM		0x040000	/* number */
-#define O_FVAL		0x080000	/* load a value */
-#define O_FJIF		0x100000	/* conditional jump */
-#define O_FJX		0x200000	/* jump if zero or nonzero */
-#define O_FJCMP		0x400000	/* conditional jump with comparison */
+/* instructions macros */
+#define O_ADD		0x000010	/* add	r0, r1, r2(num) */
+#define O_SHL		0x000020	/* shl	r0, r1, r2(num) */
+#define O_MUL		0x000040	/* mul	r0, r1, r2(num) */
+#define O_CMP		0x000080	/* cmp	r0, r1, r2(num) */
+#define O_UOP		0x000100	/* neg	r0, r1 */
+#define O_CALL		0x000200	/* cmp	r0, r1(sym) */
+#define O_MOV		0x000400	/* mov	r0, r1(num,sym,loc) */
+#define O_MEM		0x000800	/* mem*	r0, r1, r2 */
+#define O_JMP		0x001000	/* jmp	num */
+#define O_JZ		0x002000	/* jz	r0, num */
+#define O_JCC		0x004000	/* jcc	r0, r1(num), num */
+#define O_RET		0x008000	/* ret	r0 */
+#define O_LD		0x010000	/* ld	r0, r1(sym,loc), r2(num) */
+#define O_ST		0x020000	/* st	r0, r1(sym,loc), r2(num) */
+/* opcode flags: num, loc, sym */
+#define O_NUM		0x100000	/* instruction immediate */
+#define O_LOC		0x200000	/* local (frame pointer displacement) */
+#define O_SYM		0x400000	/* symbols (relocations and offset) */
+/* other members of instruction groups */
+#define O_SUB		(1 | O_ADD)
+#define O_AND		(2 | O_ADD)
+#define O_OR		(3 | O_ADD)
+#define O_XOR		(4 | O_ADD)
+#define O_SHR		(1 | O_SHL)
+#define O_DIV		(1 | O_MUL)
+#define O_MOD		(2 | O_MUL)
+#define O_LT		(0 | O_CMP)
+#define O_GE		(1 | O_CMP)
+#define O_EQ		(2 | O_CMP)
+#define O_NE		(3 | O_CMP)
+#define O_LE		(4 | O_CMP)
+#define O_GT		(5 | O_CMP)
+#define O_NEG		(0 | O_UOP)
+#define O_NOT		(1 | O_UOP)
+#define O_LNOT		(2 | O_UOP)
+#define O_MSET		(0 | O_MEM)
+#define O_MCPY		(1 | O_MEM)
+#define O_JNZ		(1 | O_JZ)
+/* instruction masks */
+#define O_BOP		(O_ADD | O_MUL | O_CMP | O_SHL)
+#define O_OUT		(O_BOP | O_UOP | O_CALL | O_MOV | O_LD)
+#define O_JXX		(O_JMP | O_JZ | O_JCC)
+/* instruction operand type */
 #define O_C(op)		((op) & 0xffffff)	/* operation code */
 #define O_T(op)		((op) >> 24)	/* instruction operand type */
 #define O_MK(op, bt)	((op) | ((bt) << 24))
-/* instruction masks */
-#define O_MBOP		(O_FADD | O_FMUL | O_FCMP | O_FSHT)
-#define O_MUOP		(O_FUOP)
-#define O_MOUT		(O_MBOP | O_MUOP | O_FCALL | O_FMOV | O_FVAL)
-
-/* binary instructions for o_bop() */
-#define O_ADD		(0 | O_FADD)
-#define O_SUB		(1 | O_FADD)
-#define O_AND		(2 | O_FADD)
-#define O_OR		(3 | O_FADD)
-#define O_XOR		(4 | O_FADD)
-#define O_SHL		(0 | O_FSHT)
-#define O_SHR		(1 | O_FSHT)
-#define O_MUL		(0 | O_FMUL)
-#define O_DIV		(1 | O_FMUL)
-#define O_MOD		(2 | O_FMUL)
-#define O_LT		(0 | O_FCMP)
-#define O_GE		(1 | O_FCMP)
-#define O_EQ		(2 | O_FCMP)
-#define O_NE		(3 | O_FCMP)
-#define O_LE		(4 | O_FCMP)
-#define O_GT		(5 | O_FCMP)
-/* unary instructions for o_uop() */
-#define O_NEG		(0 | O_FUOP)
-#define O_NOT		(1 | O_FUOP)
-#define O_LNOT		(2 | O_FUOP)
-/* other instructions */
-#define O_CALL		(0 | O_FCALL)
-#define O_JMP		(0 | O_FJMP)
-#define O_JZ		(1 | O_FJMP | O_FJIF | O_FJX)
-#define O_JN		(2 | O_FJMP | O_FJIF | O_FJX)
-#define O_RET		(0 | O_FRET)
-#define O_MSET		(0 | O_FMEM)
-#define O_MCPY		(1 | O_FMEM)
-#define O_LOAD		(0 | O_FIO | O_FVAL)
-#define O_SAVE		(1 | O_FIO)
-#define O_MOV		(0 | O_FMOV)
-/* loading values */
-#define O_NUM		(0 | O_FNUM | O_FVAL)
-#define O_LOC		(0 | O_FLOC | O_FVAL)
-#define O_SYM		(0 | O_FSYM | O_FVAL)
 
 /* operations on the stack */
 void o_bop(long op);		/* binary operation */

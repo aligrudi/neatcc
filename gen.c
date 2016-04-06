@@ -99,20 +99,28 @@ void o_dsset(char *name, long off, long bt)
 static int ic_regcnt(struct ic *ic)
 {
 	long o = ic->op;
-	if (o & O_MBOP)
-		return o & O_FNUM ? 2 : 3;
-	if (o & O_MUOP)
-		return o & O_FNUM ? 1 : 2;
-	if (o & O_FCALL)
-		return o & O_FSYM ? 1 : 2;
-	if (o & O_FIO)
-		return o & (O_FSYM | O_FLOC) ? 1 : 2;
-	if (o & (O_FNUM | O_FLOC | O_FSYM | O_FJX | O_FRET))
-		return 1;
-	if (o & (O_FJCMP | O_FMOV))
-		return 2;
-	if (o & O_FMEM)
+	if (o & O_BOP)
+		return o & (O_NUM | O_SYM | O_LOC) ? 2 : 3;
+	if (o & O_UOP)
+		return o & (O_NUM | O_SYM | O_LOC) ? 1 : 2;
+	if (o & O_CALL)
+		return o & (O_NUM | O_SYM | O_LOC) ? 1 : 2;
+	if (o & O_MOV)
+		return o & (O_NUM | O_SYM | O_LOC) ? 1 : 2;
+	if (o & O_MEM)
 		return 3;
+	if (o & O_JMP)
+		return 0;
+	if (o & O_JZ)
+		return 1;
+	if (o & O_JCC)
+		return o & (O_NUM | O_SYM | O_LOC) ? 1 : 2;
+	if (o & O_RET)
+		return 1;
+	if (o & (O_LD | O_ST) && o & (O_SYM | O_LOC))
+		return 1;
+	if (o & (O_LD | O_ST))
+		return o & O_NUM ? 2 : 3;
 	return 0;
 }
 
@@ -128,7 +136,7 @@ static int iv_maxlive;
 static long iv_map(long iv, long gmask, long amask, long bmask)
 {
 	int i;
-	gmask &= ~bmask;
+	gmask &= ~bmask & amask;
 	amask &= ~bmask;
 	if (iv_pos[iv] >= 0 && (1 << iv_pos[iv]) & (gmask | amask))
 		return iv_pos[iv];
@@ -153,39 +161,40 @@ static void ic_map(struct ic *ic, int *r0, int *r1, int *r2, long *mt)
 {
 	long m0, m1, m2;
 	long all = 0;
+	int n = ic_regcnt(ic);
 	int oc = O_C(ic->op);
 	int i;
-	if (oc == O_CALL)
+	if (oc & O_CALL)
 		for (i = 0; i < MIN(ic->arg2, N_ARGS); i++)
 			all |= (1 << argregs[i]);
-	if (oc == O_LOC) {
-		m0 = ~0;
-		m1 = 0;
-		m2 = 0;
-		*mt = 0;
-	} else if (i_reg(ic->op, &m0, &m1, &m2, mt)) {
-		die("neatcc: instruction %08lx not supported\n", ic->op);
+	if (oc & O_LOC) {
+		if (oc & O_MOV)
+			oc = O_ADD | O_NUM;
+		if (oc & (O_ST | O_LD))
+			oc = (oc & ~O_LOC) & O_NUM;
 	}
-	if (m2) {
+	if (i_reg(ic->op, &m0, &m1, &m2, mt))
+		die("neatcc: instruction %08lx not supported\n", ic->op);
+	if (n >= 3) {
 		*r2 = iv_map(ic->arg2, m2, m2, all);
 		all |= (1 << *r2);
 	}
-	if (m1) {
+	if (n >= 2) {
 		*r1 = iv_map(ic->arg1, m1, m1, all);
 		all |= (1 << *r1);
 	}
-	if (m0) {
-		int wop = ic->op & O_MOUT;
-		if (wop && m2 && m0 & (1 << *r2))
+	if (n >= 1 && m0) {
+		int wop = ic->op & O_OUT;
+		if (wop && n >= 3 && m0 & (1 << *r2))
 			*r0 = *r2;
-		else if (wop && m1 && m0 & (1 << *r1))
+		else if (wop && n >= 2 && m0 & (1 << *r1))
 			*r0 = *r1;
 		else
 			*r0 = iv_map(ic->arg0, iv_gmask[ic->arg0], m0, all);
-	} else {
-		*r0 = *r1;
 	}
-	if (m0 | m1 | m2)
+	if (n >= 1 && !m0)
+		*r0 = *r1;
+	if (n)
 		all |= *r0;
 	func_regs |= all | *mt;
 }
@@ -211,7 +220,7 @@ static void iv_spill(long iv)
 	if (iv_pos[iv] >= 0) {
 		long rank = iv_rank(iv);
 		iv_maxlive = MAX(iv_maxlive, rank + 1);
-		i_ins(O_MK(O_SAVE, ULNG), iv_pos[iv], REG_FP, -iv_addr(rank));
+		i_ins(O_MK(O_ST | O_NUM, ULNG), iv_pos[iv], REG_FP, -iv_addr(rank));
 		iv_regmap[iv_pos[iv]] = -1;
 		iv_pos[iv] = -1;
 	}
@@ -242,7 +251,7 @@ static void iv_load(long iv, int reg)
 		iv_regmap[iv_pos[iv]] = -1;
 		i_ins(O_MK(O_MOV, ULNG), reg, iv_pos[iv], 0);
 	} else {
-		i_ins(O_MK(O_LOAD, ULNG), reg, REG_FP, -iv_addr(iv_rank(iv)));
+		i_ins(O_MK(O_LD | O_NUM, ULNG), reg, REG_FP, -iv_addr(iv_rank(iv)));
 	}
 	iv_regmap[reg] = iv;
 	iv_pos[iv] = reg;
@@ -265,7 +274,7 @@ static void iv_drop(long iv)
 static void ic_info(struct ic *ic, long **w, long **r1, long **r2, long **r3)
 {
 	long n = ic_regcnt(ic);
-	long o = ic->op & O_MOUT;
+	long o = ic->op & O_OUT;
 	*r1 = NULL;
 	*r2 = NULL;
 	*r3 = NULL;
@@ -294,7 +303,7 @@ static void iv_init(struct ic *ic, int ic_n)
 		long *w, *r1, *r2, *r3;
 		ic_info(ic + i, &w, &r1, &r2, &r3);
 		if (!iv_use[i])
-			if (!w || ic[i].op & O_FCALL)
+			if (!w || ic[i].op & O_CALL)
 				iv_use[i] = i;
 		if (!iv_use[i])
 			continue;
@@ -304,7 +313,7 @@ static void iv_init(struct ic *ic, int ic_n)
 			iv_use[*r2] = i;
 		if (r3 && !iv_use[*r3])
 			iv_use[*r3] = i;
-		if (ic[i].op & O_FCALL)
+		if (ic[i].op & O_CALL)
 			for (j = 0; j < ic[i].arg2; j++)
 				if (!iv_use[ic[i].args[j]])
 					iv_use[ic[i].args[j]] = i;
@@ -316,13 +325,13 @@ static void iv_init(struct ic *ic, int ic_n)
 		if (!iv_use[i])
 			continue;
 		i_reg(op, &m0, &m1, &m2, &mt);
-		if (n >= 1 && !(op & O_MOUT))
+		if (n >= 1 && !(op & O_OUT))
 			iv_gmask[ic[i].arg0] = m0;
 		if (n >= 2)
 			iv_gmask[ic[i].arg1] = m1;
 		if (n >= 3)
 			iv_gmask[ic[i].arg2] = m2;
-		if (op & O_FCALL)
+		if (op & O_CALL)
 			for (j = 0; j < ic[j].arg2; j++)
 				iv_gmask[ic[i].args[j]] = 1 << argregs[j];
 	}
@@ -330,9 +339,9 @@ static void iv_init(struct ic *ic, int ic_n)
 	for (i = 0; i < ic_n; i++) {
 		if (!iv_use[i])
 			continue;
-		if (i + 1 < ic_n && ic[i].op & (O_FJMP | O_FCALL | O_FRET))
+		if (i + 1 < ic_n && ic[i].op & (O_JXX | O_CALL | O_RET))
 			iv_bbeg[i + 1] = 1;
-		if (ic[i].op & O_FJMP)
+		if (ic[i].op & O_JXX)
 			iv_bbeg[ic[i].arg2] = 1;
 	}
 	/* iv_pos */
@@ -369,14 +378,14 @@ static void ic_gencode(struct ic *ic, int ic_n)
 		if (!iv_use[i])
 			continue;
 		ic_map(ic + i, &r0, &r1, &r2, &mt);
-		if (oc & O_FCALL) {
+		if (oc & O_CALL) {
 			int argc = ic[i].arg2;
 			int aregs = MIN(N_ARGS, argc);
 			/* arguments passed via stack */
 			for (j = argc - 1; j >= aregs; --j) {
 				int v = ic[i].args[j];
 				iv_load(v, r0);
-				i_ins(O_MK(O_SAVE, ULNG), r0, REG_SP,
+				i_ins(O_MK(O_ST | O_NUM, ULNG), r0, REG_SP,
 					(j - aregs) * ULNG);
 				iv_drop(v);
 			}
@@ -385,9 +394,9 @@ static void ic_gencode(struct ic *ic, int ic_n)
 				iv_load(ic[i].args[j], argregs[j]);
 		}
 		/* loading the arguments */
-		if (n >= 1 && !(oc & O_MOUT))
+		if (n >= 1 && !(oc & O_OUT))
 			iv_load(ic[i].arg0, r0);
-		if (n >= 2)
+		if (n >= 2 && !(oc & O_LOC))
 			iv_load(ic[i].arg1, r1);
 		if (n >= 3)
 			iv_load(ic[i].arg2, r2);
@@ -396,7 +405,7 @@ static void ic_gencode(struct ic *ic, int ic_n)
 			if (iv_regmap[j] >= 0 && mt & (1 << j))
 				iv_spill(iv_regmap[j]);
 		/* overwriting a value that is needed later */
-		if (n >= 1 && oc & O_MOUT && iv_regmap[r0] >= 0)
+		if (n >= 1 && oc & O_OUT && iv_regmap[r0] >= 0)
 			if (iv_use[iv_regmap[r0]] > i)
 				iv_spill(iv_regmap[r0]);
 		/* dropping values that are no longer used */
@@ -409,38 +418,47 @@ static void ic_gencode(struct ic *ic, int ic_n)
 				if (iv_live[j] >= 0)
 					iv_spill(iv_live[j]);
 		/* performing the instruction */
-		if (oc & O_MBOP)
+		if (oc & O_BOP)
 			i_ins(op, r0, r1, r2);
-		if (oc & O_MUOP)
+		if (oc & O_UOP)
 			i_ins(op, r0, r1, r2);
-		if (oc == O_NUM)
-			i_ins(op, r0, 0, ic[i].arg2);
-		if (oc == O_LOC)
-			i_ins(O_ADD | O_FNUM, r0, REG_FP, -loc_off[ic[i].arg2]);
-		if (oc == O_SYM)
-			i_ins(O_SYM, r0, 0, ic[i].arg2);
-		if (oc == O_LOAD)
-			i_ins(op, r0, r1, 0);
-		if (oc == O_SAVE)
-			i_ins(op, r1, r0, 0);
+		if (oc == (O_LD | O_NUM))
+			i_ins(op, r0, r1, ic[i].arg2);
+		if (oc == (O_LD | O_LOC))
+			i_ins((op & ~O_LOC) | O_NUM, r0, REG_FP,
+				-loc_off[ic[i].arg1] + ic[i].arg2);
+		if (oc == (O_ST | O_NUM))
+			i_ins(op, r0, r1, ic[i].arg2);
+		if (oc == (O_ST | O_LOC))
+			i_ins((op & ~O_LOC) | O_NUM , r0, REG_FP,
+				-loc_off[ic[i].arg1] + ic[i].arg2);
 		if (oc == O_RET)
 			i_ins(op, r0, 0, 0);
 		if (oc == O_MOV)
 			i_ins(op, r0, r0, 0);
+		if (oc == (O_MOV | O_NUM))
+			i_ins(op, r0, ic[i].arg1, 0);
+		if (oc == (O_MOV | O_LOC))
+			i_ins(O_ADD | O_NUM, r0, REG_FP,
+				-loc_off[ic[i].arg1] + ic[i].arg2);
+		if (oc == (O_MOV | O_SYM))
+			i_ins(op, r0, ic[i].arg1, ic[i].arg2);
 		if (oc == O_CALL)
 			i_ins(op, r0, r1, 0);
+		if (oc == (O_CALL | O_SYM))
+			i_ins(op, r0, ic[i].arg1, 0);
 		if (oc == O_JMP)
 			i_ins(op, 0, 0, ic[i].arg2);
-		if (oc == O_JZ || op == O_JN)
+		if (oc & O_JZ)
 			i_ins(op, r0, 0, ic[i].arg2);
-		if (oc & O_FJCMP)
+		if (oc & O_JCC)
 			i_ins(op, r0, r1, ic[i].arg2);
 		if (oc == O_MSET)
 			i_ins(op, r0, r1, r2);
 		if (oc == O_MCPY)
 			i_ins(op, r0, r1, r2);
 		/* saving back the output register */
-		if (oc & O_MOUT)
+		if (oc & O_OUT)
 			iv_save(ic[i].arg0, r0);
 	}
 	iv_done();
@@ -492,7 +510,7 @@ void o_func_end(void)
 	free(rflg);
 	free(roff);
 	for (i = 0; i < ic_n; i++)
-		if (ic[i].op == O_CALL)
+		if (ic[i].op & O_CALL)
 			free(ic[i].args);
 	free(ic);
 	ic_reset();

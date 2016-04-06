@@ -303,8 +303,8 @@ static long i_jmp(long op, int rn, int rm, int nbytes)
 	long ret;
 	if (nbytes > 1)
 		nbytes = 4;
-	if (op & O_FJIF) {
-		if (op == O_JZ || op == O_JN) {
+	if (op & (O_JZ | O_JCC)) {
+		if (op & O_JZ) {
 			i_tst(rn, rn);
 			jx(op == O_JZ ? 0x84 : 0x85, nbytes);
 		} else {
@@ -361,17 +361,17 @@ static void i_add_anyimm(int rd, int rn, long n)
 
 static void i_op_imm(int op, int rd, int r1, long n)
 {
-	if (op & O_FADD) {	/* add */
+	if (op & O_ADD) {	/* add */
 		if (rd == r1 && i_imm(O_ADD, n))
 			i_add_imm(op, rd, r1, n);
 		else
 			i_add_anyimm(rd, r1, n);
 	}
-	if (op & O_FSHT)	/* shl */
+	if (op & O_SHL)		/* shl */
 		i_shl_imm(op, rd, r1, n);
-	if (op & O_FMUL)	/* mul */
+	if (op & O_MUL)		/* mul */
 		die("mul/imm not implemented");
-	if (op & O_FCMP) {	/* cmp */
+	if (op & O_CMP) {	/* cmp */
 		i_cmp_imm(r1, n);
 		i_set(op, rd);
 	}
@@ -549,26 +549,29 @@ long i_reg(long op, long *rd, long *r1, long *r2, long *tmp)
 	*r1 = 0;
 	*r2 = 0;
 	*tmp = 0;
-	if (oc == O_NUM || oc == O_SYM) {
+	if (oc & O_MOV) {
 		*rd = R_TMPS;
+		*r1 = oc & (O_NUM | O_SYM) ? 0 : R_TMPS;
 		return 0;
 	}
-	if (oc & O_FADD) {
+	if (oc & O_ADD) {
 		*r1 = R_TMPS;
-		*r2 = oc & O_FNUM ? 0 : R_TMPS;
+		*r2 = oc & O_NUM ? (oc == O_ADD ? 32 : 8) : R_TMPS;
 		return 0;
 	}
-	if (oc & O_FSHT) {
-		if (oc & O_FNUM) {
+	if (oc & O_SHL) {
+		if (oc & O_NUM) {
 			*r1 = R_TMPS;
-			*r2 = 0;
+			*r2 = 8;
 		} else {
 			*r2 = 1 << R_RCX;
 			*r1 = R_TMPS & ~*r2;
 		}
 		return 0;
 	}
-	if (oc & O_FMUL) {
+	if (oc & O_MUL) {
+		if (oc & O_NUM)
+			return 1;
 		*rd = oc == O_MOD ? (1 << R_RDX) : (1 << R_RAX);
 		*r1 = (1 << R_RAX);
 		*r2 = R_TMPS & ~*rd & ~*r1;
@@ -577,13 +580,13 @@ long i_reg(long op, long *rd, long *r1, long *r2, long *tmp)
 		*tmp = (1 << R_RDX) | (1 << R_RAX);
 		return 0;
 	}
-	if (oc & O_FCMP) {
+	if (oc & O_CMP) {
 		*rd = 1 << R_RAX;
 		*r1 = R_TMPS;
-		*r2 = oc & O_FNUM ? 0 : R_TMPS;
+		*r2 = oc & O_NUM ? 8 : R_TMPS;
 		return 0;
 	}
-	if (oc & O_FUOP) {
+	if (oc & O_UOP) {
 		*rd = R_TMPS;
 		if (oc == O_LNOT)
 			*r1 = 1 << R_RAX;
@@ -607,23 +610,24 @@ long i_reg(long op, long *rd, long *r1, long *r2, long *tmp)
 		*rd = (1 << REG_RET);
 		return 0;
 	}
-	if (oc == O_CALL) {
+	if (oc & O_CALL) {
 		*rd = (1 << REG_RET);
-		*r1 = R_TMPS;
+		*r1 = oc & O_SYM ? 0 : R_TMPS;
 		return 0;
 	}
-	if (oc == O_SAVE || oc == O_LOAD || oc == O_MOV) {
+	if (oc & (O_LD | O_ST)) {
 		*rd = R_TMPS;
 		*r1 = R_TMPS;
+		*r2 = oc & O_NUM ? 0 : R_TMPS;
 		return 0;
 	}
-	if (oc == O_JZ || oc == O_JN || oc == O_SYM) {
+	if (oc & O_JZ) {
 		*rd = R_TMPS;
 		return 0;
 	}
-	if (oc & O_FJCMP) {
+	if (oc & O_JCC) {
 		*rd = R_TMPS;
-		*r1 = R_TMPS;
+		*r1 = oc & O_NUM ? 8 : R_TMPS;
 		return 0;
 	}
 	if (oc == O_JMP)
@@ -635,15 +639,15 @@ long i_ins(long op, long r0, long r1, long r2)
 {
 	long oc = O_C(op);
 	long bt = O_T(op);
-	if (oc & O_FADD) {
-		if (oc & O_FNUM)
+	if (oc & O_ADD) {
+		if (oc & O_NUM)
 			i_op_imm(O_ADD, r0, r1, r2);
 		else
 			i_add(op, r1, r1, r2);
 	}
-	if (oc & O_FSHT)
+	if (oc & O_SHL)
 		i_shl(op, r1, r1, r2);
-	if (oc & O_FMUL) {
+	if (oc & O_MUL) {
 		if (oc == O_MUL)
 			i_mul(R_RAX, r1, r2);
 		if (oc == O_DIV)
@@ -652,12 +656,12 @@ long i_ins(long op, long r0, long r1, long r2)
 			i_div(op, R_RDX, r1, r2);
 		return 0;
 	}
-	if (oc & O_FCMP) {
+	if (oc & O_CMP) {
 		i_cmp(r1, r2);
 		i_set(op, r0);
 		return 0;
 	}
-	if (oc & O_FUOP) {	/* uop */
+	if (oc & O_UOP) {	/* uop */
 		if (oc == O_NEG)
 			i_neg(r1);
 		if (oc == O_NOT)
@@ -670,18 +674,18 @@ long i_ins(long op, long r0, long r1, long r2)
 		op_rr(I_CALL, 2, r1, LONGSZ);
 		return 0;
 	}
-	if (oc == (O_CALL | O_FSYM)) {
+	if (oc == (O_CALL | O_SYM)) {
 		os("\xe8", 1);		/* call $x */
-		i_rel(r2, OUT_CS | OUT_RLREL, opos());
-		oi(-4 + r1, 4);
+		i_rel(r1, OUT_CS | OUT_RLREL, opos());
+		oi(-4 + r2, 4);
 		return 0;
 	}
-	if (oc == O_SYM) {
-		i_sym(r0, r2, r1);
+	if (oc == (O_MOV | O_SYM)) {
+		i_sym(r0, r1, r2);
 		return 0;
 	}
-	if (oc == O_NUM) {
-		i_num(r0, r2);
+	if (oc == (O_MOV | O_NUM)) {
+		i_num(r0, r1);
 		return 0;
 	}
 	if (oc == O_MSET) {
@@ -696,11 +700,11 @@ long i_ins(long op, long r0, long r1, long r2)
 		jmp_add(i_jmp(O_JMP, 0, 0, 4), 0);
 		return 0;
 	}
-	if (oc == O_LOAD) {
+	if (oc == (O_LD | O_NUM)) {
 		op_rm(movrx_op(bt, I_MOVR), r0, r1, r2, movrx_bt(bt));
 		return 0;
 	}
-	if (oc == O_SAVE) {
+	if (oc == (O_ST | O_NUM)) {
 		op_rm(I_MOV, r0, r1, r2, bt);
 		return 0;
 	}
@@ -708,7 +712,7 @@ long i_ins(long op, long r0, long r1, long r2)
 		i_cast(r0, r1, bt);
 		return 0;
 	}
-	if (oc & O_FJMP) {
+	if (oc & O_JXX) {
 		jmp_add(i_jmp(op, r0, r1, 4), r2 + 1);
 		return 0;
 	}
