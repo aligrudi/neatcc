@@ -143,13 +143,6 @@ static void mov_r2r(int rd, int r1, unsigned bt)
 		op_rr(movrx_op(bt, I_MOVR), rd, r1, movrx_bt(bt));
 }
 
-static int i_imm(int op, long imm)
-{
-	if ((op & 0xf0) == 0x20)
-		return 0;
-	return imm <= 127 && imm >= -128;
-}
-
 static void i_push(int reg)
 {
 	op_x(I_PUSH | (reg & 0x7), 0, reg, LONGSZ);
@@ -308,7 +301,10 @@ static long i_jmp(long op, int rn, int rm, int nbytes)
 			i_tst(rn, rn);
 			jx(op == O_JZ ? 0x84 : 0x85, nbytes);
 		} else {
-			i_cmp(rn, rm);
+			if (op & O_NUM)
+				i_cmp_imm(rn, rm);
+			else
+				i_cmp(rn, rm);
 			jx(i_cond(op) & ~0x10, nbytes);
 		}
 	} else {
@@ -357,24 +353,6 @@ static void i_cast(int rd, int rn, int bt)
 static void i_add_anyimm(int rd, int rn, long n)
 {
 	op_rm(I_LEA, rd, rn, n, LONGSZ);
-}
-
-static void i_op_imm(int op, int rd, int r1, long n)
-{
-	if (op & O_ADD) {	/* add */
-		if (rd == r1 && i_imm(O_ADD, n))
-			i_add_imm(op, rd, r1, n);
-		else
-			i_add_anyimm(rd, r1, n);
-	}
-	if (op & O_SHL)		/* shl */
-		i_shl_imm(op, rd, r1, n);
-	if (op & O_MUL)		/* mul */
-		die("mul/imm not implemented");
-	if (op & O_CMP) {	/* cmp */
-		i_cmp_imm(r1, n);
-		i_set(op, rd);
-	}
 }
 
 static long *rel_sym;		/* relocation symbols */
@@ -640,13 +618,21 @@ long i_ins(long op, long r0, long r1, long r2)
 	long oc = O_C(op);
 	long bt = O_T(op);
 	if (oc & O_ADD) {
-		if (oc & O_NUM)
-			i_op_imm(O_ADD, r0, r1, r2);
-		else
+		if (oc & O_NUM) {
+			if (r0 == r1 && r2 <= 127 && r2 >= -128)
+				i_add_imm(op, r1, r1, r2);
+			else
+				i_add_anyimm(r0, r1, r2);
+		} else {
 			i_add(op, r1, r1, r2);
+		}
 	}
-	if (oc & O_SHL)
-		i_shl(op, r1, r1, r2);
+	if (oc & O_SHL) {
+		if (oc & O_NUM)
+			i_shl_imm(op, r1, r1, r2);
+		else
+			i_shl(op, r1, r1, r2);
+	}
 	if (oc & O_MUL) {
 		if (oc == O_MUL)
 			i_mul(R_RAX, r1, r2);
@@ -657,7 +643,10 @@ long i_ins(long op, long r0, long r1, long r2)
 		return 0;
 	}
 	if (oc & O_CMP) {
-		i_cmp(r1, r2);
+		if (oc & O_NUM)
+			i_cmp_imm(r1, r2);
+		else
+			i_cmp(r1, r2);
 		i_set(op, r0);
 		return 0;
 	}

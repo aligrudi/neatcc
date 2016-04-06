@@ -419,7 +419,7 @@ static void ic_gencode(struct ic *ic, int ic_n)
 					iv_spill(iv_live[j]);
 		/* performing the instruction */
 		if (oc & O_BOP)
-			i_ins(op, r0, r1, r2);
+			i_ins(op, r0, r1, oc & O_NUM ? ic[i].arg2 : r2);
 		if (oc & O_UOP)
 			i_ins(op, r0, r1, r2);
 		if (oc == (O_LD | O_NUM))
@@ -452,7 +452,7 @@ static void ic_gencode(struct ic *ic, int ic_n)
 		if (oc & O_JZ)
 			i_ins(op, r0, 0, ic[i].arg2);
 		if (oc & O_JCC)
-			i_ins(op, r0, r1, ic[i].arg2);
+			i_ins(op, r0, oc & O_NUM ? ic[i].arg1 : r1, ic[i].arg2);
 		if (oc == O_MSET)
 			i_ins(op, r0, r1, r2);
 		if (oc == O_MCPY)

@@ -17,6 +17,7 @@ static int io_cmp(void);
 static int io_jmp(void);
 static int io_addr(void);
 static int io_loc(void);
+static int io_imm(void);
 static int io_call(void);
 
 static struct ic *ic_new(void)
@@ -121,7 +122,7 @@ void o_bop(long op)
 	int r1 = iv_pop();
 	int r2 = iv_pop();
 	ic_put(op, iv_new(), r2, r1);
-	io_num() && io_mul2() && io_addr();
+	io_num() && io_mul2() && io_imm() && io_addr();
 }
 
 void o_uop(long op)
@@ -174,14 +175,14 @@ void o_memset(void)
 
 void o_call(int argc, int ret)
 {
-	struct ic *ic;
-	long *args = malloc(argc * sizeof(ic->args[0]));
+	struct ic *c;
+	long *args = malloc(argc * sizeof(c->args[0]));
 	int r1, i;
 	for (i = argc - 1; i >= 0; --i)
 		args[i] = iv_pop();
 	r1 = iv_pop();
-	ic = ic_put(O_CALL, iv_new(), r1, argc);
-	ic->args = args;
+	c = ic_put(O_CALL, iv_new(), r1, argc);
+	c->args = args;
 	iv_drop(ret == 0);
 	io_call();
 }
@@ -456,7 +457,7 @@ static int io_mul2(void)
 	long bt = O_T(c->op);
 	if (!(oc & O_MUL))
 		return 1;
-	if (oc == O_MUL && ic_num(ic, c->arg1, &n)) {
+	if (oc == O_MUL && !ic_num(ic, c->arg1, &n)) {
 		long t = c->arg1;
 		c->arg1 = c->arg2;
 		c->arg2 = t;
@@ -577,6 +578,67 @@ static int io_loc(void)
 	c->arg1 = iv;
 	c->arg2 += off;
 	return 0;
+}
+
+static int imm_ok(long op, long n, int arg)
+{
+	long m0, m1, m2, mt, bits;
+	long max;
+	if (i_reg(op | O_NUM, &m0, &m1, &m2, &mt))
+		return 0;
+	bits = arg == 2 ? m2 : m1;
+	max = (1 << (bits - 1)) - 1;
+	return n <= max && n + 1 >= -max;
+}
+
+/* use instruction immediates */
+static int io_imm(void)
+{
+	struct ic *c = &ic[ic_n - 1];
+	long oc = O_C(c->op);
+	long n;
+	if (oc & (O_NUM | O_LOC | O_SYM))
+		return 1;
+	if (oc == O_ADD || oc == O_MUL || oc == O_AND || oc == O_OR ||
+			oc == O_XOR || oc == O_EQ || oc == O_NE) {
+		if (!ic_num(ic, c->arg1, &n)) {
+			long t = c->arg1;
+			c->arg1 = c->arg2;
+			c->arg2 = t;
+		}
+	}
+	if (oc == O_LT || oc == O_GE || oc == O_LE || oc == O_GT) {
+		if (!ic_num(ic, c->arg1, &n)) {
+			int t = c->arg1;
+			c->arg1 = c->arg2;
+			c->arg2 = t;
+			c->op ^= 1;
+		}
+	}
+	if (oc & O_JCC && !ic_num(ic, c->arg0, &n)) {
+		int t = c->arg0;
+		c->arg0 = c->arg1;
+		c->arg1 = t;
+		c->op ^= 1;
+	}
+	if (oc & O_JCC && !ic_num(ic, c->arg1, &n) && imm_ok(c->op, n, 1)) {
+		c->op |= O_NUM;
+		c->arg1 = n;
+		return 0;
+	}
+	if (!(oc & O_BOP) || ic_num(ic, c->arg2, &n))
+		return 1;
+	if ((oc == O_ADD || oc == O_SUB) && n == 0) {
+		iv_drop(1);
+		iv_put(c->arg1);
+		return 0;
+	}
+	if (imm_ok(c->op, n, 2)) {
+		c->op |= O_NUM;
+		c->arg2 = n;
+		return 0;
+	}
+	return 1;
 }
 
 /* calling symbols */
