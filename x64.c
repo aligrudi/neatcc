@@ -28,7 +28,6 @@
 #define I_CALL		0xff
 #define I_MUL		0xf7
 #define I_XOR		0x33
-#define I_TEST		0x85
 #define I_CQO		0x99
 #define I_PUSH		0x50
 #define I_POP		0x58
@@ -365,6 +364,7 @@ static long *lab_loc;		/* label offsets in cs */
 static long jmp_n, jmp_sz;	/* jump count */
 static long *jmp_off;		/* jump offsets */
 static long *jmp_dst;		/* jump destinations */
+static long jmp_ret;		/* the position of the last return jmp */
 
 static void lab_add(long id)
 {
@@ -437,6 +437,11 @@ void i_wrap(int argc, int varg, int sargs, int sregs, int initfp, int spsub)
 	int nsargs = 0;		/* number of saved arguments */
 	int mod16;		/* 16-byte alignment */
 	int i;
+	/* removing the last jmp to the epilogue */
+	if (jmp_ret + 5 == opos()) {
+		mem_cut(&cs, jmp_ret);
+		jmp_n--;
+	}
 	lab_add(0);		/* the return label */
 	body_n = mem_len(&cs);
 	body = mem_get(&cs);
@@ -686,6 +691,7 @@ long i_ins(long op, long r0, long r1, long r2)
 		return 0;
 	}
 	if (oc == O_RET) {
+		jmp_ret = opos();
 		jmp_add(i_jmp(O_JMP, 0, 0, 4), 0);
 		return 0;
 	}
