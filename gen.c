@@ -164,6 +164,10 @@ static void ic_map(struct ic *ic, int *r0, int *r1, int *r2, long *mt)
 	int n = ic_regcnt(ic);
 	int oc = O_C(ic->op);
 	int i;
+	*r0 = 0;
+	*r1 = 0;
+	*r2 = 0;
+	*mt = 0;
 	if (oc & O_CALL)
 		for (i = 0; i < MIN(ic->arg2, N_ARGS); i++)
 			all |= (1 << argregs[i]);
@@ -500,7 +504,8 @@ void o_func_end(void)
 	spsub = loc_pos + iv_maxlive * ULNG;
 	for (i = 0; i < MIN(N_ARGS, func_argc); i++)
 		sargs |= 1 << argregs[i];
-	i_wrap(func_argc, func_varg, sargs, R_PERM & func_regs, 1, spsub);
+	i_wrap(func_argc, func_varg, sargs, R_PERM & func_regs,
+		spsub || func_argc, spsub);
 	i_code(&c, &c_len, &rsym, &rflg, &roff, &rcnt);
 	for (i = 0; i < rcnt; i++)	/* adding the relocations */
 		out_rel(rsym[i], rflg[i], roff[i] + mem_len(&cs));
