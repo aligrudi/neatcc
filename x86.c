@@ -13,6 +13,7 @@
 #define R_RDI		0x07
 
 #define REG_RET		R_RAX
+#define R_BYTE		0x0007
 
 /* x86 opcodes */
 #define I_MOV		0x89
@@ -35,14 +36,13 @@
 #define MIN(a, b)		((a) < (b) ? (a) : (b))
 #define ALIGN(x, a)		(((x) + (a) - 1) & ~((a) - 1))
 
-int tmpregs[] = {0, 7, 6, 2, 1, 8, 9, 10, 11, 3, 12, 13, 14, 15};
-int argregs[] = {7, 6, 2, 1, 8, 9};
+int tmpregs[] = {0, 1, 2, 6, 7, 3};
+int argregs[] = {0};
 
 #define OP2(o2, o1)		(0x010000 | ((o2) << 8) | (o1))
 #define O2(op)			(((op) >> 8) & 0xff)
 #define O1(op)			((op) & 0xff)
 #define MODRM(m, r1, r2)	((m) << 6 | (r1) << 3 | (r2))
-#define REX(r1, r2)		(0x48 | (((r1) & 8) >> 1) | (((r2) & 8) >> 3))
 
 static struct mem cs;		/* generated code */
 
@@ -81,19 +81,8 @@ long opos(void)
 static void op_x(int op, int r1, int r2, int bt)
 {
 	int sz = T_SZ(bt);
-	int rex = 0;
-	if (sz == 8)
-		rex |= 8;
-	if (sz == 1)
-		rex |= 0x40;
-	if (r1 & 0x8)
-		rex |= 4;
-	if (r2 & 0x8)
-		rex |= 1;
 	if (sz == 2)
 		oi(0x66, 1);
-	if (rex)
-		oi(rex | 0x40, 1);
 	if (op & 0x10000)
 		oi(O2(op), 1);
 	oi(sz == 1 ? O1(op) & ~0x1 : O1(op), 1);
@@ -122,13 +111,11 @@ static void op_rr(int op, int src, int dst, int bt)
 	oi(MODRM(3, src & 0x07, dst & 0x07), 1);
 }
 
-#define movrx_bt(bt)		(((bt) == 4) ? 4 : LONGSZ)
+#define movrx_bt(bt)		(LONGSZ)
 
 static int movrx_op(int bt, int mov)
 {
 	int sz = T_SZ(bt);
-	if (sz == 4)
-		return bt & T_MSIGN ? I_MOVSXD : mov;
 	if (sz == 2)
 		return OP2(0x0f, bt & T_MSIGN ? 0xbf : 0xb7);
 	if (sz == 1)
@@ -168,8 +155,8 @@ static void i_add_imm(int op, int rd, int rn, long n)
 {
 	/* opcode for O_ADD, O_SUB, O_AND, O_OR, O_XOR */
 	static int rx[] = {0xc0, 0xe8, 0xe0, 0xc8, 0xf0};
-	unsigned char s[4] = {REX(0, rd), 0x83, rx[op & 0x0f] | (rd & 7), n & 0xff};
-	os((void *) s, 4);
+	unsigned char s[4] = {0x83, rx[op & 0x0f] | rd, n & 0xff};
+	os((void *) s, 3);
 }
 
 static void i_num(int rd, long n)
@@ -177,16 +164,9 @@ static void i_num(int rd, long n)
 	if (!n) {
 		op_rr(I_XOR, rd, rd, 4);
 		return;
-	}
-	if (n < 0 && -n <= 0xffffffff) {
-		op_rr(I_MOVI, 0, rd, LONGSZ);
-		oi(n, 4);
 	} else {
-		int len = 8;
-		if (n > 0 && n <= 0xffffffff)
-			len = 4;
-		op_x(I_MOVIR + (rd & 7), 0, rd, len);
-		oi(n, len);
+		op_x(I_MOVIR + (rd & 7), 0, rd, LONGSZ);
+		oi(n, LONGSZ);
 	}
 }
 
@@ -221,8 +201,8 @@ static void i_cmp(int rn, int rm)
 
 static void i_cmp_imm(int rn, long n)
 {
-	unsigned char s[4] = {REX(0, rn), 0x83, 0xf8 | rn, n & 0xff};
-	os(s, 4);
+	unsigned char s[4] = {0x83, 0xf8 | rn, n & 0xff};
+	os(s, 3);
 }
 
 static void i_shl(int op, int rd, int r1, int rs)
@@ -238,8 +218,8 @@ static void i_shl_imm(int op, int rd, int rn, long n)
 {
 	long bt = O_T(op);
 	int sm = (op & 0x1) ? (bt & T_MSIGN ? 0xf8 : 0xe8) : 0xe0;
-	char s[4] = {REX(0, rn), 0xc1, sm | (rn & 7), n & 0xff};
-	os(s, 4);
+	char s[4] = {0xc1, sm | rn, n & 0xff};
+	os(s, 3);
 }
 
 static void i_neg(int rd)
@@ -266,15 +246,14 @@ static void i_set(long op, int rd)
 	char set[] = "\x0f\x00\xc0";
 	set[1] = i_cond(op);
 	os(set, 3);			/* setl al */
-	os("\x48\x0f\xb6\xc0", 4);	/* movzx rax, al */
+	os("\x0f\xb6\xc0", 3);		/* movzx rax, al */
 }
 
 static void i_lnot(int rd)
 {
-	char cmp[] = "\x00\x83\xf8\x00";
-	cmp[0] = REX(0, rd);
-	cmp[2] |= rd & 7;
-	os(cmp, 4);		/* cmp rax, 0 */
+	char cmp[] = "\x83\xf8\x00";
+	cmp[1] |= rd;
+	os(cmp, 3);		/* cmp rax, 0 */
 	i_set(O_EQ, rd);
 }
 
@@ -282,11 +261,10 @@ static void jx(int x, int nbytes)
 {
 	char op[2] = {0x0f};
 	if (nbytes == 1) {
-		op[0] = 0x70 | (x & 0x0f);
-		os(op, 1);		/* jx $addr */
+		oi(0x70 | (x & 0x0f), 1);	/* jx $addr */
 	} else {
 		op[1] = x;
-		os(op, 2);		/* jx $addr */
+		os(op, 2);			/* jx $addr */
 	}
 }
 
@@ -298,7 +276,7 @@ static long i_jmp(long op, int rn, int rm, int nbytes)
 	if (op & (O_JZ | O_JCC)) {
 		if (op & O_JZ) {
 			i_tst(rn, rn);
-			jx(op == O_JZ ? 0x84 : 0x85, nbytes);
+			jx(O_C(op) == O_JZ ? 0x84 : 0x85, nbytes);
 		} else {
 			if (op & O_NUM)
 				i_cmp_imm(rn, rm);
@@ -409,23 +387,9 @@ static void i_rel(long sym, long flg, long off)
 
 static void i_sym(int rd, int sym, int off)
 {
-	int sz = X64_ABS_RL & OUT_RL32 ? 4 : LONGSZ;
-	if (X64_ABS_RL & OUT_RLSX)
-		op_rr(I_MOVI, 0, rd, sz);
-	else
-		op_x(I_MOVIR + (rd & 7), 0, rd, sz);
-	i_rel(sym, OUT_CS | X64_ABS_RL, opos());
-	oi(off, sz);
-}
-
-static void i_saveargs(long sargs)
-{
-	int i;
-	os("\x58", 1);		/* pop rax */
-	for (i = N_ARGS - 1; i >= 0; i--)
-		if ((1 << argregs[i]) & sargs)
-			i_push(argregs[i]);
-	os("\x50", 1);		/* push rax */
+	op_x(I_MOVIR + (rd & 7), 0, rd, LONGSZ);
+	i_rel(sym, OUT_CS, opos());
+	oi(off, LONGSZ);
 }
 
 void i_wrap(int argc, int varg, int sargs, int sregs, int initfp, int spsub)
@@ -434,7 +398,6 @@ void i_wrap(int argc, int varg, int sargs, int sregs, int initfp, int spsub)
 	void *body;
 	long diff;		/* prologue length */
 	int nsregs = 0;		/* number of saved registers */
-	int nsargs = 0;		/* number of saved arguments */
 	int mod16;		/* 16-byte alignment */
 	int i;
 	/* removing the last jmp to the epilogue */
@@ -446,11 +409,9 @@ void i_wrap(int argc, int varg, int sargs, int sregs, int initfp, int spsub)
 	body_n = mem_len(&cs);
 	body = mem_get(&cs);
 	/* generating function prologue */
-	if (sargs)
-		i_saveargs(sargs);
 	if (initfp) {
 		os("\x55", 1);			/* push rbp */
-		os("\x48\x89\xe5", 3);		/* mov rbp, rsp */
+		os("\x89\xe5", 2);		/* mov rbp, rsp */
 	}
 	if (sregs) {
 		for (i = N_TMPS - 1; i >= 0; i--)
@@ -460,13 +421,10 @@ void i_wrap(int argc, int varg, int sargs, int sregs, int initfp, int spsub)
 	for (i = 0; i < N_TMPS; i++)
 		if ((1 << tmpregs[i]) & sregs)
 			nsregs++;
-	for (i = 0; i < N_ARGS; i++)
-		if ((1 << argregs[i]) & sargs)
-			nsargs++;
-	/* forcing 16-byte alignment */
-	mod16 = (spsub + (nsargs + nsregs) * LONGSZ) % 16;
+	/* forcing 8-byte alignment */
+	mod16 = (spsub + nsregs * LONGSZ) % 8;
 	if (spsub) {
-		os("\x48\x81\xec", 3);
+		os("\x81\xec", 2);
 		spsub = spsub + (16 - mod16);
 		oi(spsub, 4);
 	}
@@ -483,12 +441,7 @@ void i_wrap(int argc, int varg, int sargs, int sregs, int initfp, int spsub)
 	}
 	if (initfp)
 		os("\xc9", 1);		/* leave */
-	if (sargs) {
-		os("\xc2", 1);		/* ret n */
-		oi(nsargs * LONGSZ, 2);
-	} else {
-		os("\xc3", 1);		/* ret */
-	}
+	os("\xc3", 1);			/* ret */
 	/* adjusting code offsets */
 	for (i = 0; i < rel_n; i++)
 		rel_off[i] += diff;
@@ -526,14 +479,18 @@ void i_done(void)
 
 long i_reg(long op, long *rd, long *r1, long *r2, long *tmp)
 {
-	int oc = O_C(op);
+	long oc = O_C(op);
+	long bt = O_T(op);
 	*rd = 0;
 	*r1 = 0;
 	*r2 = 0;
 	*tmp = 0;
 	if (oc & O_MOV) {
 		*rd = R_TMPS;
-		*r1 = oc & (O_NUM | O_SYM) ? 0 : R_TMPS;
+		if (oc & (O_NUM | O_SYM))
+			*r1 = oc & (O_NUM | O_SYM) ? LONGSZ * 8 : R_TMPS;
+		else
+			*r1 = T_SZ(bt) == 1 ? R_BYTE : R_TMPS;
 		return 0;
 	}
 	if (oc & O_ADD) {
@@ -670,7 +627,7 @@ long i_ins(long op, long r0, long r1, long r2)
 	if (oc == (O_CALL | O_SYM)) {
 		os("\xe8", 1);		/* call $x */
 		i_rel(r1, OUT_CS | OUT_RLREL, opos());
-		oi(-4 + r2, 4);
+		oi(-4, 4);
 		return 0;
 	}
 	if (oc == (O_MOV | O_SYM)) {
