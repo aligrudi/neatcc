@@ -13,21 +13,10 @@
 
 /* SECTION ZERO: Helper Functions */
 /* predefined array limits; (p.f. means per function) */
-#define NSYMS		4096*8		/* number of elf symbols */
-#define NRELS		8192*8		/* number of elf relocations */
-#define NGLOBALS	2048		/* number of global variables */
-#define NLOCALS		1024		/* number of locals p.f. */
 #define NARGS		32		/* number of function/macro arguments */
 #define NTMPS		64		/* number of expression temporaries */
 #define NNUMS		1024		/* number of integer constants p.f. (arm.c) */
-#define NJMPS		4096		/* number of jmp instructions p.f. */
-#define NFUNCS		1024		/* number of functions */
-#define NENUMS		4096		/* number of enum constants */
-#define NTYPEDEFS	1024		/* number of typedefs */
-#define NSTRUCTS	512		/* number of structs */
 #define NFIELDS		128		/* number of fields in structs */
-#define NARRAYS		8192*8		/* number of arrays */
-#define NLABELS		1024		/* number of labels p.f. */
 #define NAMELEN		128		/* size of identifiers */
 #define NDEFS		1024		/* number of macros */
 #define MARGLEN		1024		/* size of macro arguments */

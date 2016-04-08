@@ -116,22 +116,24 @@ struct name {
 	long addr;		/* local stack offset, global data addr, struct offset */
 };
 
-static struct name locals[NLOCALS];
-static int nlocals;
-static struct name globals[NGLOBALS];
-static int nglobals;
+static struct name *locals;
+static int locals_n, locals_sz;
+static struct name *globals;
+static int globals_n, globals_sz;
 
 static void local_add(struct name *name)
 {
-	if (nlocals >= NLOCALS)
-		err("nomem: NLOCALS reached!\n");
-	memcpy(&locals[nlocals++], name, sizeof(*name));
+	if (locals_n >= locals_sz) {
+		locals_sz = MAX(128, locals_sz * 2);
+		locals = mextend(locals, locals_n, locals_sz, sizeof(locals[0]));
+	}
+	memcpy(&locals[locals_n++], name, sizeof(*name));
 }
 
 static int local_find(char *name)
 {
 	int i;
-	for (i = nlocals - 1; i >= 0; --i)
+	for (i = locals_n- 1; i >= 0; --i)
 		if (!strcmp(locals[i].name, name))
 			return i;
 	return -1;
@@ -140,7 +142,7 @@ static int local_find(char *name)
 static int global_find(char *name)
 {
 	int i;
-	for (i = nglobals - 1; i >= 0; i--)
+	for (i = globals_n - 1; i >= 0; i--)
 		if (!strcmp(name, globals[i].name))
 			return i;
 	return -1;
@@ -148,9 +150,11 @@ static int global_find(char *name)
 
 static void global_add(struct name *name)
 {
-	if (nglobals >= NGLOBALS)
-		err("nomem: NGLOBALS reached!\n");
-	memcpy(&globals[nglobals++], name, sizeof(*name));
+	if (globals_n >= globals_sz) {
+		globals_sz = MAX(128, globals_sz * 2);
+		globals = mextend(globals, globals_n, globals_sz, sizeof(globals[0]));
+	}
+	memcpy(&globals[globals_n++], name, sizeof(*name));
 }
 
 #define LABEL()			(++label)
@@ -162,14 +166,17 @@ static int l_cont;		/* current continue label */
 static struct enumval {
 	char name[NAMELEN];
 	int n;
-} enums[NENUMS];
-static int nenums;
+} *enums;
+static int enums_n, enums_sz;
 
 static void enum_add(char *name, int val)
 {
-	struct enumval *ev = &enums[nenums++];
-	if (nenums >= NENUMS)
-		err("nomem: NENUMS reached!\n");
+	struct enumval *ev;
+	if (enums_n >= enums_sz) {
+		enums_sz = MAX(128, enums_sz * 2);
+		enums = mextend(enums, enums_n, enums_sz, sizeof(enums[0]));
+	}
+	ev = &enums[enums_n++];
 	strcpy(ev->name, name);
 	ev->n = val;
 }
@@ -177,7 +184,7 @@ static void enum_add(char *name, int val)
 static int enum_find(int *val, char *name)
 {
 	int i;
-	for (i = nenums - 1; i >= 0; --i)
+	for (i = enums_n - 1; i >= 0; --i)
 		if (!strcmp(name, enums[i].name)) {
 			*val = enums[i].n;
 			return 0;
@@ -188,14 +195,18 @@ static int enum_find(int *val, char *name)
 static struct typdefinfo {
 	char name[NAMELEN];
 	struct type type;
-} typedefs[NTYPEDEFS];
-static int ntypedefs;
+} *typedefs;
+static int typedefs_n, typedefs_sz;
 
 static void typedef_add(char *name, struct type *type)
 {
-	struct typdefinfo *ti = &typedefs[ntypedefs++];
-	if (ntypedefs >= NTYPEDEFS)
-		err("nomem: NTYPEDEFS reached!\n");
+	struct typdefinfo *ti;
+	if (typedefs_n >= typedefs_sz) {
+		typedefs_sz = MAX(128, typedefs_sz * 2);
+		typedefs = mextend(typedefs, typedefs_n, typedefs_sz,
+					sizeof(typedefs[0]));
+	}
+	ti = &typedefs[typedefs_n++];
 	strcpy(ti->name, name);
 	memcpy(&ti->type, type, sizeof(*type));
 }
@@ -203,7 +214,7 @@ static void typedef_add(char *name, struct type *type)
 static int typedef_find(char *name)
 {
 	int i;
-	for (i = ntypedefs - 1; i >= 0; --i)
+	for (i = typedefs_n - 1; i >= 0; --i)
 		if (!strcmp(name, typedefs[i].name))
 			return i;
 	return -1;
@@ -212,14 +223,17 @@ static int typedef_find(char *name)
 static struct array {
 	struct type type;
 	int n;
-} arrays[NARRAYS];
-static int narrays;
+} *arrays;
+static int arrays_n, arrays_sz;
 
 static int array_add(struct type *type, int n)
 {
-	struct array *a = &arrays[narrays++];
-	if (narrays >= NARRAYS)
-		err("nomem: NARRAYS reached!\n");
+	struct array *a;
+	if (arrays_n >= arrays_sz) {
+		arrays_sz = MAX(128, arrays_sz * 2);
+		arrays = mextend(arrays, arrays_n, arrays_sz, sizeof(arrays[0]));
+	}
+	a = &arrays[arrays_n++];
 	memcpy(&a->type, type, sizeof(*type));
 	a->n = n;
 	return a - arrays;
@@ -239,19 +253,21 @@ static struct structinfo {
 	int nfields;
 	int isunion;
 	int size;
-} structs[NSTRUCTS];
-static int nstructs;
+} *structs;
+static int structs_n, structs_sz;
 
 static int struct_find(char *name, int isunion)
 {
 	int i;
-	for (i = nstructs - 1; i >= 0; --i)
+	for (i = structs_n - 1; i >= 0; --i)
 		if (*structs[i].name && !strcmp(name, structs[i].name) &&
 				structs[i].isunion == isunion)
 			return i;
-	i = nstructs++;
-	if (nstructs >= NSTRUCTS)
-		err("nomem: NSTRUCTS reached!\n");
+	if (structs_n >= structs_sz) {
+		structs_sz = MAX(128, structs_sz * 2);
+		structs = mextend(structs, structs_n, structs_sz, sizeof(structs[0]));
+	}
+	i = structs_n++;
 	memset(&structs[i], 0, sizeof(structs[i]));
 	strcpy(structs[i].name, name);
 	structs[i].isunion = isunion;
@@ -644,16 +660,19 @@ static struct funcinfo {
 	/* function and argument names; useful only when defining */
 	char argnames[NARGS][NAMELEN];
 	char name[NAMELEN];
-} funcs[NFUNCS];
-static int nfuncs;
+} *funcs;
+static int funcs_n, funcs_sz;
 
 static int func_create(struct type *ret, char *name, char argnames[][NAMELEN],
 			struct type *args, int nargs, int varg)
 {
-	struct funcinfo *fi = &funcs[nfuncs++];
+	struct funcinfo *fi;
 	int i;
-	if (nfuncs >= NFUNCS)
-		err("nomem: NFUNCS reached!\n");
+	if (funcs_n >= funcs_sz) {
+		funcs_sz = MAX(128, funcs_sz * 2);
+		funcs = mextend(funcs, funcs_n, funcs_sz, sizeof(funcs[0]));
+	}
+	fi = &funcs[funcs_n++];
 	memcpy(&fi->ret, ret, sizeof(*ret));
 	for (i = 0; i < nargs; i++)
 		memcpy(&fi->args[i], &args[i], sizeof(*ret));
@@ -1385,19 +1404,26 @@ static void readswitch(void)
 	l_break = o_break;
 }
 
-static char label_name[NLABELS][NAMELEN];
-static int label_ids[NLABELS];
-static int nlabels;
+static char (*label_name)[NAMELEN];
+static int *label_ids;
+static int label_n, label_sz;
 
 static int label_id(char *name)
 {
 	int i;
-	for (i = nlabels - 1; i >= 0; --i)
+	if (label_n >= label_sz) {
+		label_sz = MAX(128, label_sz * 2);
+		label_name = mextend(label_name, label_n, label_sz,
+					sizeof(label_name[0]));
+		label_ids = mextend(label_ids, label_n, label_sz,
+					sizeof(label_ids[0]));
+	}
+	for (i = label_n - 1; i >= 0; --i)
 		if (!strcmp(label_name[i], name))
 			return label_ids[i];
-	strcpy(label_name[nlabels], name);
-	label_ids[nlabels] = LABEL();
-	return label_ids[nlabels++];
+	strcpy(label_name[label_n], name);
+	label_ids[label_n] = LABEL();
+	return label_ids[label_n++];
 }
 
 static void readstmt(void)
@@ -1405,22 +1431,22 @@ static void readstmt(void)
 	o_tmpdrop(-1);
 	nts = 0;
 	if (!tok_jmp("{")) {
-		int _nlocals = nlocals;
-		int _nglobals = nglobals;
-		int _nenums = nenums;
-		int _ntypedefs = ntypedefs;
-		int _nstructs = nstructs;
-		int _nfuncs = nfuncs;
-		int _narrays = narrays;
+		int _nlocals = locals_n;
+		int _nglobals = globals_n;
+		int _nenums = enums_n;
+		int _ntypedefs = typedefs_n;
+		int _nstructs = structs_n;
+		int _nfuncs = funcs_n;
+		int _narrays = arrays_n;
 		while (tok_jmp("}"))
 			readstmt();
-		nlocals = _nlocals;
-		nenums = _nenums;
-		ntypedefs = _ntypedefs;
-		nstructs = _nstructs;
-		nfuncs = _nfuncs;
-		narrays = _narrays;
-		nglobals = _nglobals;
+		locals_n = _nlocals;
+		enums_n = _nenums;
+		typedefs_n = _ntypedefs;
+		structs_n = _nstructs;
+		funcs_n = _nfuncs;
+		arrays_n = _narrays;
+		globals_n = _nglobals;
 		return;
 	}
 	if (!readdefs(localdef, NULL)) {
@@ -1573,11 +1599,11 @@ static void readfunc(struct name *name, int flags)
 		local_add(&arg);
 	}
 	label = 0;
-	nlabels = 0;
+	label_n = 0;
 	readstmt();
 	o_func_end();
 	func_name[0] = '\0';
-	nlocals = 0;
+	locals_n = 0;
 }
 
 static void readdecl(void)
@@ -1642,11 +1668,20 @@ int main(int argc, char *argv[])
 		die("neatcc: no file given\n");
 	if (cpp_init(argv[i]))
 		die("neatcc: cannot open <%s>\n", argv[i]);
+	out_init(0);
 	parse();
 	if (!*obj) {
 		strcpy(obj, argv[i]);
 		obj[strlen(obj) - 1] = 'o';
 	}
+	free(locals);
+	free(globals);
+	free(label_name);
+	free(label_ids);
+	free(funcs);
+	free(typedefs);
+	free(structs);
+	free(arrays);
 	tok_done();
 	ofd = open(obj, O_WRONLY | O_TRUNC | O_CREAT, 0600);
 	o_write(ofd);
