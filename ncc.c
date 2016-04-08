@@ -133,7 +133,7 @@ static void local_add(struct name *name)
 static int local_find(char *name)
 {
 	int i;
-	for (i = locals_n- 1; i >= 0; --i)
+	for (i = locals_n - 1; i >= 0; --i)
 		if (!strcmp(locals[i].name, name))
 			return i;
 	return -1;
