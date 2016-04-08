@@ -628,7 +628,7 @@ static int io_imm(void)
 	}
 	if (!(oc & O_BOP) || ic_num(ic, c->arg2, &n))
 		return 1;
-	if ((oc == O_ADD || oc == O_SUB) && n == 0) {
+	if ((oc == O_ADD || oc == O_SUB || oc & O_SHL) && n == 0) {
 		iv_drop(1);
 		iv_put(c->arg1);
 		return 0;
