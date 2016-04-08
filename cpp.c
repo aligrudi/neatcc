@@ -562,7 +562,7 @@ int cpp_read(char **obuf, long *olen)
 		buf_pop();
 	}
 	old = cur;
-	if (buf[cur] == '#')
+	if (cur < len && buf[cur] == '#')
 		if (!cpp_cmd())
 			return 0;
 	while (cur < len) {
