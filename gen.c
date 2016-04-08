@@ -130,7 +130,7 @@ static long *iv_bbeg;		/* whether each instruction begins a basic block */
 static long *iv_pos;		/* the current position of each value */
 static long iv_regmap[N_REGS];	/* the value stored in each register */
 static long iv_live[NTMPS];	/* live values */
-static int iv_maxlive;
+static int iv_maxlive;		/* the number of values stored on the stack */
 
 /* find a register, with the given good, acceptable, and bad registers */
 static long iv_map(long iv, long gmask, long amask, long bmask)
@@ -393,6 +393,7 @@ static void ic_gencode(struct ic *ic, int ic_n)
 					(j - aregs) * ULNG);
 				iv_drop(v);
 			}
+			iv_maxlive += argc - aregs;
 			/* arguments passed via registers */
 			for (j = aregs - 1; j >= 0; --j)
 				iv_load(ic[i].args[j], argregs[j]);
