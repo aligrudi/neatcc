@@ -345,7 +345,7 @@ static void iv_init(struct ic *ic, int ic_n)
 			continue;
 		if (i + 1 < ic_n && ic[i].op & (O_JXX | O_CALL | O_RET))
 			iv_bbeg[i + 1] = 1;
-		if (ic[i].op & O_JXX)
+		if (ic[i].op & O_JXX && ic[i].arg2 < ic_n)
 			iv_bbeg[ic[i].arg2] = 1;
 	}
 	/* iv_pos */
@@ -466,6 +466,7 @@ static void ic_gencode(struct ic *ic, int ic_n)
 		if (oc & O_OUT)
 			iv_save(ic[i].arg0, r0);
 	}
+	i_label(ic_n);
 	iv_done();
 }
 
