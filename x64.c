@@ -298,7 +298,7 @@ static long i_jmp(long op, int rn, int rm, int nbytes)
 	if (op & (O_JZ | O_JCC)) {
 		if (op & O_JZ) {
 			i_tst(rn, rn);
-			jx(op == O_JZ ? 0x84 : 0x85, nbytes);
+			jx(O_C(op) == O_JZ ? 0x84 : 0x85, nbytes);
 		} else {
 			if (op & O_NUM)
 				i_cmp_imm(rn, rm);
