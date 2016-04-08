@@ -1,4 +1,4 @@
-/* architecture-dependent code generation for x86_64 */
+/* architecture-dependent code generation for x86 */
 #include <stdlib.h>
 #include "ncc.h"
 
