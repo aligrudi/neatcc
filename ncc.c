@@ -1004,7 +1004,7 @@ static void savelocal(long val, int bt)
 {
 	o_local(val);
 	o_tmpswap();
-	o_assign(UINT);
+	o_assign(bt);
 	o_tmpdrop(1);
 }
 
@@ -1911,8 +1911,10 @@ static int readname(struct type *main, char *name, struct type *base)
 			while (!tok_comes("{") && !readdefs(krdef, &funcs[ptype->id]))
 				tok_req(";");
 	} else {
-		if (ptype && readarrays(type))
-			array2ptr(type);
+		if (ptype && readarrays(btype)) {
+			btype->ptr = ptype->ptr;
+			memcpy(ptype, btype, sizeof(*ptype));
+		}
 	}
 	memcpy(main, type, sizeof(*type));
 	return 0;
