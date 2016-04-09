@@ -392,7 +392,7 @@ static void i_sym(int rd, int sym, int off)
 	oi(off, LONGSZ);
 }
 
-void i_wrap(int argc, int varg, int sargs, int sregs, int initfp, int spsub)
+void i_wrap(int argc, int sargs, int sregs, int initfp, int spsub)
 {
 	long body_n;
 	void *body;

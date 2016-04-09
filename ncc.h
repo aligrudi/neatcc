@@ -251,7 +251,7 @@ int ic_sym(struct ic *ic, long iv, long *sym, long *off);
 long i_reg(long op, long *r0, long *r1, long *r2, long *mt);
 long i_ins(long op, long r0, long r1, long r2);
 void i_label(long id);
-void i_wrap(int argc, int varg, int sargs, int sregs, int initfp, int subsp);
+void i_wrap(int argc, int sargs, int sregs, int initfp, int subsp);
 void i_code(char **c, long *c_len, long **rsym, long **rflg, long **roff, long *rcnt);
 void i_done(void);
 

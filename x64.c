@@ -428,7 +428,7 @@ static void i_saveargs(long sargs)
 	os("\x50", 1);		/* push rax */
 }
 
-void i_wrap(int argc, int varg, int sargs, int sregs, int initfp, int spsub)
+void i_wrap(int argc, int sargs, int sregs, int initfp, int spsub)
 {
 	long body_n;
 	void *body;

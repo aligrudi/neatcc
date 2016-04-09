@@ -504,10 +504,9 @@ void o_func_end(void)
 	ic_gencode(ic, ic_n);		/* generating machine code */
 	/* adding function prologue and epilogue */
 	spsub = loc_pos + iv_maxlive * ULNG;
-	for (i = 0; i < MIN(N_ARGS, func_argc); i++)
+	for (i = 0; i < N_ARGS && (func_varg || i < func_argc); i++)
 		sargs |= 1 << argregs[i];
-	i_wrap(func_argc, func_varg, sargs, R_PERM & func_regs,
-		spsub || func_argc, spsub);
+	i_wrap(func_argc, sargs, R_PERM & func_regs, spsub || func_argc, spsub);
 	i_code(&c, &c_len, &rsym, &rflg, &roff, &rcnt);
 	for (i = 0; i < rcnt; i++)	/* adding the relocations */
 		out_rel(rsym[i], rflg[i], roff[i] + mem_len(&cs));
