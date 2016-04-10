@@ -34,13 +34,13 @@ void mem_cut(struct mem *mem, long pos)
 
 void mem_cpy(struct mem *mem, long off, void *buf, long len)
 {
+	while (mem->n + off + len + 1 >= mem->sz)
+		mem_extend(mem);
 	memcpy(mem->s + off, buf, len);
 }
 
 void mem_put(struct mem *mem, void *buf, long len)
 {
-	while (mem->n + len + 1 >= mem->sz)
-		mem_extend(mem);
 	mem_cpy(mem, mem->n, buf, len);
 	mem->n += len;
 }
