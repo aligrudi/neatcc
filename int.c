@@ -10,6 +10,7 @@ static long iv[NTMPS];		/* operand stack */
 static long iv_n;		/* number of values in iv[] */
 static long *lab_loc;		/* label locations */
 static long lab_n, lab_sz;	/* number of labels in lab_loc[] */
+static long lab_last;		/* the last label target */
 
 static int io_num(void);
 static int io_mul2(void);
@@ -203,6 +204,7 @@ void o_label(long id)
 	while (lab_n <= id)
 		lab_loc[lab_n++] = -1;
 	lab_loc[id] = ic_n;
+	lab_last = ic_n;
 }
 
 void o_jmp(long id)
@@ -245,8 +247,7 @@ void o_back(long mark)
 void ic_get(struct ic **c, long *n)
 {
 	int i;
-	if (!ic_n || ~ic[ic_n - 1].op & O_RET ||
-			(lab_n && lab_loc[lab_n - 1] == ic_n))
+	if (!ic_n || ~ic[ic_n - 1].op & O_RET || lab_last == ic_n)
 		o_ret(0);
 	/* filling jump destinations */
 	for (i = 0; i < ic_n; i++)
@@ -262,6 +263,7 @@ void ic_get(struct ic **c, long *n)
 	lab_loc = NULL;
 	lab_n = 0;
 	lab_sz = 0;
+	lab_last = 0;
 }
 
 /* intermediate code queries */
