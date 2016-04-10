@@ -354,8 +354,9 @@ static int tok_comes(char *tok)
 
 static void tok_req(char *tok)
 {
-	if (strcmp(tok, tok_get()))
-		err("syntax error\n");
+	char *got = tok_get();
+	if (strcmp(tok, got))
+		err("syntax error (expected <%s> but got <%s>)\n", tok, got);
 }
 
 static int tok_grp(void)
@@ -2050,17 +2051,17 @@ static void initexpr(struct type *t, int off, void *obj,
 				break;
 		}
 	} else if (t->flags & T_ARRAY) {
-		struct type *t_de = &arrays[t->id].type;
+		struct type t_de = arrays[t->id].type;
 		int i;
 		/* handling extra braces as in: char s[] = {"sth"} */
-		if (TYPE_SZ(t_de) == 1 && tok_grp() == '"') {
+		if (TYPE_SZ(&t_de) == 1 && tok_grp() == '"') {
 			set(obj, off, t);
 			tok_req("}");
 			return;
 		}
 		for (i = 0; !tok_comes("}"); i++) {
 			long idx = i;
-			struct type *it = t_de;
+			struct type it = t_de;
 			if (!tok_jmp("[")) {
 				readexpr();
 				ts_pop_de(NULL);
@@ -2069,9 +2070,9 @@ static void initexpr(struct type *t, int off, void *obj,
 				tok_req("=");
 			}
 			if (!tok_comes("{") && (tok_grp() != '"' ||
-						!(it->flags & T_ARRAY)))
-				it = innertype(t_de);
-			initexpr(it, off + type_totsz(it) * idx, obj, set);
+						!(it.flags & T_ARRAY)))
+				it = *innertype(&t_de);
+			initexpr(&it, off + type_totsz(&it) * idx, obj, set);
 			if (tok_jmp(","))
 				break;
 		}
