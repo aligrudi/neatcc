@@ -434,10 +434,10 @@ static void ts_addop(int op)
 /* function prototypes for parsing function and variable declarations */
 static int readname(struct type *main, char *name, struct type *base);
 static int readtype(struct type *type);
-static int readdefs(void (*def)(void *data, struct name *name, unsigned flags),
-			void *data);
-static int readdefs_int(void (*def)(void *data, struct name *name, unsigned flags),
-			void *data);
+static int readdefs(void (*def)(long data, struct name *name, unsigned flags),
+			long data);
+static int readdefs_int(void (*def)(long data, struct name *name, unsigned flags),
+			long data);
 
 /* function prototypes for parsing initializer expressions */
 static int initsize(void);
@@ -453,9 +453,9 @@ static int type_alignment(struct type *t)
 	return MIN(ULNG, type_totsz(t));
 }
 
-static void structdef(void *data, struct name *name, unsigned flags)
+static void structdef(long data, struct name *name, unsigned flags)
 {
-	struct structinfo *si = data;
+	struct structinfo *si = &structs[data];
 	if (si->isunion) {
 		name->addr = 0;
 		if (si->size < type_totsz(&name->type))
@@ -475,10 +475,9 @@ static void structdef(void *data, struct name *name, unsigned flags)
 static int struct_create(char *name, int isunion)
 {
 	int id = struct_find(name, isunion);
-	struct structinfo *si = &structs[id];
 	tok_req("{");
 	while (tok_jmp("}")) {
-		readdefs(structdef, si);
+		readdefs(structdef, id);
 		tok_req(";");
 	}
 	return id;
@@ -693,7 +692,6 @@ static void readcall(void)
 	ts_pop(&t);
 	if (t.flags & T_FUNC && t.ptr > 0)
 		o_deref(ULNG);
-	fi = t.flags & T_FUNC ? &funcs[t.id] : NULL;
 	if (!tok_comes(")")) {
 		do {
 			readexpr();
@@ -702,6 +700,7 @@ static void readcall(void)
 		} while (!tok_jmp(","));
 	}
 	tok_req(")");
+	fi = t.flags & T_FUNC ? &funcs[t.id] : NULL;
 	o_call(argc, fi ? TYPE_BT(&fi->ret) : SINT);
 	if (fi) {
 		if (TYPE_BT(&fi->ret))
@@ -1252,7 +1251,7 @@ static void globalinit(void *obj, int off, struct type *t)
 
 static void readfunc(struct name *name, int flags);
 
-static void globaldef(void *data, struct name *name, unsigned flags)
+static void globaldef(long data, struct name *name, unsigned flags)
 {
 	struct type *t = &name->type;
 	char *elfname = *name->elfname ? name->elfname : name->name;
@@ -1311,7 +1310,7 @@ static void localinit(void *obj, int off, struct type *t)
 /* current function name */
 static char func_name[NAMELEN];
 
-static void localdef(void *data, struct name *name, unsigned flags)
+static void localdef(long data, struct name *name, unsigned flags)
 {
 	struct type *t = &name->type;
 	if ((flags & F_EXTERN) || ((t->flags & T_FUNC) && !t->ptr)) {
@@ -1339,7 +1338,7 @@ static void localdef(void *data, struct name *name, unsigned flags)
 	}
 }
 
-static void typedefdef(void *data, struct name *name, unsigned flags)
+static void typedefdef(long data, struct name *name, unsigned flags)
 {
 	typedef_add(name->name, &name->type);
 }
@@ -1450,12 +1449,12 @@ static void readstmt(void)
 		globals_n = _nglobals;
 		return;
 	}
-	if (!readdefs(localdef, NULL)) {
+	if (!readdefs(localdef, 0)) {
 		tok_req(";");
 		return;
 	}
 	if (!tok_jmp("typedef")) {
-		readdefs(typedefdef, NULL);
+		readdefs(typedefdef, 0);
 		tok_req(";");
 		return;
 	}
@@ -1610,11 +1609,11 @@ static void readfunc(struct name *name, int flags)
 static void readdecl(void)
 {
 	if (!tok_jmp("typedef")) {
-		readdefs(typedefdef, NULL);
+		readdefs(typedefdef, 0);
 		tok_req(";");
 		return;
 	}
-	readdefs_int(globaldef, NULL);
+	readdefs_int(globaldef, 0);
 	tok_jmp(";");
 }
 
@@ -1807,9 +1806,9 @@ static int readargs(struct type *args, char argnames[][NAMELEN], int *varg)
 }
 
 /* read K&R function arguments */
-static void krdef(void *data, struct name *name, unsigned flags)
+static void krdef(long data, struct name *name, unsigned flags)
 {
-	struct funcinfo *fi = data;
+	struct funcinfo *fi = &funcs[data];
 	int i;
 	for (i = 0; i < fi->nargs; i++)
 		if (!strcmp(fi->argnames[i], name->name))
@@ -1854,6 +1853,21 @@ static struct type *readarrays(struct type *type)
 	return inner;
 }
 
+static struct type *innertype(struct type *t)
+{
+	while (t->flags & T_ARRAY && !t->ptr)
+		t = &arrays[t->id].type;
+	return t;
+}
+
+static void innertype_modify(struct type *t, struct type *s)
+{
+	struct type *inner = innertype(t);
+	int ptr = inner->ptr;
+	memcpy(inner, s, sizeof(*inner));
+	inner->ptr = ptr;
+}
+
 /*
  * readname() reads a variable definition; the name is copied into
  * "name" and the type is copied into "main" argument.  The "base"
@@ -1865,59 +1879,53 @@ static struct type *readarrays(struct type *type)
  */
 static int readname(struct type *main, char *name, struct type *base)
 {
-	struct type tpool[3];
-	int npool = 0;
-	struct type *type = &tpool[npool++];
-	struct type *ptype = NULL;	/* type inside parenthesis */
-	struct type *btype = NULL;	/* type before parenthesis */
-	struct type *inner;
+	struct type type;	/* the main type */
+	struct type btype;	/* type before parenthesis; e.g. "int *" in "int *(*p)[10] */
+	int paren;
 	unsigned flags;
-	memset(tpool, 0, sizeof(tpool));
 	if (name)
 		*name = '\0';
 	if (!base) {
-		if (basetype(type, &flags))
+		if (basetype(&type, &flags))
 			return 1;
 	} else {
-		memcpy(type, base, sizeof(*base));
+		type = *base;
 	}
-	readptrs(type);
-	if (!tok_jmp("(")) {
+	readptrs(&type);
+	paren = !tok_jmp("(");
+	if (paren) {
 		btype = type;
-		type = &tpool[npool++];
-		ptype = type;
-		readptrs(type);
+		readptrs(&type);
 	}
 	if (tok_grp() == 'a' && name)
 		strcpy(name, tok_get());
-	inner = readarrays(type);
-	if (ptype && inner)
-		ptype = inner;
-	if (ptype)
+	readarrays(&type);
+	if (paren)
 		tok_req(")");
 	if (tok_comes("(")) {
 		struct type args[NARGS];
 		char argnames[NARGS][NAMELEN];
 		int varg = 0;
 		int nargs = readargs(args, argnames, &varg);
-		if (!ptype) {
-			btype = type;
-			type = &tpool[npool++];
-			ptype = type;
-		}
-		ptype->flags = T_FUNC;
-		ptype->bt = ULNG;
-		ptype->id = func_create(btype, name, argnames, args, nargs, varg);
+		struct type rtype = type;	/* return type */
+		struct type ftype = {0};	/* function type */
+		if (paren)
+			rtype = btype;
+		ftype.flags = T_FUNC;
+		ftype.bt = ULNG;
+		ftype.id = func_create(&rtype, name, argnames, args, nargs, varg);
+		if (paren)
+			innertype_modify(&type, &ftype);
+		else
+			type = ftype;
 		if (!tok_comes(";"))
-			while (!tok_comes("{") && !readdefs(krdef, &funcs[ptype->id]))
+			while (!tok_comes("{") && !readdefs(krdef, type.id))
 				tok_req(";");
 	} else {
-		if (ptype && readarrays(btype)) {
-			btype->ptr = ptype->ptr;
-			memcpy(ptype, btype, sizeof(*ptype));
-		}
+		if (paren && readarrays(&btype))
+				innertype_modify(&type, &btype);
 	}
-	memcpy(main, type, sizeof(*type));
+	*main = type;
 	return 0;
 }
 
@@ -1927,7 +1935,7 @@ static int readtype(struct type *type)
 }
 
 /*
- * readdef() reads a variable definition statement.  The definition
+ * readdefs() reads a variable definition statement.  The definition
  * can appear in different contexts: global variables, function
  * local variables, struct fields, and typedefs.  For each defined
  * variable, def() callback is called with the appropriate name
@@ -1935,8 +1943,8 @@ static int readtype(struct type *type)
  * by possibly reading the initializer expression and saving the name
  * struct.
  */
-static int readdefs(void (*def)(void *data, struct name *name, unsigned flags),
-			void *data)
+static int readdefs(void (*def)(long data, struct name *name, unsigned flags),
+			long data)
 {
 	struct type base;
 	unsigned base_flags;
@@ -1954,8 +1962,8 @@ static int readdefs(void (*def)(void *data, struct name *name, unsigned flags),
 }
 
 /* just like readdefs, but default to int type; for handling K&R functions */
-static int readdefs_int(void (*def)(void *data, struct name *name, unsigned flags),
-			void *data)
+static int readdefs_int(void (*def)(long data, struct name *name, unsigned flags),
+			long data)
 {
 	struct type base;
 	unsigned flags = 0;
@@ -2020,13 +2028,6 @@ static int initsize(void)
 	}
 	tok_jump(addr);
 	return n;
-}
-
-static struct type *innertype(struct type *t)
-{
-	if (t->flags & T_ARRAY && !t->ptr)
-		return innertype(&arrays[t->id].type);
-	return t;
 }
 
 /* read the initializer expression and initialize basic types using set() cb */
