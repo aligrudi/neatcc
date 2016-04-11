@@ -203,7 +203,7 @@ static int tok_read(void)
 			mem_putc(&tok, (unsigned char) buf[off++]);
 		return 0;
 	}
-	if (off + 3 <= len && (t3 = find_tok3(buf + off))) {
+	if (off + 2 <= len && (t3 = find_tok3(buf + off))) {
 		off += strlen(t3);
 		mem_put(&tok, t3, strlen(t3));
 		return 0;
