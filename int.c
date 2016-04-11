@@ -452,19 +452,19 @@ static long iv_num(long n)
 /* optimised multiplication operations for powers of two */
 static int io_mul2(void)
 {
-	struct ic *c = &ic[iv_get(0)];
+	long iv = iv_get(0);
 	long n, p;
 	long r1, r2;
-	long oc = O_C(c->op);
-	long bt = O_T(c->op);
+	long oc = O_C(ic[iv].op);
+	long bt = O_T(ic[iv].op);
 	if (!(oc & O_MUL))
 		return 1;
-	if (oc == O_MUL && !ic_num(ic, c->arg1, &n)) {
-		long t = c->arg1;
-		c->arg1 = c->arg2;
-		c->arg2 = t;
+	if (oc == O_MUL && !ic_num(ic, ic[iv].arg1, &n)) {
+		long t = ic[iv].arg1;
+		ic[iv].arg1 = ic[iv].arg2;
+		ic[iv].arg2 = t;
 	}
-	if (ic_num(ic, c->arg2, &n))
+	if (ic_num(ic, ic[iv].arg2, &n))
 		return 1;
 	p = log2a(n);
 	if (n && p < 0)
@@ -472,7 +472,7 @@ static int io_mul2(void)
 	if (oc == O_MUL) {
 		iv_drop(1);
 		if (n == 1) {
-			iv_put(c->arg1);
+			iv_put(ic[iv].arg1);
 			return 0;
 		}
 		if (n == 0) {
@@ -480,17 +480,17 @@ static int io_mul2(void)
 			return 0;
 		}
 		r2 = iv_num(p);
-		ic_put(O_MK(O_SHL, ULNG), iv_new(), c->arg1, r2);
+		ic_put(O_MK(O_SHL, ULNG), iv_new(), ic[iv].arg1, r2);
 		return 0;
 	}
 	if (oc == O_DIV && ~bt & T_MSIGN) {
 		iv_drop(1);
 		if (n == 1) {
-			iv_put(c->arg1);
+			iv_put(ic[iv].arg1);
 			return 0;
 		}
 		r2 = iv_num(p);
-		ic_put(O_MK(O_SHR, ULNG), iv_new(), c->arg1, r2);
+		ic_put(O_MK(O_SHR, ULNG), iv_new(), ic[iv].arg1, r2);
 		return 0;
 	}
 	if (oc == O_MOD && ~bt & T_MSIGN) {
@@ -500,7 +500,7 @@ static int io_mul2(void)
 			return 0;
 		}
 		r2 = iv_num(LONGSZ * 8 - p);
-		ic_put(O_MK(O_SHL, ULNG), iv_new(), c->arg1, r2);
+		ic_put(O_MK(O_SHL, ULNG), iv_new(), ic[iv].arg1, r2);
 		r1 = iv_pop();
 		r2 = iv_num(LONGSZ * 8 - p);
 		ic_put(O_MK(O_SHR, ULNG), iv_new(), r1, r2);
@@ -512,9 +512,9 @@ static int io_mul2(void)
 /* optimise comparison */
 static int io_cmp(void)
 {
-	struct ic *c = &ic[iv_get(0)];
-	long cmp = c->arg1;
-	if (O_C(c->op) == O_LNOT && ic[cmp].op & O_CMP) {
+	long iv = iv_get(0);
+	long cmp = ic[iv].arg1;
+	if (O_C(ic[iv].op) == O_LNOT && ic[cmp].op & O_CMP) {
 		iv_drop(1);
 		ic[cmp].op ^= 1;
 		iv_put(ic[cmp].arg0);
