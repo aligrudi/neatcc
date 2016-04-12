@@ -281,7 +281,7 @@ static struct name *struct_field(int id, char *name)
 	for (i = 0; i < si->nfields; i++)
 		if (!strcmp(name, si->fields[i].name))
 			return &si->fields[i];
-	err("field not found\n");
+	err("unknown field <%s>\n", name);
 	return NULL;
 }
 
