@@ -617,6 +617,12 @@ long i_reg(long op, long *rd, long *r1, long *r2, long *tmp)
 	return 1;
 }
 
+int i_imm(long lim, long n)
+{
+	long max = (1 << (lim - 1)) - 1;
+	return n <= max && n + 1 >= -max;
+}
+
 long i_ins(long op, long r0, long r1, long r2)
 {
 	long oc = O_C(op);

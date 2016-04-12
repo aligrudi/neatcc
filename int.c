@@ -584,13 +584,10 @@ static int io_loc(void)
 
 static int imm_ok(long op, long n, int arg)
 {
-	long m0, m1, m2, mt, bits;
-	long max;
+	long m0, m1, m2, mt;
 	if (i_reg(op | O_NUM, &m0, &m1, &m2, &mt))
 		return 0;
-	bits = arg == 2 ? m2 : m1;
-	max = (1 << (bits - 1)) - 1;
-	return n <= max && n + 1 >= -max;
+	return i_imm(arg == 2 ? m2 : m1, n);
 }
 
 /* use instruction immediates */
