@@ -389,8 +389,9 @@ static void ic_gencode(struct ic *ic, int ic_n)
 			/* arguments passed via stack */
 			for (j = argc - 1; j >= aregs; --j) {
 				int v = ic[i].args[j];
-				iv_load(v, r0);
-				i_ins(O_MK(O_ST | O_NUM, ULNG), r0, REG_SP,
+				int rx = iv_pos[v] >= 0 ? iv_pos[v] : r0;
+				iv_load(v, rx);
+				i_ins(O_MK(O_ST | O_NUM, ULNG), rx, REG_SP,
 					(j - aregs) * ULNG);
 				iv_drop(v);
 			}
