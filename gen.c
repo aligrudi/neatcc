@@ -194,7 +194,8 @@ static void ic_map(struct ic *ic, int *r0, int *r1, int *r2, long *mt)
 		else if (wop && n >= 2 && m0 & (1 << *r1))
 			*r0 = *r1;
 		else
-			*r0 = iv_map(ic->arg0, iv_gmask[ic->arg0], m0, all);
+			*r0 = iv_map(ic->arg0, iv_gmask[ic->arg0],
+				m0, wop ? 0 : all);
 	}
 	if (n >= 1 && !m0)
 		*r0 = *r1;
@@ -336,7 +337,7 @@ static void iv_init(struct ic *ic, int ic_n)
 		if (n >= 3)
 			iv_gmask[ic[i].arg2] = m2;
 		if (op & O_CALL)
-			for (j = 0; j < ic[j].arg2; j++)
+			for (j = 0; j < MIN(N_ARGS, ic[i].arg2); j++)
 				iv_gmask[ic[i].args[j]] = 1 << argregs[j];
 	}
 	/* iv_bbeg */
