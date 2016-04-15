@@ -325,7 +325,7 @@ static void iv_init(struct ic *ic, int ic_n)
 	/* iv_gmask */
 	for (i = 0; i < ic_n; i++) {
 		int n = ic_regcnt(ic + i);
-		int op = ic->op;
+		int op = ic[i].op;
 		if (!iv_use[i])
 			continue;
 		i_reg(op, &m0, &m1, &m2, &mt);
@@ -490,6 +490,12 @@ void o_func_beg(char *name, int argc, int global, int varg)
 	for (i = 0; i < argc; i++)
 		loc_add((-i - 2) * ULNG);
 	out_def(name, (global ? OUT_GLOB : 0) | OUT_CS, mem_len(&cs), 0);
+}
+
+void o_code(char *name, char *c, long c_len)
+{
+	out_def(name, OUT_CS, mem_len(&cs), 0);
+	mem_put(&cs, c, c_len);
 }
 
 void o_func_end(void)

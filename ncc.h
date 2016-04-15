@@ -15,7 +15,6 @@
 /* predefined array limits; (p.f. means per function) */
 #define NARGS		32		/* number of function/macro arguments */
 #define NTMPS		64		/* number of expression temporaries */
-#define NNUMS		1024		/* number of integer constants p.f. (arm.c) */
 #define NFIELDS		128		/* number of fields in structs */
 #define NAMELEN		128		/* size of identifiers */
 #define NDEFS		1024		/* number of macros */
@@ -171,6 +170,7 @@ void o_bsnew(char *name, long size, int global);
 /* functions */
 void o_func_beg(char *name, int argc, int global, int vararg);
 void o_func_end(void);
+void o_code(char *name, char *c, long c_len);
 /* output */
 void o_write(int fd);
 
