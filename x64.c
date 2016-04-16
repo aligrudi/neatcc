@@ -290,7 +290,7 @@ static void jx(int x, int nbytes)
 	}
 }
 
-static long i_jmp(long op, int rn, int rm, int nbytes)
+static long i_jmp(long op, long rn, long rm, int nbytes)
 {
 	long ret;
 	if (nbytes > 1)
@@ -428,12 +428,21 @@ static void i_saveargs(long sargs)
 	os("\x50", 1);		/* push rax */
 }
 
-void i_wrap(int argc, int sargs, int sregs, int initfp, int spsub)
+static void i_saveregs(long sregs, long sregs_pos, int st)
+{
+	int nsregs = 0;
+	int i;
+	for (i = 0; i < N_TMPS; i++)
+		if ((1 << tmpregs[i]) & sregs)
+			op_rm(st ? I_MOV : I_MOVR, tmpregs[i], REG_FP,
+				sregs_pos + nsregs++ * ULNG, ULNG);
+}
+
+void i_wrap(int argc, long sargs, long spsub, int initfp, long sregs, long sregs_pos)
 {
 	long body_n;
 	void *body;
 	long diff;		/* prologue length */
-	int nsregs = 0;		/* number of saved registers */
 	int nsargs = 0;		/* number of saved arguments */
 	int mod16;		/* 16-byte alignment */
 	int i;
@@ -442,7 +451,7 @@ void i_wrap(int argc, int sargs, int sregs, int initfp, int spsub)
 		mem_cut(&cs, jmp_ret);
 		jmp_n--;
 	}
-	lab_add(0);		/* the return label */
+	lab_add(0);				/* the return label */
 	body_n = mem_len(&cs);
 	body = mem_get(&cs);
 	/* generating function prologue */
@@ -452,42 +461,28 @@ void i_wrap(int argc, int sargs, int sregs, int initfp, int spsub)
 		os("\x55", 1);			/* push rbp */
 		os("\x48\x89\xe5", 3);		/* mov rbp, rsp */
 	}
-	if (sregs) {
-		for (i = N_TMPS - 1; i >= 0; i--)
-			if ((1 << tmpregs[i]) & sregs)
-				i_push(tmpregs[i]);
-	}
-	for (i = 0; i < N_TMPS; i++)
-		if ((1 << tmpregs[i]) & sregs)
-			nsregs++;
 	for (i = 0; i < N_ARGS; i++)
 		if ((1 << argregs[i]) & sargs)
 			nsargs++;
-	/* forcing 16-byte alignment */
-	mod16 = (spsub + (nsargs + nsregs) * LONGSZ) % 16;
+	mod16 = (spsub + nsargs * LONGSZ) % 16;	/* forcing 16-byte alignment */
 	if (spsub) {
 		os("\x48\x81\xec", 3);
 		spsub = spsub + (16 - mod16);
 		oi(spsub, 4);
 	}
+	i_saveregs(sregs, sregs_pos, 1);	/* saving registers */
 	diff = mem_len(&cs);
 	mem_put(&cs, body, body_n);
 	free(body);
 	/* generating function epilogue */
-	if (spsub)
-		i_add_anyimm(R_RSP, R_RBP, -nsregs * LONGSZ);
-	if (sregs) {
-		for (i = 0; i < N_TMPS; i++)
-			if ((1 << tmpregs[i]) & sregs)
-				i_pop(tmpregs[i]);
-	}
+	i_saveregs(sregs, sregs_pos, 0);	/* restoring saved registers */
 	if (initfp)
-		os("\xc9", 1);		/* leave */
+		os("\xc9", 1);			/* leave */
 	if (sargs) {
-		os("\xc2", 1);		/* ret n */
+		os("\xc2", 1);			/* ret n */
 		oi(nsargs * LONGSZ, 2);
 	} else {
-		os("\xc3", 1);		/* ret */
+		os("\xc3", 1);			/* ret */
 	}
 	/* adjusting code offsets */
 	for (i = 0; i < rel_n; i++)

@@ -12,4 +12,7 @@
 #define REG_FP		5	/* frame pointer register */
 #define REG_SP		4	/* stack pointer register */
 
+#define I_ARG0		(-16)	/* offset of the first argument from FP */
+#define I_LOC0		0	/* offset of the first local from FP */
+
 #define X64_ABS_RL	(OUT_RL32)	/* x86_64 memory model */

@@ -252,7 +252,7 @@ long i_reg(long op, long *r0, long *r1, long *r2, long *mt);
 long i_ins(long op, long r0, long r1, long r2);
 int i_imm(long lim, long n);
 void i_label(long id);
-void i_wrap(int argc, int sargs, int sregs, int initfp, int subsp);
+void i_wrap(int argc, long sargs, long spsub, int initfp, long sregs, long sregs_pos);
 void i_code(char **c, long *c_len, long **rsym, long **rflg, long **roff, long *rcnt);
 void i_done(void);
 

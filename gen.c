@@ -131,6 +131,7 @@ static long *iv_pos;		/* the current position of each value */
 static long iv_regmap[N_REGS];	/* the value stored in each register */
 static long iv_live[NTMPS];	/* live values */
 static int iv_maxlive;		/* the number of values stored on the stack */
+static int iv_maxargs;		/* the maximum number of arguments on the stack */
 
 /* find a register, with the given good, acceptable, and bad registers */
 static long iv_map(long iv, long gmask, long amask, long bmask)
@@ -359,6 +360,7 @@ static void iv_init(struct ic *ic, int ic_n)
 	for (i = 0; i < LEN(iv_live); i++)
 		iv_live[i] = -1;
 	iv_maxlive = 0;
+	iv_maxargs = 0;
 }
 
 static void iv_done(void)
@@ -395,7 +397,7 @@ static void ic_gencode(struct ic *ic, int ic_n)
 					(j - aregs) * ULNG);
 				iv_drop(v);
 			}
-			iv_maxlive += argc - aregs;
+			iv_maxargs = MAX(iv_maxargs, argc - aregs);
 			/* arguments passed via registers */
 			for (j = aregs - 1; j >= 0; --j)
 				iv_load(ic[i].args[j], argregs[j]);
@@ -480,7 +482,7 @@ static void ic_reset(void)
 	loc_off = NULL;
 	loc_n = 0;
 	loc_sz = 0;
-	loc_pos = 0;
+	loc_pos = I_LOC0;
 }
 
 void o_func_beg(char *name, int argc, int global, int varg)
@@ -490,7 +492,7 @@ void o_func_beg(char *name, int argc, int global, int varg)
 	func_varg = varg;
 	ic_reset();
 	for (i = 0; i < argc; i++)
-		loc_add((-i - 2) * ULNG);
+		loc_add(I_ARG0 + -i * ULNG);
 	out_def(name, (global ? OUT_GLOB : 0) | OUT_CS, mem_len(&cs), 0);
 }
 
@@ -505,16 +507,23 @@ void o_func_end(void)
 	struct ic *ic;
 	long ic_n, spsub;
 	long sargs = 0;
+	long sregs_pos;
 	char *c;
 	long c_len, *rsym, *rflg, *roff, rcnt;
 	int i;
 	ic_get(&ic, &ic_n);		/* the intermediate code */
 	ic_gencode(ic, ic_n);		/* generating machine code */
 	/* adding function prologue and epilogue */
-	spsub = loc_pos + iv_maxlive * ULNG;
 	for (i = 0; i < N_ARGS && (func_varg || i < func_argc); i++)
 		sargs |= 1 << argregs[i];
-	i_wrap(func_argc, sargs, R_PERM & func_regs, spsub || func_argc, spsub);
+	spsub = loc_pos + iv_maxlive * ULNG;
+	for (i = 0; i < N_TMPS; i++)
+		if ((func_regs & R_PERM) != 0)
+			spsub += ULNG;
+	sregs_pos = spsub;
+	spsub += iv_maxargs * ULNG;
+	i_wrap(func_argc, sargs, spsub, spsub || func_argc,
+		R_PERM & func_regs, -sregs_pos);
 	i_code(&c, &c_len, &rsym, &rflg, &roff, &rcnt);
 	for (i = 0; i < rcnt; i++)	/* adding the relocations */
 		out_rel(rsym[i], rflg[i], roff[i] + mem_len(&cs));

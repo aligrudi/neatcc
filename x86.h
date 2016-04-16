@@ -11,3 +11,6 @@
 
 #define REG_FP		5	/* frame pointer register */
 #define REG_SP		4	/* stack pointer register */
+
+#define I_ARG0		(-8)	/* offset of the first argument from FP */
+#define I_LOC0		0	/* offset of the first local from FP */
