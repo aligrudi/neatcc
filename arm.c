@@ -1,8 +1,9 @@
 /* architecture-dependent code generation for ARM */
 #include <string.h>
-#include "tok.h"
 #include "gen.h"
+#include "ncc.h"
 #include "out.h"
+#include "tok.h"
 
 #define MIN(a, b)		((a) < (b) ? (a) : (b))
 #define ALIGN(x, a)		(((x) + (a) - 1) & ~((a) - 1))
