@@ -490,6 +490,7 @@ void o_func_beg(char *name, int argc, int global, int varg)
 	int i;
 	func_argc = argc;
 	func_varg = varg;
+	func_regs = 0;
 	ic_reset();
 	for (i = 0; i < argc; i++)
 		loc_add(I_ARG0 + -i * ULNG);
