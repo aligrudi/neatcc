@@ -753,7 +753,7 @@ void i_wrap(int argc, long sargs, long spsub, int initfp, long sregs, long sregs
 	}
 	if (sregs) {				/* saving registers */
 		oi4(0xe24bc000 | add_encimm(-sregs_pos));
-		oi4(0xe90c0000 | sregs);	/* ldmfd ip, {r4-r9} */
+		oi4(0xe88c0000 | sregs);	/* stmea ip, {r4-r9} */
 	}
 	diff = mem_len(&cs);
 	mem_put(&cs, body, body_n);
