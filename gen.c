@@ -310,7 +310,7 @@ static void iv_init(struct ic *ic, int ic_n)
 		ic_info(ic + i, &w, &r1, &r2, &r3);
 		if (!iv_use[i])
 			if (!w || ic[i].op & O_CALL)
-				iv_use[i] = i;
+				iv_use[i] = -1;
 		if (!iv_use[i])
 			continue;
 		if (r1 && !iv_use[*r1])
