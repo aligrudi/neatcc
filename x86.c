@@ -47,7 +47,7 @@ int argregs[] = {0};
 static struct mem cs;		/* generated code */
 
 /* code generation functions */
-void os(void *s, int n)
+static void os(void *s, int n)
 {
 	mem_put(&cs, s, n);
 }
@@ -63,17 +63,17 @@ static char *ointbuf(long n, int l)
 	return buf;
 }
 
-void oi(long n, int l)
+static void oi(long n, int l)
 {
 	mem_put(&cs, ointbuf(n, l), l);
 }
 
-void oi_at(long pos, long n, int l)
+static void oi_at(long pos, long n, int l)
 {
 	mem_cpy(&cs, pos, ointbuf(n, l), l);
 }
 
-long opos(void)
+static long opos(void)
 {
 	return mem_len(&cs);
 }
@@ -290,13 +290,6 @@ static long i_jmp(long op, long rn, long rm, int nbytes)
 	ret = opos();
 	oi(0, nbytes);
 	return ret;
-}
-
-void i_fill(long src, long dst, long nbytes)
-{
-	if (nbytes > 1)
-		nbytes = 4;
-	oi_at(src, dst - src - nbytes, nbytes);
 }
 
 static void i_zx(int rd, int r1, int bits)
