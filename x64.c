@@ -47,7 +47,7 @@ int argregs[] = {7, 6, 2, 1, 8, 9};
 static struct mem cs;		/* generated code */
 
 /* code generation functions */
-void os(void *s, int n)
+static void os(void *s, int n)
 {
 	mem_put(&cs, s, n);
 }
@@ -63,17 +63,17 @@ static char *ointbuf(long n, int l)
 	return buf;
 }
 
-void oi(long n, int l)
+static void oi(long n, int l)
 {
 	mem_put(&cs, ointbuf(n, l), l);
 }
 
-void oi_at(long pos, long n, int l)
+static void oi_at(long pos, long n, int l)
 {
 	mem_cpy(&cs, pos, ointbuf(n, l), l);
 }
 
-long opos(void)
+static long opos(void)
 {
 	return mem_len(&cs);
 }
@@ -285,37 +285,41 @@ static void jx(int x, int nbytes)
 	}
 }
 
-static long i_jmp(long op, long rn, long rm, int nbytes)
+/* generate cmp or tst before a conditional jump */
+static void i_jcmp(long op, long rn, long rm)
 {
-	long ret;
-	if (nbytes > 1)
-		nbytes = 4;
-	if (op & (O_JZ | O_JCC)) {
-		if (op & O_JZ) {
-			i_tst(rn, rn);
-			jx(O_C(op) == O_JZ ? 0x84 : 0x85, nbytes);
-		} else {
-			if (op & O_NUM)
-				i_cmp_imm(rn, rm);
-			else
-				i_cmp(rn, rm);
-			jx(i_cond(op) & ~0x10, nbytes);
-		}
-	} else {
-		os(nbytes == 1 ? "\xeb" : "\xe9", 1);	/* jmp $addr */
+	if (op & O_JZ)
+		i_tst(rn, rn);
+	if (op & O_JCC) {
+		if (op & O_NUM)
+			i_cmp_imm(rn, rm);
+		else
+			i_cmp(rn, rm);
 	}
-	ret = opos();
-	oi(0, nbytes);
-	return ret;
 }
 
-void i_fill(long src, long dst, long nbytes)
+/* generate a jump instruction and return the of its displacement */
+static long i_jmp(long op, int nb)
 {
-	if (nbytes > 1)
-		nbytes = 4;
-	oi_at(src, dst - src - nbytes, nbytes);
+	if (op & O_JZ)
+		jx(O_C(op) == O_JZ ? 0x84 : 0x85, nb);
+	else if (op & O_JCC)
+		jx(i_cond(op) & ~0x10, nb);
+	else
+		os(nb == 1 ? "\xeb" : "\xe9", 1);
+	oi(0, nb);
+	return opos() - nb;
 }
 
+/* the length of a jump instruction opcode */
+static int i_jlen(long op, int nb)
+{
+	if (op & (O_JZ | O_JCC))
+		return nb ? 2 : 1;
+	return 1;
+}
+
+/* zero extend */
 static void i_zx(int rd, int r1, int bits)
 {
 	if (bits & 0x07) {
@@ -326,6 +330,7 @@ static void i_zx(int rd, int r1, int bits)
 	}
 }
 
+/* sign extend */
 static void i_sx(int rd, int r1, int bits)
 {
 	mov_r2r(rd, r1, T_MSIGN | (bits >> 3));
@@ -359,6 +364,7 @@ static long *lab_loc;		/* label offsets in cs */
 static long jmp_n, jmp_sz;	/* jump count */
 static long *jmp_off;		/* jump offsets */
 static long *jmp_dst;		/* jump destinations */
+static long *jmp_op;		/* jump opcode */
 static long jmp_ret;		/* the position of the last return jmp */
 
 static void lab_add(long id)
@@ -371,15 +377,17 @@ static void lab_add(long id)
 	lab_loc[id] = opos();
 }
 
-static void jmp_add(long off, long dst)
+static void jmp_add(long op, long off, long dst)
 {
 	if (jmp_n == jmp_sz) {
 		jmp_sz = MAX(128, jmp_sz * 2);
 		jmp_off = mextend(jmp_off, jmp_n, jmp_sz, sizeof(*jmp_off));
 		jmp_dst = mextend(jmp_dst, jmp_n, jmp_sz, sizeof(*jmp_dst));
+		jmp_op = mextend(jmp_op, jmp_n, jmp_sz, sizeof(*jmp_op));
 	}
 	jmp_off[jmp_n] = off;
 	jmp_dst[jmp_n] = dst;
+	jmp_op[jmp_n] = op;
 	jmp_n++;
 }
 
@@ -442,7 +450,7 @@ void i_wrap(int argc, long sargs, long spsub, int initfp, long sregs, long sregs
 	int mod16;		/* 16-byte alignment */
 	int i;
 	/* removing the last jmp to the epilogue */
-	if (jmp_ret + 5 == opos()) {
+	if (jmp_ret + i_jlen(O_JMP, 4) + 4 == opos()) {
 		mem_cut(&cs, jmp_ret);
 		jmp_n--;
 	}
@@ -488,11 +496,51 @@ void i_wrap(int argc, long sargs, long spsub, int initfp, long sregs, long sregs
 		lab_loc[i] += diff;
 }
 
+/* introduce shorter jumps, if possible */
+static void i_shortjumps(int *nb)
+{
+	long off = 0;	/* current code offset */
+	long dif = 0;	/* the difference after changing jump instructions */
+	int rel = 0;	/* current relocation */
+	int lab = 1;	/* current label */
+	long c_len = mem_len(&cs);
+	char *c = mem_get(&cs);
+	int i;
+	for (i = 0; i < jmp_n; i++)
+		nb[i] = abs(lab_loc[jmp_dst[i]] - jmp_off[i]) < 0x70 ? 1 : 4;
+	for (i = 0; i < jmp_n; i++) {
+		long cur = jmp_off[i] - i_jlen(jmp_op[i], 4);
+		while (rel < rel_n && rel_off[rel] <= cur)
+			rel_off[rel++] += dif;
+		while (lab < lab_sz && lab_loc[lab] <= cur)
+			lab_loc[lab++] += dif;
+		mem_put(&cs, c + off, cur - off);
+		jmp_off[i] = i_jmp(jmp_op[i], nb[i]);
+		off = cur + i_jlen(jmp_op[i], 4) + 4;
+		dif = mem_len(&cs) - off;
+	}
+	while (rel < rel_n)
+		rel_off[rel++] += dif;
+	while (lab < lab_sz)
+		lab_loc[lab++] += dif;
+	lab_loc[0] += dif;
+	mem_put(&cs, c + off, c_len - off);
+	free(c);
+}
+
 void i_code(char **c, long *c_len, long **rsym, long **rflg, long **roff, long *rcnt)
 {
+	int *nb;	/* number of bytes necessary for jump displacements */
 	int i;
+	/* more compact jmp instructions */
+	nb = malloc(jmp_n * sizeof(nb[0]));
+	for (i = 0; i < jmp_n; i++)
+		nb[i] = 4;
+	i_shortjumps(nb);
 	for (i = 0; i < jmp_n; i++)	/* filling jmp destinations */
-		oi_at(jmp_off[i], lab_loc[jmp_dst[i]] - jmp_off[i] - 4, 4);
+		oi_at(jmp_off[i], lab_loc[jmp_dst[i]] -
+				jmp_off[i] - nb[i], nb[i]);
+	free(nb);
 	*c_len = mem_len(&cs);
 	*c = mem_get(&cs);
 	*rsym = rel_sym;
@@ -511,6 +559,7 @@ void i_done(void)
 {
 	free(jmp_off);
 	free(jmp_dst);
+	free(jmp_op);
 	free(lab_loc);
 }
 
@@ -687,7 +736,7 @@ long i_ins(long op, long r0, long r1, long r2)
 	}
 	if (oc == O_RET) {
 		jmp_ret = opos();
-		jmp_add(i_jmp(O_JMP, 0, 0, 4), 0);
+		jmp_add(O_JMP, i_jmp(op, 4), 0);
 		return 0;
 	}
 	if (oc == (O_LD | O_NUM)) {
@@ -703,7 +752,8 @@ long i_ins(long op, long r0, long r1, long r2)
 		return 0;
 	}
 	if (oc & O_JXX) {
-		jmp_add(i_jmp(op, r0, r1, 4), r2 + 1);
+		i_jcmp(op, r0, r1);
+		jmp_add(op, i_jmp(op, 4), r2 + 1);
 		return 0;
 	}
 	return 1;
