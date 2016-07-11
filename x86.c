@@ -538,10 +538,11 @@ long i_reg(long op, long *rd, long *r1, long *r2, long *tmp)
 	if (oc & O_CALL) {
 		*rd = (1 << REG_RET);
 		*r1 = oc & O_SYM ? 0 : R_TMPS;
+		*tmp = R_TMPS & ~R_PERM;
 		return 0;
 	}
 	if (oc & (O_LD | O_ST)) {
-		*rd = R_TMPS;
+		*rd = T_SZ(bt) == 1 ? R_BYTE : R_TMPS;
 		*r1 = R_TMPS;
 		*r2 = oc & O_NUM ? 0 : R_TMPS;
 		return 0;

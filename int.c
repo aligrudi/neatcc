@@ -643,8 +643,7 @@ static int io_imm(void)
 /* calling symbols */
 static int io_call(void)
 {
-	int iv = iv_get(0);
-	struct ic *c = &ic[iv];
+	struct ic *c = &ic[ic_n - 1];
 	long sym, off;
 	if (c->op & O_CALL && !ic_sym(ic, c->arg1, &sym, &off) && !off) {
 		c->op |= O_SYM;
