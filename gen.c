@@ -33,7 +33,6 @@ static long ra_lmapglob[N_REGS];	/* global register to local assignments */
 static long *ra_gmask;		/* the mask of good registers for each value */
 static long ra_live[NTMPS];	/* live values */
 static int ra_vmax;		/* the number of values stored on the stack */
-static int ra_lmask;		/* mask of registers in ra_lmapglob[] */
 
 static long loc_add(long pos)
 {
@@ -183,21 +182,30 @@ static long ra_regget(long iv, long gmask, long amask, long bmask)
 	return 0;
 }
 
-/* allocate registers for a 3 operand instruction */
-static void ic_map(struct ic *ic, int *r0, int *r1, int *r2, long *mt)
+/* allocate registers for a 3-operand instruction */
+static void ra_map(struct ic *ic, int *r0, int *r1, int *r2, long *mt)
 {
 	long m0, m1, m2;
 	long all = 0;
 	int n = ic_regcnt(ic);
 	int oc = O_C(ic->op);
 	int i;
-	*r0 = 0;
-	*r1 = 0;
-	*r2 = 0;
+	*r0 = -1;
+	*r1 = -1;
+	*r2 = -1;
 	*mt = 0;
+	/* optimizing loading locals: point to local's register */
+	if (oc == (O_LD | O_LOC) && ra_lreg(ic->arg1) >= 0 &&
+			ra_vmap[ra_lreg(ic->arg1)] < 0) {
+		*r0 = ra_lreg(ic->arg1);
+		func_regs |= 1 << *r0;
+		return;
+	}
+	/* do not use argument registers to hold call destination */
 	if (oc & O_CALL)
 		for (i = 0; i < MIN(ic->arg2, N_ARGS); i++)
 			all |= (1 << argregs[i]);
+	/* instructions on locals can be simplified */
 	if (oc & O_LOC) {
 		if (oc & O_MOV)
 			oc = O_ADD | O_NUM;
@@ -211,9 +219,9 @@ static void ic_map(struct ic *ic, int *r0, int *r1, int *r2, long *mt)
 	 * be used in the last instruction of a basic block.
 	 */
 	if (ic->op & (O_JZ | O_JCC))
-		m0 &= ~ra_lmask;
-	if (ic->op & O_JCC)
-		m1 &= ~ra_lmask;
+		for (i = 0; i < LEN(ra_lmap); i++)
+			if (ra_lmapglob[i] >= 0 && ra_lmap[i] != ra_lmapglob[i])
+				all |= (1 << i);
 	/* allocating registers for the operands */
 	if (n >= 3) {
 		*r2 = ra_regget(ic->arg2, m2, m2, all);
@@ -235,6 +243,19 @@ static void ic_map(struct ic *ic, int *r0, int *r1, int *r2, long *mt)
 	}
 	if (n >= 1 && !m0)
 		*r0 = *r1;
+	/* if r0 is overwritten and it is a local; use another register */
+	if (n >= 1 && oc & O_OUT && ra_lmap[*r0] >= 0) {
+		long m3 = (m0 ? m0 : m1) & ~(all | (1 << *r0));
+		long arg3 = m0 ? ic->arg0 : ic->arg1;
+		if (m3 != 0) {
+			int r3 = ra_regget(arg3, ra_gmask[ic->arg0], m3, 0);
+			if (n >= 2 && *r0 == *r1)
+				*r1 = r3;
+			if (n >= 3 && *r0 == *r2)
+				*r2 = r3;
+			*r0 = r3;
+		}
+	}
 	if (n)
 		all |= (1 << *r0);
 	func_regs |= all | *mt;
@@ -360,7 +381,7 @@ static void ra_lsave(long loc, long off, int reg, int bt)
 	int lreg = ra_lreg(loc);
 	if (lreg >= 0 && ra_lmapglob[lreg] == ra_lmap[lreg]) {
 		if (ra_vmap[lreg] >= 0) {	/* values using the same register */
-			val_tomem(ra_vmap[lreg], reg);
+			val_tomem(ra_vmap[lreg], lreg);
 			ra_vmap[lreg] = -1;
 		}
 		i_ins(O_MK(O_MOV, bt), lreg, reg, 0);
@@ -458,6 +479,7 @@ static void ic_info(struct ic *ic, long **w, long **r1, long **r2, long **r3)
 static void ra_init(struct ic *ic, int ic_n)
 {
 	long m0, m1, m2, mt;
+	int *loc_sz;
 	int i, j;
 	ic_luse = calloc(ic_n, sizeof(ic_luse[0]));
 	ic_bbeg = calloc(ic_n, sizeof(ic_bbeg[0]));
@@ -512,19 +534,25 @@ static void ra_init(struct ic *ic, int ic_n)
 	/* loc_ptr and loc_dat */
 	loc_ptr = calloc(loc_n, sizeof(loc_ptr[0]));
 	loc_dat = calloc(loc_n, sizeof(loc_dat[0]));
+	loc_sz = calloc(loc_n, sizeof(loc_sz[0]));
 	for (i = 0; i < ic_n; i++) {
 		long oc = O_C(ic[i].op);
 		if (!ic_luse[i])
 			continue;
 		if (oc == (O_LD | O_LOC) || oc == (O_ST | O_LOC)) {
-			if (ic[i].arg2 || T_SZ(O_T(ic[i].op)) < 2)
-				loc_ptr[ic[i].arg1]++;
+			int loc = ic[i].arg1;
+			int sz = T_SZ(O_T(ic[i].op));
+			if (!loc_sz[loc])
+				loc_sz[loc] = sz;
+			if (ic[i].arg2 || sz < 2 || sz != loc_sz[loc])
+				loc_ptr[loc]++;
 			else
-				loc_dat[ic[i].arg1]++;
+				loc_dat[loc]++;
 		}
 		if (oc == (O_MOV | O_LOC))
 			loc_ptr[ic[i].arg1]++;
 	}
+	free(loc_sz);
 	/* func_leaf */
 	func_leaf = 1;
 	for (i = 0; i < ic_n; i++)
@@ -539,11 +567,9 @@ static void ra_init(struct ic *ic, int ic_n)
 	ra_glob(ic, ic_n);
 	memcpy(ra_lmap, ra_lmapglob, sizeof(ra_lmap));
 	/* ra_lmask */
-	ra_lmask = 0;
 	for (i = 0; i < LEN(ra_lmapglob); i++)
 		if (ra_lmapglob[i] >= 0)
-			ra_lmask |= (1 << i);
-	func_regs |= ra_lmask;
+			func_regs |= (1 << i);
 	/* ra_live */
 	for (i = 0; i < LEN(ra_live); i++)
 		ra_live[i] = -1;
@@ -581,7 +607,7 @@ static void ic_gencode(struct ic *ic, int ic_n)
 		i_label(i);
 		if (!ic_luse[i])
 			continue;
-		ic_map(ic + i, &r0, &r1, &r2, &mt);
+		ra_map(ic + i, &r0, &r1, &r2, &mt);
 		if (oc & O_CALL) {
 			int argc = ic[i].arg2;
 			int aregs = MIN(N_ARGS, argc);
@@ -614,9 +640,11 @@ static void ic_gencode(struct ic *ic, int ic_n)
 		for (j = 0; j < N_REGS; j++)
 			if (mt & (1 << j))
 				ra_spill(j);
-		/* overwriting a value that is needed later */
+		/* overwriting a value that is needed later (unless loading a local to its register) */
 		if (n >= 1 && oc & O_OUT)
-			ra_spill(r0);
+			if (oc != (O_LD | O_LOC) || ra_lmap[r0] != ic[i].arg1 ||
+					ra_vmap[r0] >= 0)
+				ra_spill(r0);
 		/* before the last instruction of a basic block; for jumps */
 		if (i + 1 < ic_n && ic_bbeg[i + 1] && oc & O_JXX)
 			ra_bbend();
