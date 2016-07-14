@@ -512,11 +512,11 @@ long i_reg(long op, long *rd, long *r1, long *r2, long *tmp)
 		return 0;
 	}
 	if (oc & O_UOP) {
-		*rd = R_TMPS;
+		*r1 = R_TMPS;
 		if (oc == O_LNOT)
-			*r1 = 1 << R_RAX;
+			*rd = 1 << R_RAX;
 		else
-			*r1 = R_TMPS;
+			*rd = R_TMPS;
 		return 0;
 	}
 	if (oc == O_MSET) {
