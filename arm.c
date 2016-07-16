@@ -30,11 +30,6 @@ int argregs[] = {0, 1, 2, 3};
 static struct mem cs;		/* generated code */
 
 /* code generation functions */
-static void os(void *s, int n)
-{
-	mem_put(&cs, s, n);
-}
-
 static char *ointbuf(long n, int l)
 {
 	static char buf[16];
@@ -559,9 +554,10 @@ long i_reg(long op, long *rd, long *r1, long *r2, long *tmp)
 		return 0;
 	}
 	if (oc == O_MSET || oc == O_MCPY) {
-		*rd = R_TMPS;
-		*r1 = R_TMPS;
-		*r2 = R_TMPS;
+		*rd = 1 << 4;
+		*r1 = 1 << 5;
+		*r2 = 1 << 6;
+		*tmp = (1 << 4) | (1 << 5) | (oc == O_MCPY ? (1 << 6) : 0);
 		return 0;
 	}
 	if (oc == O_RET) {

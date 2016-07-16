@@ -619,12 +619,14 @@ long i_reg(long op, long *rd, long *r1, long *r2, long *tmp)
 		*rd = 1 << R_RDI;
 		*r1 = 1 << R_RAX;
 		*r2 = 1 << R_RCX;
+		*tmp = (1 << R_RDI) | (1 << R_RCX);
 		return 0;
 	}
 	if (oc == O_MCPY) {
 		*rd = 1 << R_RDI;
 		*r1 = 1 << R_RSI;
 		*r2 = 1 << R_RCX;
+		*tmp = (1 << R_RDI) | (1 << R_RSI) | (1 << R_RCX);
 		return 0;
 	}
 	if (oc == O_RET) {
