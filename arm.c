@@ -557,7 +557,7 @@ long i_reg(long op, long *rd, long *r1, long *r2, long *tmp)
 		*rd = 1 << 4;
 		*r1 = 1 << 5;
 		*r2 = 1 << 6;
-		*tmp = (1 << 4) | (1 << 5) | (oc == O_MCPY ? (1 << 6) : 0);
+		*tmp = (1 << 4) | (1 << 6) | (oc == O_MCPY ? (1 << 5) : 0);
 		return 0;
 	}
 	if (oc == O_RET) {
