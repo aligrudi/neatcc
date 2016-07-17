@@ -389,7 +389,7 @@ static void ra_lsave(long loc, long off, int reg, int bt)
 		if (lreg >= 0)
 			ra_lmap[lreg] = -1;
 		loc_tomem(loc, off, reg, bt);
-		if (!loc_ptr[loc] && loc_dat[loc] > 2)
+		if (!loc_ptr[loc] && loc_dat[loc] > 2 && ra_lmap[reg] < 0)
 			ra_lmap[reg] = loc;
 	}
 }
