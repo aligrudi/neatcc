@@ -213,7 +213,8 @@ static long ra_regget(long iv, long gmask, long amask, long bmask)
 /* find a free and cheap register */
 static long ra_regcheap(long mask)
 {
-	return ra_regscn(mask & ~ra_lmask() & ~ra_vmask());
+	return ra_regscn(mask & (func_regs | (R_TMPS & ~R_PERM)) &
+			~ra_lmask() & ~ra_vmask());
 }
 
 /* allocate registers for a 3-operand instruction */
