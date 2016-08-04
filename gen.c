@@ -156,30 +156,64 @@ static int ra_lreg(int loc)
 	return -1;
 }
 
+/* mask of registers assigned to locals */
+static long ra_lmask(void)
+{
+	long m = 0;
+	int i;
+	for (i = 0; i < LEN(ra_lmap); i++)
+		if (ra_lmap[i] >= 0)
+			m |= (1 << i);
+	return m;
+}
+
+/* mask of registers assigned to values */
+static long ra_vmask(void)
+{
+	long m = 0;
+	int i;
+	for (i = 0; i < LEN(ra_vmap); i++)
+		if (ra_vmap[i] >= 0)
+			m |= (1 << i);
+	return m;
+}
+
+/* find a temporary register specified in the given mask */
+static long ra_regscn(long mask)
+{
+	int i;
+	for (i = 0; i < N_TMPS; i++)
+		if ((1 << tmpregs[i]) & mask)
+			return tmpregs[i];
+	return -1;
+}
+
 /* find a register, with the given good, acceptable, and bad register masks */
 static long ra_regget(long iv, long gmask, long amask, long bmask)
 {
-	int i;
+	long lmask, vmask;
 	gmask &= ~bmask & amask;
 	amask &= ~bmask;
 	if (ra_vreg(iv) >= 0 && (1 << ra_vreg(iv)) & (gmask | amask))
 		return ra_vreg(iv);
-	for (i = 0; i < N_TMPS; i++)
-		if ((1 << tmpregs[i]) & gmask && ra_vmap[tmpregs[i]] < 0 &&
-						ra_lmap[tmpregs[i]] < 0)
-			return tmpregs[i];
-	for (i = 0; i < N_TMPS; i++)
-		if ((1 << tmpregs[i]) & amask && ra_vmap[tmpregs[i]] < 0 &&
-						ra_lmap[tmpregs[i]] < 0)
-			return tmpregs[i];
-	for (i = 0; i < N_TMPS; i++)
-		if ((1 << tmpregs[i]) & gmask)
-			return tmpregs[i];
-	for (i = 0; i < N_TMPS; i++)
-		if ((1 << tmpregs[i]) & amask)
-			return tmpregs[i];
+	vmask = ra_vmask();
+	lmask = ra_lmask();
+	if (ra_regscn(gmask & ~vmask & ~lmask) >= 0)
+		return ra_regscn(gmask & ~vmask & ~lmask);
+	if (ra_regscn(amask & ~vmask & ~lmask) >= 0)
+		return ra_regscn(amask & ~vmask & ~lmask);
+	if (ra_regscn(gmask) >= 0)
+		return ra_regscn(gmask);
+	if (ra_regscn(amask) >= 0)
+		return ra_regscn(amask);
 	die("neatcc: cannot allocate an acceptable register\n");
 	return 0;
+}
+
+/* find a free and cheap register */
+static long ra_regcheap(long mask)
+{
+	return ra_regscn(mask & ~ra_lmask() & ~ra_vmask());
 }
 
 /* allocate registers for a 3-operand instruction */
@@ -360,6 +394,20 @@ static void ra_vdrop(long iv)
 		ra_vmap[ra_vreg(iv)] = -1;
 }
 
+/* move the given value to memory or a free register */
+static void ra_vmove(long iv, long mask)
+{
+	int src = ra_vreg(iv);
+	int dst = ra_regcheap(mask);
+	if (dst >= 0 && ra_vmap[dst] < 0 && ra_lmap[dst] < 0) {
+		i_ins(O_MK(O_MOV, ULNG), dst, src, 0);
+		ra_vmap[dst] = iv;
+	} else {
+		val_tomem(iv, src);
+	}
+	ra_vmap[src] = -1;
+}
+
 /* load the value of local loc into register reg */
 static void ra_lload(long loc, long off, int reg, int bt)
 {
@@ -380,10 +428,9 @@ static void ra_lsave(long loc, long off, int reg, int bt)
 {
 	int lreg = ra_lreg(loc);
 	if (lreg >= 0 && ra_lmapglob[lreg] == ra_lmap[lreg]) {
-		if (ra_vmap[lreg] >= 0) {	/* values using the same register */
-			val_tomem(ra_vmap[lreg], lreg);
-			ra_vmap[lreg] = -1;
-		}
+		if (ra_vmap[lreg] >= 0)	/* values using the same register */
+			ra_vmove(ra_vmap[lreg],
+				ra_gmask[ra_vmap[lreg]] & ~(1 << reg));
 		i_ins(O_MK(O_MOV, bt), lreg, reg, 0);
 	} else {
 		if (lreg >= 0)
@@ -566,7 +613,6 @@ static void ra_init(struct ic *ic, int ic_n)
 		ra_lmapglob[i] = -1;
 	ra_glob(ic, ic_n);
 	memcpy(ra_lmap, ra_lmapglob, sizeof(ra_lmap));
-	/* ra_lmask */
 	for (i = 0; i < LEN(ra_lmapglob); i++)
 		if (ra_lmapglob[i] >= 0)
 			func_regs |= (1 << i);
