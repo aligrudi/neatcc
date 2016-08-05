@@ -188,6 +188,9 @@ struct ic {
 void ic_get(struct ic **c, long *n);
 int ic_num(struct ic *ic, long iv, long *num);
 int ic_sym(struct ic *ic, long iv, long *sym, long *off);
+long *ic_lastuse(struct ic *ic, long ic_n);
+void ic_free(struct ic *ic);
+int ic_regcnt(struct ic *ic);
 
 /* SECTION FOUR: Final Code Generation */
 /*

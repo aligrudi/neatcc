@@ -20,6 +20,7 @@ static int io_addr(void);
 static int io_loc(void);
 static int io_imm(void);
 static int io_call(void);
+static void io_deadcode(void);
 
 static struct ic *ic_new(void)
 {
@@ -249,10 +250,10 @@ void ic_get(struct ic **c, long *n)
 	int i;
 	if (!ic_n || ~ic[ic_n - 1].op & O_RET || lab_last == ic_n)
 		o_ret(0);
-	/* filling jump destinations */
-	for (i = 0; i < ic_n; i++)
+	for (i = 0; i < ic_n; i++)	/* filling branch targets */
 		if (ic[i].op & O_JXX)
 			ic[i].arg2 = lab_loc[ic[i].arg2];
+	io_deadcode();			/* removing dead code */
 	*c = ic;
 	*n = ic_n;
 	ic = NULL;
@@ -264,6 +265,12 @@ void ic_get(struct ic **c, long *n)
 	lab_n = 0;
 	lab_sz = 0;
 	lab_last = 0;
+}
+
+void ic_free(struct ic *ic)
+{
+	if (ic->op & O_CALL)
+		free(ic->args);
 }
 
 /* intermediate code queries */
@@ -416,6 +423,85 @@ static int ic_off(struct ic *ic, long iv, long *base_iv, long *off)
 		return 0;
 	}
 	return 1;
+}
+
+/* number of register arguments */
+int ic_regcnt(struct ic *ic)
+{
+	long o = ic->op;
+	if (o & O_BOP)
+		return o & (O_NUM | O_SYM | O_LOC) ? 2 : 3;
+	if (o & O_UOP)
+		return o & (O_NUM | O_SYM | O_LOC) ? 1 : 2;
+	if (o & O_CALL)
+		return o & (O_NUM | O_SYM | O_LOC) ? 1 : 2;
+	if (o & O_MOV)
+		return o & (O_NUM | O_SYM | O_LOC) ? 1 : 2;
+	if (o & O_MEM)
+		return 3;
+	if (o & O_JMP)
+		return 0;
+	if (o & O_JZ)
+		return 1;
+	if (o & O_JCC)
+		return o & (O_NUM | O_SYM | O_LOC) ? 1 : 2;
+	if (o & O_RET)
+		return 1;
+	if (o & (O_LD | O_ST) && o & (O_SYM | O_LOC))
+		return 1;
+	if (o & (O_LD | O_ST))
+		return o & O_NUM ? 2 : 3;
+	return 0;
+}
+
+/* return the values written to and read from in the given instruction */
+static void ic_info(struct ic *ic, long **w, long **r1, long **r2, long **r3)
+{
+	long n = ic_regcnt(ic);
+	long o = ic->op & O_OUT;
+	*r1 = NULL;
+	*r2 = NULL;
+	*r3 = NULL;
+	*w = NULL;
+	if (o) {
+		*w = &ic->arg0;
+		*r1 = n >= 2 ? &ic->arg1 : NULL;
+		*r2 = n >= 3 ? &ic->arg2 : NULL;
+	} else {
+		*r1 = n >= 1 ? &ic->arg0 : NULL;
+		*r2 = n >= 2 ? &ic->arg1 : NULL;
+		*r3 = n >= 3 ? &ic->arg2 : NULL;
+	}
+}
+
+/*
+ * The returned array indicates the last instruction in
+ * which the value produced by each instruction is used.
+ */
+long *ic_lastuse(struct ic *ic, long ic_n)
+{
+	long *luse = calloc(ic_n, sizeof(luse[0]));
+	int i, j;
+	for (i = ic_n - 1; i >= 0; --i) {
+		long *w, *r1, *r2, *r3;
+		ic_info(ic + i, &w, &r1, &r2, &r3);
+		if (!luse[i])
+			if (!w || ic[i].op & O_CALL)
+				luse[i] = -1;
+		if (!luse[i])
+			continue;
+		if (r1 && !luse[*r1])
+			luse[*r1] = i;
+		if (r2 && !luse[*r2])
+			luse[*r2] = i;
+		if (r3 && !luse[*r3])
+			luse[*r3] = i;
+		if (ic[i].op & O_CALL)
+			for (j = 0; j < ic[i].arg2; j++)
+				if (!luse[ic[i].args[j]])
+					luse[ic[i].args[j]] = i;
+	}
+	return luse;
 }
 
 /* intermediate code optimisations */
@@ -651,4 +737,68 @@ static int io_call(void)
 		return 0;
 	}
 	return 1;
+}
+
+/* remove dead code */
+static void io_deadcode(void)
+{
+	char *live;
+	long *nidx;
+	long src = 0, dst = 0;
+	int i, j;
+	/* liveness analysis */
+	live = calloc(ic_n, sizeof(live[0]));
+	for (i = ic_n - 1; i >= 0; i--) {
+		long *w, *r1, *r2, *r3;
+		ic_info(ic + i, &w, &r1, &r2, &r3);
+		if (!w || ic[i].op & O_CALL)
+			live[i] = 1;
+		if (!live[i])
+			continue;
+		if (r1)
+			live[*r1] = 1;
+		if (r2)
+			live[*r2] = 1;
+		if (r3)
+			live[*r3] = 1;
+		if (ic[i].op & O_CALL)
+			for (j = 0; j < ic[i].arg2; j++)
+				live[ic[i].args[j]] = 1;
+	}
+	/* the new indices of intermediate instructions */
+	nidx = calloc(ic_n, sizeof(nidx[0]));
+	while (src < ic_n) {
+		while (src < ic_n && !live[src]) {
+			nidx[src] = dst;
+			ic_free(&ic[src++]);
+		}
+		if (src < ic_n) {
+			nidx[src] = dst;
+			if (src != dst)
+				memcpy(ic + dst, ic + src, sizeof(ic[src]));
+			src++;
+			dst++;
+		}
+	}
+	ic_n = dst;
+	/* adjusting arguments and branch targets */
+	for (i = 0; i < ic_n; i++) {
+		long *w, *r1, *r2, *r3;
+		ic_info(ic + i, &w, &r1, &r2, &r3);
+		if (r1)
+			*r1 = nidx[*r1];
+		if (r2)
+			*r2 = nidx[*r2];
+		if (r3)
+			*r3 = nidx[*r3];
+		if (w)
+			*w = nidx[*w];
+		if (ic[i].op & O_JXX)
+			ic[i].arg2 = nidx[ic[i].arg2];
+		if (ic[i].op & O_CALL)
+			for (j = 0; j < ic[i].arg2; j++)
+				ic[i].args[j] = nidx[ic[i].args[j]];
+	}
+	free(live);
+	free(nidx);
 }
