@@ -124,7 +124,7 @@ void o_bop(long op)
 	int r1 = iv_pop();
 	int r2 = iv_pop();
 	ic_put(op, iv_new(), r2, r1);
-	io_num() && io_mul2() && io_imm() && io_addr();
+	io_num() && io_mul2() && io_addr() && io_imm();
 }
 
 void o_uop(long op)
@@ -633,7 +633,7 @@ static int io_jmp(void)
 static int io_addr(void)
 {
 	long iv, off;
-	if (ic_off(ic, ic_n - 1, &iv, &off) || iv != ic_n - 1)
+	if (ic_off(ic, iv_get(0), &iv, &off) || iv == iv_get(0))
 		return 1;
 	if (ic[iv].op & O_MOV && ic[iv].op & O_LOC) {
 		iv_drop(1);
