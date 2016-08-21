@@ -119,10 +119,28 @@ void o_tmpcopy(void)
 	iv_dup();
 }
 
+/* return one if the given value is constant */
+static int ic_const(long iv)
+{
+	long oc = O_C(ic[iv].op);
+	return oc & O_MOV && oc & (O_NUM | O_SYM | O_LOC);
+}
+
+/* return one if the given value is a simple load */
+static int ic_load(long iv)
+{
+	long oc = O_C(ic[iv].op);
+	return oc & O_LD && oc & (O_NUM | O_SYM | O_LOC);
+}
+
 void o_bop(long op)
 {
 	int r1 = iv_pop();
 	int r2 = iv_pop();
+	if (ic_const(r2) && !ic_const(r1)) {	/* load constants last */
+		ic_put(ic[r2].op, iv_new(), ic[r2].arg1, ic[r2].arg2);
+		r2 = iv_pop();
+	}
 	ic_put(op, iv_new(), r2, r1);
 	io_num() && io_mul2() && io_addr() && io_imm();
 }
@@ -182,6 +200,13 @@ void o_call(int argc, int ret)
 	int r1, i;
 	for (i = argc - 1; i >= 0; --i)
 		args[i] = iv_pop();
+	for (i = argc - 1; i >= 0; --i) {
+		int iv = args[i];
+		if (ic_const(iv) || ic_load(iv)) {	/* load constants last */
+			ic_put(ic[iv].op, iv_new(), ic[iv].arg1, ic[iv].arg2);
+			args[i] = iv_pop();
+		}
+	}
 	r1 = iv_pop();
 	c = ic_put(O_CALL, iv_new(), r1, argc);
 	c->args = args;
