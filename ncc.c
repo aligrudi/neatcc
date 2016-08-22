@@ -1337,6 +1337,7 @@ static void localdef(long data, struct name *name, unsigned flags)
 	name->addr = o_mklocal(type_totsz(&name->type));
 	local_add(name);
 	if (!tok_jmp("=")) {
+		/* this is not necessary for "struct x = y" */
 		if (t->flags & (T_ARRAY | T_STRUCT) && !t->ptr) {
 			o_local(name->addr);
 			o_num(0);

@@ -192,6 +192,14 @@ long *ic_lastuse(struct ic *ic, long ic_n);
 void ic_free(struct ic *ic);
 int ic_regcnt(struct ic *ic);
 
+/* global register allocation */
+void reg_init(struct ic *ic, long ic_n);
+long reg_mask(void);
+int reg_lmap(long ic, long loc);
+int reg_rmap(long ic, long reg);
+int reg_safe(long loc);
+void reg_done(void);
+
 /* SECTION FOUR: Final Code Generation */
 /*
  * To make maintaining different architectures easier and to unify the
