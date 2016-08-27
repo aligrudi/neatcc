@@ -22,22 +22,22 @@ static int io_imm(void);
 static int io_call(void);
 static void io_deadcode(void);
 
-static struct ic *ic_new(void)
+static void iv_put(long n);
+
+static struct ic *ic_put(long op, long arg1, long arg2, long arg3)
 {
+	struct ic *c;
 	if (ic_n == ic_sz) {
 		ic_sz = MAX(128, ic_sz * 2);
 		ic = mextend(ic, ic_n, ic_sz, sizeof(*ic));
 	}
-	return &ic[ic_n++];
-}
-
-static struct ic *ic_put(long op, long arg0, long arg1, long arg2)
-{
-	struct ic *c = ic_new();
+	c = &ic[ic_n++];
 	c->op = op;
-	c->arg0 = arg0;
-	c->arg1 = arg1;
-	c->arg2 = arg2;
+	c->a1 = arg1;
+	c->a2 = arg2;
+	c->a3 = arg3;
+	if (op & O_OUT)
+		iv_put(ic_n - 1);
 	return c;
 }
 
@@ -58,12 +58,6 @@ static long iv_pop(void)
 static long iv_get(int n)
 {
 	return iv[iv_n - n - 1];
-}
-
-static long iv_new(void)
-{
-	iv[iv_n] = ic_n;
-	return iv[iv_n++];
 }
 
 static void iv_put(long n)
@@ -91,17 +85,17 @@ static void iv_dup(void)
 
 void o_num(long n)
 {
-	ic_put(O_MOV | O_NUM, iv_new(), n, 0);
+	ic_put(O_MOV | O_NUM, n, 0, 0);
 }
 
 void o_local(long id)
 {
-	ic_put(O_MOV | O_LOC, iv_new(), id, 0);
+	ic_put(O_MOV | O_LOC, id, 0, 0);
 }
 
 void o_sym(char *sym)
 {
-	ic_put(O_MOV | O_SYM, iv_new(), out_sym(sym), 0);
+	ic_put(O_MOV | O_SYM, out_sym(sym), 0, 0);
 }
 
 void o_tmpdrop(int n)
@@ -138,17 +132,17 @@ void o_bop(long op)
 	int r1 = iv_pop();
 	int r2 = iv_pop();
 	if (ic_const(r2) && !ic_const(r1)) {	/* load constants last */
-		ic_put(ic[r2].op, iv_new(), ic[r2].arg1, ic[r2].arg2);
+		ic_put(ic[r2].op, ic[r2].a1, ic[r2].a2, ic[r2].a3);
 		r2 = iv_pop();
 	}
-	ic_put(op, iv_new(), r2, r1);
+	ic_put(op, r2, r1, 0);
 	io_num() && io_mul2() && io_addr() && io_imm();
 }
 
 void o_uop(long op)
 {
 	int r1 = iv_pop();
-	ic_put(op, iv_new(), r1, 0);
+	ic_put(op, r1, 0, 0);
 	if (io_num())
 		io_cmp();
 }
@@ -164,7 +158,7 @@ void o_assign(long bt)
 void o_deref(long bt)
 {
 	int r1 = iv_pop();
-	ic_put(O_MK(O_LD | O_NUM, bt), iv_new(), r1, 0);
+	ic_put(O_MK(O_LD | O_NUM, bt), r1, 0, 0);
 	io_loc();
 }
 
@@ -172,7 +166,7 @@ void o_cast(long bt)
 {
 	if (T_SZ(bt) != ULNG) {
 		int r1 = iv_pop();
-		ic_put(O_MK(O_MOV, bt), iv_new(), r1, 0);
+		ic_put(O_MK(O_MOV, bt), r1, 0, 0);
 		io_num();
 	}
 }
@@ -203,12 +197,12 @@ void o_call(int argc, int ret)
 	for (i = argc - 1; i >= 0; --i) {
 		int iv = args[i];
 		if (ic_const(iv) || ic_load(iv)) {	/* load constants last */
-			ic_put(ic[iv].op, iv_new(), ic[iv].arg1, ic[iv].arg2);
+			ic_put(ic[iv].op, ic[iv].a1, ic[iv].a2, ic[iv].a3);
 			args[i] = iv_pop();
 		}
 	}
 	r1 = iv_pop();
-	c = ic_put(O_CALL, iv_new(), r1, argc);
+	c = ic_put(O_CALL, r1, 0, argc);
 	c->args = args;
 	iv_drop(ret == 0);
 	io_call();
@@ -277,7 +271,7 @@ void ic_get(struct ic **c, long *n)
 		o_ret(0);
 	for (i = 0; i < ic_n; i++)	/* filling branch targets */
 		if (ic[i].op & O_JXX)
-			ic[i].arg2 = lab_loc[ic[i].arg2];
+			ic[i].a3 = lab_loc[ic[i].a3];
 	io_deadcode();			/* removing dead code */
 	*c = ic;
 	*n = ic_n;
@@ -368,25 +362,25 @@ int ic_num(struct ic *ic, long iv, long *n)
 	long oc = O_C(ic[iv].op);
 	long bt = O_T(ic[iv].op);
 	if (oc & O_MOV && oc & O_NUM) {
-		*n = ic[iv].arg1;
+		*n = ic[iv].a1;
 		return 0;
 	}
 	if (oc & O_BOP) {
-		if (ic_num(ic, ic[iv].arg1, &n1))
+		if (ic_num(ic, ic[iv].a1, &n1))
 			return 1;
-		if (ic_num(ic, ic[iv].arg2, &n2))
+		if (ic_num(ic, ic[iv].a2, &n2))
 			return 1;
 		*n = cb(ic[iv].op, n1, n2);
 		return 0;
 	}
 	if (oc & O_UOP) {
-		if (ic_num(ic, ic[iv].arg1, &n1))
+		if (ic_num(ic, ic[iv].a1, &n1))
 			return 1;
 		*n = cu(ic[iv].op, n1);
 		return 0;
 	}
 	if (oc & O_MOV && !(oc & (O_NUM | O_LOC | O_SYM))) {
-		if (ic_num(ic, ic[iv].arg1, &n1))
+		if (ic_num(ic, ic[iv].a1, &n1))
 			return 1;
 		*n = c_cast(n1, bt);
 		return 0;
@@ -399,22 +393,22 @@ int ic_sym(struct ic *ic, long iv, long *sym, long *off)
 	long n;
 	long oc = O_C(ic[iv].op);
 	if (oc & O_MOV && oc & O_SYM) {
-		*sym = ic[iv].arg1;
-		*off = ic[iv].arg2;
+		*sym = ic[iv].a1;
+		*off = ic[iv].a2;
 		return 0;
 	}
 	if (oc == O_ADD) {
-		if ((ic_sym(ic, ic[iv].arg1, sym, off) ||
-				ic_num(ic, ic[iv].arg2, &n)) &&
-			(ic_sym(ic, ic[iv].arg2, sym, off) ||
-				ic_num(ic, ic[iv].arg1, &n)))
+		if ((ic_sym(ic, ic[iv].a1, sym, off) ||
+				ic_num(ic, ic[iv].a2, &n)) &&
+			(ic_sym(ic, ic[iv].a2, sym, off) ||
+				ic_num(ic, ic[iv].a1, &n)))
 			return 1;
 		*off += n;
 		return 0;
 	}
 	if (oc == O_SUB) {
-		if (ic_sym(ic, ic[iv].arg1, sym, off) ||
-				ic_num(ic, ic[iv].arg2, &n))
+		if (ic_sym(ic, ic[iv].a1, sym, off) ||
+				ic_num(ic, ic[iv].a2, &n))
 			return 1;
 		*off -= n;
 		return 0;
@@ -432,17 +426,17 @@ static int ic_off(struct ic *ic, long iv, long *base_iv, long *off)
 		return 0;
 	}
 	if (oc == O_ADD) {
-		if ((ic_off(ic, ic[iv].arg1, base_iv, off) ||
-				ic_num(ic, ic[iv].arg2, &n)) &&
-			(ic_off(ic, ic[iv].arg2, base_iv, off) ||
-				ic_num(ic, ic[iv].arg1, &n)))
+		if ((ic_off(ic, ic[iv].a1, base_iv, off) ||
+				ic_num(ic, ic[iv].a2, &n)) &&
+			(ic_off(ic, ic[iv].a2, base_iv, off) ||
+				ic_num(ic, ic[iv].a1, &n)))
 			return 1;
 		*off += n;
 		return 0;
 	}
 	if (oc == O_SUB) {
-		if (ic_off(ic, ic[iv].arg1, base_iv, off) ||
-				ic_num(ic, ic[iv].arg2, &n))
+		if (ic_off(ic, ic[iv].a1, base_iv, off) ||
+				ic_num(ic, ic[iv].a2, &n))
 			return 1;
 		*off -= n;
 		return 0;
@@ -455,13 +449,13 @@ int ic_regcnt(struct ic *ic)
 {
 	long o = ic->op;
 	if (o & O_BOP)
-		return o & (O_NUM | O_SYM | O_LOC) ? 2 : 3;
+		return o & (O_NUM | O_SYM | O_LOC) ? 1 : 2;
 	if (o & O_UOP)
-		return o & (O_NUM | O_SYM | O_LOC) ? 1 : 2;
+		return o & (O_NUM | O_SYM | O_LOC) ? 0 : 1;
 	if (o & O_CALL)
-		return o & (O_NUM | O_SYM | O_LOC) ? 1 : 2;
+		return o & (O_NUM | O_SYM | O_LOC) ? 0 : 1;
 	if (o & O_MOV)
-		return o & (O_NUM | O_SYM | O_LOC) ? 1 : 2;
+		return o & (O_NUM | O_SYM | O_LOC) ? 0 : 1;
 	if (o & O_MEM)
 		return 3;
 	if (o & O_JMP)
@@ -472,31 +466,11 @@ int ic_regcnt(struct ic *ic)
 		return o & (O_NUM | O_SYM | O_LOC) ? 1 : 2;
 	if (o & O_RET)
 		return 1;
-	if (o & (O_LD | O_ST) && o & (O_SYM | O_LOC))
-		return 1;
-	if (o & (O_LD | O_ST))
-		return o & O_NUM ? 2 : 3;
+	if (o & O_LD)
+		return ((o & O_NUM) != 0);
+	if (o & O_ST)
+		return 1 + ((o & O_NUM) != 0);
 	return 0;
-}
-
-/* return the values written to and read from in the given instruction */
-static void ic_info(struct ic *ic, long **w, long **r1, long **r2, long **r3)
-{
-	long n = ic_regcnt(ic);
-	long o = ic->op & O_OUT;
-	*r1 = NULL;
-	*r2 = NULL;
-	*r3 = NULL;
-	*w = NULL;
-	if (o) {
-		*w = &ic->arg0;
-		*r1 = n >= 2 ? &ic->arg1 : NULL;
-		*r2 = n >= 3 ? &ic->arg2 : NULL;
-	} else {
-		*r1 = n >= 1 ? &ic->arg0 : NULL;
-		*r2 = n >= 2 ? &ic->arg1 : NULL;
-		*r3 = n >= 3 ? &ic->arg2 : NULL;
-	}
 }
 
 /*
@@ -508,21 +482,20 @@ long *ic_lastuse(struct ic *ic, long ic_n)
 	long *luse = calloc(ic_n, sizeof(luse[0]));
 	int i, j;
 	for (i = ic_n - 1; i >= 0; --i) {
-		long *w, *r1, *r2, *r3;
-		ic_info(ic + i, &w, &r1, &r2, &r3);
+		int n = ic_regcnt(ic + i);
 		if (!luse[i])
-			if (!w || ic[i].op & O_CALL)
+			if (!(ic[i].op & O_OUT) || ic[i].op & O_CALL)
 				luse[i] = -1;
 		if (!luse[i])
 			continue;
-		if (r1 && !luse[*r1])
-			luse[*r1] = i;
-		if (r2 && !luse[*r2])
-			luse[*r2] = i;
-		if (r3 && !luse[*r3])
-			luse[*r3] = i;
+		if (n >= 1 && !luse[ic[i].a1])
+			luse[ic[i].a1] = i;
+		if (n >= 2 && !luse[ic[i].a2])
+			luse[ic[i].a2] = i;
+		if (n >= 3 && !luse[ic[i].a3])
+			luse[ic[i].a3] = i;
 		if (ic[i].op & O_CALL)
-			for (j = 0; j < ic[i].arg2; j++)
+			for (j = 0; j < ic[i].a3; j++)
 				if (!luse[ic[i].args[j]])
 					luse[ic[i].args[j]] = i;
 	}
@@ -570,12 +543,12 @@ static int io_mul2(void)
 	long bt = O_T(ic[iv].op);
 	if (!(oc & O_MUL))
 		return 1;
-	if (oc == O_MUL && !ic_num(ic, ic[iv].arg1, &n)) {
-		long t = ic[iv].arg1;
-		ic[iv].arg1 = ic[iv].arg2;
-		ic[iv].arg2 = t;
+	if (oc == O_MUL && !ic_num(ic, ic[iv].a1, &n)) {
+		long t = ic[iv].a1;
+		ic[iv].a1 = ic[iv].a2;
+		ic[iv].a2 = t;
 	}
-	if (ic_num(ic, ic[iv].arg2, &n))
+	if (ic_num(ic, ic[iv].a2, &n))
 		return 1;
 	p = log2a(n);
 	if (n && p < 0)
@@ -583,7 +556,7 @@ static int io_mul2(void)
 	if (oc == O_MUL) {
 		iv_drop(1);
 		if (n == 1) {
-			iv_put(ic[iv].arg1);
+			iv_put(ic[iv].a1);
 			return 0;
 		}
 		if (n == 0) {
@@ -591,17 +564,17 @@ static int io_mul2(void)
 			return 0;
 		}
 		r2 = iv_num(p);
-		ic_put(O_MK(O_SHL, ULNG), iv_new(), ic[iv].arg1, r2);
+		ic_put(O_MK(O_SHL, ULNG), ic[iv].a1, r2, 0);
 		return 0;
 	}
 	if (oc == O_DIV && ~bt & T_MSIGN) {
 		iv_drop(1);
 		if (n == 1) {
-			iv_put(ic[iv].arg1);
+			iv_put(ic[iv].a1);
 			return 0;
 		}
 		r2 = iv_num(p);
-		ic_put(O_MK(O_SHR, ULNG), iv_new(), ic[iv].arg1, r2);
+		ic_put(O_MK(O_SHR, ULNG), ic[iv].a1, r2, 0);
 		return 0;
 	}
 	if (oc == O_MOD && ~bt & T_MSIGN) {
@@ -611,10 +584,10 @@ static int io_mul2(void)
 			return 0;
 		}
 		r2 = iv_num(LONGSZ * 8 - p);
-		ic_put(O_MK(O_SHL, ULNG), iv_new(), ic[iv].arg1, r2);
+		ic_put(O_MK(O_SHL, ULNG), ic[iv].a1, r2, 0);
 		r1 = iv_pop();
 		r2 = iv_num(LONGSZ * 8 - p);
-		ic_put(O_MK(O_SHR, ULNG), iv_new(), r1, r2);
+		ic_put(O_MK(O_SHR, ULNG), r1, r2, 0);
 		return 0;
 	}
 	return 1;
@@ -624,11 +597,11 @@ static int io_mul2(void)
 static int io_cmp(void)
 {
 	long iv = iv_get(0);
-	long cmp = ic[iv].arg1;
+	long cmp = ic[iv].a1;
 	if (O_C(ic[iv].op) == O_LNOT && ic[cmp].op & O_CMP) {
 		iv_drop(1);
 		ic[cmp].op ^= 1;
-		iv_put(ic[cmp].arg0);
+		iv_put(cmp);
 		return 0;
 	}
 	return 1;
@@ -639,16 +612,16 @@ static int io_jmp(void)
 {
 	struct ic *c = &ic[ic_n - 1];
 	long oc = O_C(c->op);
-	if (oc & O_JZ && O_C(ic[c->arg0].op) == O_LNOT) {
-		c->arg0 = ic[c->arg0].arg1;
+	if (oc & O_JZ && O_C(ic[c->a1].op) == O_LNOT) {
+		c->a1 = ic[c->a1].a1;
 		c->op ^= 1;
 		return 0;
 	}
-	if (oc & O_JZ && O_C(ic[c->arg0].op) & O_CMP) {
-		long cop = (ic[c->arg0].op & ~O_CMP) | O_JCC;
+	if (oc & O_JZ && O_C(ic[c->a1].op) & O_CMP) {
+		long cop = (ic[c->a1].op & ~O_CMP) | O_JCC;
 		c->op = O_C(c->op) == O_JZ ? cop ^ 1 : cop;
-		c->arg1 = ic[c->arg0].arg2;
-		c->arg0 = ic[c->arg0].arg1;
+		c->a2 = ic[c->a1].a2;
+		c->a1 = ic[c->a1].a1;
 		return 0;
 	}
 	return 1;
@@ -662,12 +635,12 @@ static int io_addr(void)
 		return 1;
 	if (ic[iv].op & O_MOV && ic[iv].op & O_LOC) {
 		iv_drop(1);
-		ic_put(O_MOV | O_LOC, iv_new(), ic[iv].arg1, ic[iv].arg2 + off);
+		ic_put(O_MOV | O_LOC, ic[iv].a1, ic[iv].a2 + off, 0);
 		return 0;
 	}
 	if (ic[iv].op & O_MOV && ic[iv].op & O_SYM) {
 		iv_drop(1);
-		ic_put(O_MOV | O_SYM, iv_new(), ic[iv].arg1, ic[iv].arg2 + off);
+		ic_put(O_MOV | O_SYM, ic[iv].a1, ic[iv].a2 + off, 0);
 		return 0;
 	}
 	return 1;
@@ -678,25 +651,39 @@ static int io_loc(void)
 {
 	struct ic *c = &ic[ic_n - 1];
 	long iv, off;
-	if (!(c->op & (O_LD | O_ST)) || !(c->op & O_NUM))
-		return 1;
-	if (ic_off(ic, c->arg1, &iv, &off))
-		return 1;
-	if (ic[iv].op & O_MOV && ic[iv].op & O_LOC) {
-		c->op = (c->op & ~O_NUM) | O_LOC;
-		c->arg1 = ic[iv].arg1;
-		c->arg2 += ic[iv].arg2 + off;
+	if (c->op & O_LD && c->op & O_NUM) {
+		if (ic_off(ic, c->a1, &iv, &off))
+			return 1;
+		if (ic[iv].op & O_MOV && ic[iv].op & O_LOC) {
+			c->op = (c->op & ~O_NUM) | O_LOC;
+			c->a1 = ic[iv].a1;
+			c->a2 += ic[iv].a2 + off;
+			return 0;
+		}
+		c->a1 = iv;
+		c->a2 += off;
 		return 0;
 	}
-	c->arg1 = iv;
-	c->arg2 += off;
-	return 0;
+	if (c->op & O_ST && c->op & O_NUM) {
+		if (ic_off(ic, c->a2, &iv, &off))
+			return 1;
+		if (ic[iv].op & O_MOV && ic[iv].op & O_LOC) {
+			c->op = (c->op & ~O_NUM) | O_LOC;
+			c->a2 = ic[iv].a1;
+			c->a3 += ic[iv].a2 + off;
+			return 0;
+		}
+		c->a2 = iv;
+		c->a3 += off;
+		return 0;
+	}
+	return 1;
 }
 
 static int imm_ok(long op, long n, int arg)
 {
-	long m0, m1, m2, mt;
-	if (i_reg(op | O_NUM, &m0, &m1, &m2, &mt))
+	long m0, m1, m2, m3, mt;
+	if (i_reg(op | O_NUM, &m0, &m1, &m2, &m3, &mt))
 		return 0;
 	return i_imm(arg == 2 ? m2 : m1, n);
 }
@@ -711,41 +698,41 @@ static int io_imm(void)
 		return 1;
 	if (oc == O_ADD || oc == O_MUL || oc == O_AND || oc == O_OR ||
 			oc == O_XOR || oc == O_EQ || oc == O_NE) {
-		if (!ic_num(ic, c->arg1, &n)) {
-			long t = c->arg1;
-			c->arg1 = c->arg2;
-			c->arg2 = t;
+		if (!ic_num(ic, c->a1, &n)) {
+			long t = c->a1;
+			c->a1 = c->a2;
+			c->a2 = t;
 		}
 	}
 	if (oc == O_LT || oc == O_GE || oc == O_LE || oc == O_GT) {
-		if (!ic_num(ic, c->arg1, &n)) {
-			int t = c->arg1;
-			c->arg1 = c->arg2;
-			c->arg2 = t;
+		if (!ic_num(ic, c->a1, &n)) {
+			int t = c->a1;
+			c->a1 = c->a2;
+			c->a2 = t;
 			c->op ^= 1;
 		}
 	}
-	if (oc & O_JCC && !ic_num(ic, c->arg0, &n)) {
-		int t = c->arg0;
-		c->arg0 = c->arg1;
-		c->arg1 = t;
+	if (oc & O_JCC && !ic_num(ic, c->a1, &n)) {
+		int t = c->a1;
+		c->a1 = c->a2;
+		c->a2 = t;
 		c->op ^= 1;
 	}
-	if (oc & O_JCC && !ic_num(ic, c->arg1, &n) && imm_ok(c->op, n, 1)) {
+	if (oc & O_JCC && !ic_num(ic, c->a2, &n) && imm_ok(c->op, n, 1)) {
 		c->op |= O_NUM;
-		c->arg1 = n;
+		c->a2 = n;
 		return 0;
 	}
-	if (!(oc & O_BOP) || ic_num(ic, c->arg2, &n))
+	if (!(oc & O_BOP) || ic_num(ic, c->a2, &n))
 		return 1;
 	if ((oc == O_ADD || oc == O_SUB || oc & O_SHL) && n == 0) {
 		iv_drop(1);
-		iv_put(c->arg1);
+		iv_put(c->a1);
 		return 0;
 	}
 	if (imm_ok(c->op, n, 2)) {
 		c->op |= O_NUM;
-		c->arg2 = n;
+		c->a2 = n;
 		return 0;
 	}
 	return 1;
@@ -756,9 +743,9 @@ static int io_call(void)
 {
 	struct ic *c = &ic[ic_n - 1];
 	long sym, off;
-	if (c->op & O_CALL && !ic_sym(ic, c->arg1, &sym, &off) && !off) {
+	if (c->op & O_CALL && !ic_sym(ic, c->a1, &sym, &off) && !off) {
 		c->op |= O_SYM;
-		c->arg1 = sym;
+		c->a1 = sym;
 		return 0;
 	}
 	return 1;
@@ -774,20 +761,19 @@ static void io_deadcode(void)
 	/* liveness analysis */
 	live = calloc(ic_n, sizeof(live[0]));
 	for (i = ic_n - 1; i >= 0; i--) {
-		long *w, *r1, *r2, *r3;
-		ic_info(ic + i, &w, &r1, &r2, &r3);
-		if (!w || ic[i].op & O_CALL)
+		int n = ic_regcnt(ic + i);
+		if (!(ic[i].op & O_OUT) || ic[i].op & O_CALL)
 			live[i] = 1;
 		if (!live[i])
 			continue;
-		if (r1)
-			live[*r1] = 1;
-		if (r2)
-			live[*r2] = 1;
-		if (r3)
-			live[*r3] = 1;
+		if (n >= 1)
+			live[ic[i].a1] = 1;
+		if (n >= 2)
+			live[ic[i].a2] = 1;
+		if (n >= 3)
+			live[ic[i].a3] = 1;
 		if (ic[i].op & O_CALL)
-			for (j = 0; j < ic[i].arg2; j++)
+			for (j = 0; j < ic[i].a3; j++)
 				live[ic[i].args[j]] = 1;
 	}
 	/* the new indices of intermediate instructions */
@@ -808,20 +794,17 @@ static void io_deadcode(void)
 	ic_n = dst;
 	/* adjusting arguments and branch targets */
 	for (i = 0; i < ic_n; i++) {
-		long *w, *r1, *r2, *r3;
-		ic_info(ic + i, &w, &r1, &r2, &r3);
-		if (r1)
-			*r1 = nidx[*r1];
-		if (r2)
-			*r2 = nidx[*r2];
-		if (r3)
-			*r3 = nidx[*r3];
-		if (w)
-			*w = nidx[*w];
+		int n = ic_regcnt(ic + i);
+		if (n >= 1)
+			ic[i].a1 = nidx[ic[i].a1];
+		if (n >= 2)
+			ic[i].a2 = nidx[ic[i].a2];
+		if (n >= 3)
+			ic[i].a3 = nidx[ic[i].a3];
 		if (ic[i].op & O_JXX)
-			ic[i].arg2 = nidx[ic[i].arg2];
+			ic[i].a3 = nidx[ic[i].a3];
 		if (ic[i].op & O_CALL)
-			for (j = 0; j < ic[i].arg2; j++)
+			for (j = 0; j < ic[i].a3; j++)
 				ic[i].args[j] = nidx[ic[i].args[j]];
 	}
 	free(live);

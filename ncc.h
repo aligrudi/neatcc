@@ -84,25 +84,30 @@ int cpp_read(char **buf, long *len);
 #define SSHT		(USHT | T_MSIGN)
 #define SCHR		(UCHR | T_MSIGN)
 
-/* instructions macros */
-#define O_ADD		0x000010	/* add	r0, r1, r2(num) */
-#define O_SHL		0x000020	/* shl	r0, r1, r2(num) */
-#define O_MUL		0x000040	/* mul	r0, r1, r2(num) */
-#define O_CMP		0x000080	/* cmp	r0, r1, r2(num) */
-#define O_UOP		0x000100	/* neg	r0, r1 */
-#define O_CALL		0x000200	/* cmp	r0, r1(sym) */
-#define O_MOV		0x000400	/* mov	r0, r1(num,sym,loc) */
-#define O_MEM		0x000800	/* mem*	r0, r1, r2 */
-#define O_JMP		0x001000	/* jmp	num */
-#define O_JZ		0x002000	/* jz	r0, num */
-#define O_JCC		0x004000	/* jcc	r0, r1(num), num */
-#define O_RET		0x008000	/* ret	r0 */
-#define O_LD		0x010000	/* ld	r0, r1(sym,loc), r2(num) */
-#define O_ST		0x020000	/* st	r0, r1(sym,loc), r2(num) */
+/*
+ * Intermediate instruction operands
+ * R: register, N: immediate, S: symbol, L: local,
+ * D: displacement, G: label, C: arguments
+ */
+/* Instruction				rd	r1	r2	r3 */
+#define O_ADD	0x000010	/*	R	R	RN	-  */
+#define O_SHL	0x000020	/*	R	R	RN	-  */
+#define O_MUL	0x000040	/*	R	R	RN	-  */
+#define O_CMP	0x000080	/*	R	R	RN	-  */
+#define O_UOP	0x000100	/*	R	R	-	-  */
+#define O_CALL	0x000200	/*	R	RS	D	C  */
+#define O_MOV	0x000400	/*	R	RNSL	D	-  */
+#define O_MEM	0x000800	/*	-	R	R	R  */
+#define O_JMP	0x001000	/*	-	-	-	G  */
+#define O_JZ	0x002000	/*	-	R	-	G  */
+#define O_JCC	0x004000	/*	-	R	RN	G  */
+#define O_RET	0x008000	/*	-	R	-	-  */
+#define O_LD	0x010000	/*	R	RSL	D	-  */
+#define O_ST	0x020000	/*	-	R	RSL	D  */
 /* opcode flags: num, loc, sym */
-#define O_NUM		0x100000	/* instruction immediate */
-#define O_LOC		0x200000	/* local (frame pointer displacement) */
-#define O_SYM		0x400000	/* symbols (relocations and offset) */
+#define O_NUM	0x100000	/* instruction immediate */
+#define O_LOC	0x200000	/* local (frame pointer displacement) */
+#define O_SYM	0x400000	/* symbols (relocations and offset) */
 /* other members of instruction groups */
 #define O_SUB		(1 | O_ADD)
 #define O_AND		(2 | O_ADD)
@@ -178,9 +183,9 @@ void o_write(int fd);
 /* intermediate code instructions */
 struct ic {
 	long op;		/* instruction opcode */
-	long arg0;		/* first argument; usually destination */
-	long arg1;		/* second argument */
-	long arg2;		/* more information, like jump target */
+	long a1;		/* first argument */
+	long a2;		/* second argument */
+	long a3;		/* more information, like jump target */
 	long *args;		/* call arguments */
 };
 
@@ -259,8 +264,8 @@ void reg_done(void);
 #endif
 
 /* architecture-specific operations */
-long i_reg(long op, long *r0, long *r1, long *r2, long *mt);
-long i_ins(long op, long r0, long r1, long r2);
+long i_reg(long op, long *rd, long *r1, long *r2, long *r3, long *mt);
+long i_ins(long op, long rd, long r1, long r2, long r3);
 int i_imm(long lim, long n);
 void i_label(long id);
 void i_wrap(int argc, long sargs, long spsub, int initfp, long sregs, long sregs_pos);

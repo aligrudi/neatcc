@@ -188,28 +188,29 @@ static long ra_regcheap(long mask)
 }
 
 /* allocate registers for the current instruction */
-static void ra_map(int *r0, int *r1, int *r2, long *mt)
+static void ra_map(int *rd, int *r1, int *r2, int *r3, long *mt)
 {
-	long m0, m1, m2;
+	long md, m1, m2, m3;
 	struct ic *c = &ic[ic_i];
 	long all = 0;
 	int n = ic_regcnt(c);
 	int oc = O_C(c->op);
 	int i;
-	*r0 = -1;
+	*rd = -1;
 	*r1 = -1;
 	*r2 = -1;
+	*r3 = -1;
 	*mt = 0;
 	/* optimizing loading locals: point to local's register */
-	if (oc == (O_LD | O_LOC) && ra_lreg(c->arg1) >= 0 &&
-			ra_vmap[ra_lreg(c->arg1)] < 0) {
-		*r0 = ra_lreg(c->arg1);
-		func_regs |= 1 << *r0;
+	if (oc == (O_LD | O_LOC) && ra_lreg(c->a1) >= 0 &&
+			ra_vmap[ra_lreg(c->a1)] < 0) {
+		*rd = ra_lreg(c->a1);
+		func_regs |= 1 << *rd;
 		return;
 	}
 	/* do not use argument registers to hold call destination */
 	if (oc & O_CALL)
-		for (i = 0; i < MIN(c->arg2, N_ARGS); i++)
+		for (i = 0; i < MIN(c->a3, N_ARGS); i++)
 			all |= (1 << argregs[i]);
 	/* instructions on locals can be simplified */
 	if (oc & O_LOC) {
@@ -218,7 +219,7 @@ static void ra_map(int *r0, int *r1, int *r2, long *mt)
 		if (oc & (O_ST | O_LD))
 			oc = (oc & ~O_LOC) & O_NUM;
 	}
-	if (i_reg(c->op, &m0, &m1, &m2, mt))
+	if (i_reg(c->op, &md, &m1, &m2, &m3, mt))
 		die("neatcc: instruction %08lx not supported\n", c->op);
 	/*
 	 * the registers used in global register allocation should not
@@ -229,41 +230,43 @@ static void ra_map(int *r0, int *r1, int *r2, long *mt)
 			if (reg_rmap(ic_i, i) >= 0 && ra_lmap[i] != reg_rmap(ic_i, i))
 				all |= (1 << i);
 	/* allocating registers for the operands */
-	if (n >= 3) {
-		*r2 = ra_regget(c->arg2, m2, m2, all);
+	if (n >= 2) {
+		*r2 = ra_regget(c->a2, m2, m2, all);
 		all |= (1 << *r2);
 	}
-	if (n >= 2) {
-		*r1 = ra_regget(c->arg1, m1, m1, all);
+	if (n >= 1) {
+		*r1 = ra_regget(c->a1, m1, m1, all);
 		all |= (1 << *r1);
 	}
-	if (n >= 1 && m0) {
-		int wop = c->op & O_OUT;
-		if (wop && n >= 3 && m0 & (1 << *r2) && ic_luse[*r2] <= ic_i)
-			*r0 = *r2;
-		else if (wop && n >= 2 && m0 & (1 << *r1) && ic_luse[*r1] <= ic_i)
-			*r0 = *r1;
-		else
-			*r0 = ra_regget(c->arg0, ra_gmask[c->arg0],
-				m0, wop ? 0 : all);
+	if (n >= 3) {
+		*r3 = ra_regget(c->a3, m3, m3, all);
+		all |= (1 << *r3);
 	}
-	if (n >= 1 && !m0)
-		*r0 = *r1;
+	if (c->op & O_OUT) {
+		if (n >= 1 && !md)
+			*rd = *r1;
+		else if (n >= 2 && md & (1 << *r2) && ic_luse[*r2] <= ic_i)
+			*rd = *r2;
+		else if (n >= 1 && md & (1 << *r1) && ic_luse[*r1] <= ic_i)
+			*rd = *r1;
+		else
+			*rd = ra_regget(ic_i, ra_gmask[ic_i], md, 0);
+	}
 	/* if r0 is overwritten and it is a local; use another register */
-	if (n >= 1 && oc & O_OUT && ra_lmap[*r0] >= 0) {
-		long m3 = (m0 ? m0 : m1) & ~(all | (1 << *r0));
-		long arg3 = m0 ? c->arg0 : c->arg1;
-		if (m3 != 0) {
-			int r3 = ra_regget(arg3, ra_gmask[c->arg0], m3, 0);
-			if (n >= 2 && *r0 == *r1)
-				*r1 = r3;
-			if (n >= 3 && *r0 == *r2)
-				*r2 = r3;
-			*r0 = r3;
+	if (oc & O_OUT && ra_lmap[*rd] >= 0) {
+		long m4 = (md ? md : m1) & ~(all | (1 << *rd));
+		long a4 = md ? ic_i : c->a1;
+		if (m4) {
+			int r4 = ra_regget(a4, ra_gmask[ic_i], m4, 0);
+			if (n >= 1 && *rd == *r1)
+				*r1 = r4;
+			if (n >= 2 && *rd == *r2)
+				*r2 = r4;
+			*rd = r4;
 		}
 	}
-	if (n)
-		all |= (1 << *r0);
+	if (oc & O_OUT)
+		all |= (1 << *rd);
 	func_regs |= all | *mt;
 }
 
@@ -285,19 +288,19 @@ static long iv_addr(long rank)
 static void loc_toreg(long loc, long off, int reg, int bt)
 {
 	loc_mem[loc]++;
-	i_ins(O_MK(O_LD | O_NUM, bt), reg, REG_FP, -loc_off[loc] + off);
+	i_ins(O_MK(O_LD | O_NUM, bt), reg, REG_FP, -loc_off[loc] + off, 0);
 }
 
 static void loc_tomem(long loc, long off, int reg, int bt)
 {
 	loc_mem[loc]++;
-	i_ins(O_MK(O_ST | O_NUM, bt), reg, REG_FP, -loc_off[loc] + off);
+	i_ins(O_MK(O_ST | O_NUM, bt), 0, reg, REG_FP, -loc_off[loc] + off);
 }
 
 static void loc_toadd(long loc, long off, int reg)
 {
 	loc_mem[loc]++;
-	i_ins(O_ADD | O_NUM, reg, REG_FP, -loc_off[loc] + off);
+	i_ins(O_ADD | O_NUM, reg, REG_FP, -loc_off[loc] + off, 0);
 }
 
 /* return nonzero if the local is read at least once in this basic block */
@@ -312,14 +315,14 @@ static int loc_isread(long loc)
 
 static void val_toreg(long val, int reg)
 {
-	i_ins(O_MK(O_LD | O_NUM, ULNG), reg, REG_FP, -iv_addr(iv_rank(val)));
+	i_ins(O_MK(O_LD | O_NUM, ULNG), reg, REG_FP, -iv_addr(iv_rank(val)), 0);
 }
 
 static void val_tomem(long val, int reg)
 {
 	long rank = iv_rank(val);
 	ra_vmax = MAX(ra_vmax, rank + 1);
-	i_ins(O_MK(O_ST | O_NUM, ULNG), reg, REG_FP, -iv_addr(rank));
+	i_ins(O_MK(O_ST | O_NUM, ULNG), 0, reg, REG_FP, -iv_addr(rank));
 }
 
 /* move the value to the stack */
@@ -357,7 +360,7 @@ static void ra_vload(long iv, int reg)
 	if (ra_vmap[reg] >= 0 || ra_lmap[reg] >= 0)
 		ra_spill(reg);
 	if (ra_vreg(iv) >= 0) {
-		i_ins(O_MK(O_MOV, ULNG), reg, ra_vreg(iv), 0);
+		i_ins(O_MK(O_MOV, ULNG), reg, ra_vreg(iv), 0, 0);
 		ra_vmap[ra_vreg(iv)] = -1;
 	} else {
 		val_toreg(iv, reg);
@@ -382,7 +385,7 @@ static void ra_vmove(long iv, long mask)
 	int src = ra_vreg(iv);
 	int dst = ra_regcheap(mask);
 	if (dst >= 0 && ra_vmap[dst] < 0 && ra_lmap[dst] < 0) {
-		i_ins(O_MK(O_MOV, ULNG), dst, src, 0);
+		i_ins(O_MK(O_MOV, ULNG), dst, src, 0, 0);
 		ra_vmap[dst] = iv;
 	} else {
 		val_tomem(iv, src);
@@ -403,7 +406,7 @@ static void ra_lload(long loc, long off, int reg, int bt)
 		if (lreg >= 0) {
 			ra_lmap[lreg] = -1;
 			if (lreg != greg)
-				i_ins(O_MK(O_MOV, bt), greg, lreg, 0);
+				i_ins(O_MK(O_MOV, bt), greg, lreg, 0, 0);
 		} else {
 			loc_toreg(loc, off, greg, bt);
 		}
@@ -415,7 +418,7 @@ static void ra_lload(long loc, long off, int reg, int bt)
 	}
 	if (ra_lreg(loc) >= 0) {
 		if (ra_lreg(loc) != reg)
-			i_ins(O_MK(O_MOV, bt), reg, ra_lreg(loc), 0);
+			i_ins(O_MK(O_MOV, bt), reg, ra_lreg(loc), 0, 0);
 	} else {
 		loc_toreg(loc, off, reg, bt);
 	}
@@ -432,7 +435,7 @@ static void ra_lsave(long loc, long off, int reg, int bt)
 		if (ra_vmap[greg] >= 0)	/* values using the same register */
 			ra_vmove(ra_vmap[greg],
 				ra_gmask[ra_vmap[greg]] & ~(1 << reg));
-		i_ins(O_MK(O_MOV, bt), greg, reg, 0);
+		i_ins(O_MK(O_MOV, bt), greg, reg, 0, 0);
 		ra_lmap[greg] = loc;
 	} else {
 		if (lreg >= 0)
@@ -466,7 +469,7 @@ static void ra_bbend(void)
 
 static void ra_init(struct ic *ic, long ic_n)
 {
-	long m0, m1, m2, mt;
+	long md, m1, m2, m3, mt;
 	int i, j;
 	ic_bbeg = calloc(ic_n, sizeof(ic_bbeg[0]));
 	ra_gmask = calloc(ic_n, sizeof(ra_gmask[0]));
@@ -475,22 +478,22 @@ static void ra_init(struct ic *ic, long ic_n)
 	for (i = 0; i < ic_n; i++) {
 		if (i + 1 < ic_n && ic[i].op & (O_JXX | O_RET))
 			ic_bbeg[i + 1] = 1;
-		if (ic[i].op & O_JXX && ic[i].arg2 < ic_n)
-			ic_bbeg[ic[i].arg2] = 1;
+		if (ic[i].op & O_JXX && ic[i].a3 < ic_n)
+			ic_bbeg[ic[i].a3] = 1;
 	}
 	/* ra_gmask */
 	for (i = 0; i < ic_n; i++) {
 		int n = ic_regcnt(ic + i);
 		int op = ic[i].op;
-		i_reg(op, &m0, &m1, &m2, &mt);
-		if (n >= 1 && !(op & O_OUT))
-			ra_gmask[ic[i].arg0] = m0;
+		i_reg(op, &md, &m1, &m2, &m3, &mt);
+		if (n >= 1)
+			ra_gmask[ic[i].a1] = m1;
 		if (n >= 2)
-			ra_gmask[ic[i].arg1] = m1;
+			ra_gmask[ic[i].a2] = m2;
 		if (n >= 3)
-			ra_gmask[ic[i].arg2] = m2;
+			ra_gmask[ic[i].a3] = m3;
 		if (op & O_CALL)
-			for (j = 0; j < MIN(N_ARGS, ic[i].arg2); j++)
+			for (j = 0; j < MIN(N_ARGS, ic[i].a3); j++)
 				ra_gmask[ic[i].args[j]] = 1 << argregs[j];
 	}
 	/* ra_vmap */
@@ -516,7 +519,7 @@ static void ra_done(void)
 
 static void ic_gencode(struct ic *ic, long ic_n)
 {
-	int r0, r1, r2;
+	int rd, r1, r2, r3;
 	long mt;
 	int i, j;
 	/* loading arguments in their allocated registers */
@@ -533,17 +536,17 @@ static void ic_gencode(struct ic *ic, long ic_n)
 		int n = ic_regcnt(ic + i);
 		ic_i = i;
 		i_label(i);
-		ra_map(&r0, &r1, &r2, &mt);
+		ra_map(&rd, &r1, &r2, &r3, &mt);
 		if (oc & O_CALL) {
-			int argc = ic[i].arg2;
+			int argc = ic[i].a3;
 			int aregs = MIN(N_ARGS, argc);
 			/* arguments passed via stack */
 			for (j = argc - 1; j >= aregs; --j) {
 				int v = ic[i].args[j];
-				int rx = ra_vreg(v) >= 0 ? ra_vreg(v) : r0;
+				int rx = ra_vreg(v) >= 0 ? ra_vreg(v) : rd;
 				ra_vload(v, rx);
-				i_ins(O_MK(O_ST | O_NUM, ULNG), rx, REG_SP,
-					(j - aregs) * ULNG);
+				i_ins(O_MK(O_ST | O_NUM, ULNG), 0,
+					rx, REG_SP, (j - aregs) * ULNG);
 				ra_vdrop(v);
 			}
 			func_maxargs = MAX(func_maxargs, argc - aregs);
@@ -552,12 +555,12 @@ static void ic_gencode(struct ic *ic, long ic_n)
 				ra_vload(ic[i].args[j], argregs[j]);
 		}
 		/* loading the operands */
-		if (n >= 1 && !(oc & O_OUT))
-			ra_vload(ic[i].arg0, r0);
-		if (n >= 2 && !(oc & O_LOC))
-			ra_vload(ic[i].arg1, r1);
+		if (n >= 1)
+			ra_vload(ic[i].a1, r1);
+		if (n >= 2)
+			ra_vload(ic[i].a2, r2);
 		if (n >= 3)
-			ra_vload(ic[i].arg2, r2);
+			ra_vload(ic[i].a3, r3);
 		/* dropping values that are no longer used */
 		for (j = 0; j < LEN(ra_live); j++)
 			if (ra_live[j] >= 0 && ic_luse[ra_live[j]] <= i)
@@ -567,53 +570,53 @@ static void ic_gencode(struct ic *ic, long ic_n)
 			if (mt & (1 << j))
 				ra_spill(j);
 		/* overwriting a value that is needed later (unless loading a local to its register) */
-		if (n >= 1 && oc & O_OUT)
-			if (oc != (O_LD | O_LOC) || ra_lmap[r0] != ic[i].arg1 ||
-					ra_vmap[r0] >= 0)
-				ra_spill(r0);
+		if (oc & O_OUT)
+			if (oc != (O_LD | O_LOC) || ra_lmap[rd] != ic[i].a1 ||
+					ra_vmap[rd] >= 0)
+				ra_spill(rd);
 		/* before the last instruction of a basic block; for jumps */
 		if (i + 1 < ic_n && ic_bbeg[i + 1] && oc & O_JXX)
 			ra_bbend();
 		/* performing the instruction */
 		if (oc & O_BOP)
-			i_ins(op, r0, r1, oc & O_NUM ? ic[i].arg2 : r2);
+			i_ins(op, rd, r1, oc & O_NUM ? ic[i].a2 : r2, 0);
 		if (oc & O_UOP)
-			i_ins(op, r0, r1, r2);
+			i_ins(op, rd, r1, r2, 0);
 		if (oc == (O_LD | O_NUM))
-			i_ins(op, r0, r1, ic[i].arg2);
+			i_ins(op, rd, r1, ic[i].a2, 0);
 		if (oc == (O_LD | O_LOC))
-			ra_lload(ic[i].arg1, ic[i].arg2, r0, O_T(op));
+			ra_lload(ic[i].a1, ic[i].a2, rd, O_T(op));
 		if (oc == (O_ST | O_NUM))
-			i_ins(op, r0, r1, ic[i].arg2);
+			i_ins(op, 0, r1, r2, ic[i].a3);
 		if (oc == (O_ST | O_LOC))
-			ra_lsave(ic[i].arg1, ic[i].arg2, r0, O_T(op));
+			ra_lsave(ic[i].a2, ic[i].a3, r1, O_T(op));
 		if (oc == O_RET)
-			i_ins(op, r0, 0, 0);
+			i_ins(op, 0, r1, 0, 0);
 		if (oc == O_MOV)
-			i_ins(op, r0, r1, 0);
+			i_ins(op, rd, r1, 0, 0);
 		if (oc == (O_MOV | O_NUM))
-			i_ins(op, r0, ic[i].arg1, 0);
+			i_ins(op, rd, ic[i].a1, 0, 0);
 		if (oc == (O_MOV | O_LOC))
-			loc_toadd(ic[i].arg1, ic[i].arg2, r0);
+			loc_toadd(ic[i].a1, ic[i].a2, rd);
 		if (oc == (O_MOV | O_SYM))
-			i_ins(op, r0, ic[i].arg1, ic[i].arg2);
+			i_ins(op, rd, ic[i].a1, ic[i].a2, 0);
 		if (oc == O_CALL)
-			i_ins(op, r0, r1, 0);
+			i_ins(op, rd, r1, 0, 0);
 		if (oc == (O_CALL | O_SYM))
-			i_ins(op, r0, ic[i].arg1, 0);
+			i_ins(op, rd, ic[i].a1, ic[i].a2, 0);
 		if (oc == O_JMP)
-			i_ins(op, 0, 0, ic[i].arg2);
+			i_ins(op, 0, 0, 0, ic[i].a3);
 		if (oc & O_JZ)
-			i_ins(op, r0, 0, ic[i].arg2);
+			i_ins(op, 0, r1, 0, ic[i].a3);
 		if (oc & O_JCC)
-			i_ins(op, r0, oc & O_NUM ? ic[i].arg1 : r1, ic[i].arg2);
+			i_ins(op, 0, r1, oc & O_NUM ? ic[i].a2 : r2, ic[i].a3);
 		if (oc == O_MSET)
-			i_ins(op, r0, r1, r2);
+			i_ins(op, 0, r1, r2, r3);
 		if (oc == O_MCPY)
-			i_ins(op, r0, r1, r2);
+			i_ins(op, 0, r1, r2, r3);
 		/* saving back the output register */
 		if (oc & O_OUT && ic_luse[i] > i)
-			ra_vsave(ic[i].arg0, r0);
+			ra_vsave(ic_i, rd);
 		/* after the last instruction of a basic block */
 		if (i + 1 < ic_n && ic_bbeg[i + 1] && !(oc & O_JXX))
 			ra_bbend();

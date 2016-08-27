@@ -3,9 +3,24 @@
 #include <stdlib.h>
 #include "ncc.h"
 
-#define IC_LOC(ic, i)		((ic)[i].arg1)
-#define IC_LLD(ic, i)		(O_C((ic)[i].op) == (O_LD | O_LOC))
-#define IC_LST(ic, i)		(O_C((ic)[i].op) == (O_ST | O_LOC))
+#define IC_LLD(ic, i)		(O_C((ic)[i].op) == (O_LD | O_LOC) ? (ic)[i].a1 : -1)
+#define IC_LST(ic, i)		(O_C((ic)[i].op) == (O_ST | O_LOC) ? (ic)[i].a2 : -1)
+
+static int ic_loc(struct ic *ic, long iv, long *loc, long *off)
+{
+	long oc = O_C(ic[iv].op);
+	if (oc == (O_LD | O_LOC) || oc == (O_MOV | O_LOC)) {
+		*loc = ic[iv].a1;
+		*off = ic[iv].a2;
+		return 0;
+	}
+	if (oc == (O_ST | O_LOC)) {
+		*loc = ic[iv].a2;
+		*off = ic[iv].a3;
+		return 0;
+	}
+	return 1;
+}
 
 /* local live region */
 struct rgn {
@@ -80,9 +95,9 @@ static long reg_region(struct ic *ic, long ic_n, long loc, long pos,
 		if (mark[pos])
 			break;
 		mark[pos] = 1;
-		if (IC_LST(ic, pos) && IC_LOC(ic, pos) == loc)
+		if (IC_LST(ic, pos) == loc)
 			break;
-		if (IC_LLD(ic, pos) && IC_LOC(ic, pos) == loc)
+		if (IC_LLD(ic, pos) == loc)
 			cnt++;
 		dst = dst_head[pos];
 		while (dst >= 0) {
@@ -104,7 +119,7 @@ static void reg_regions(struct ic *ic, long ic_n, long loc)
 	long i;
 	mark = calloc(ic_n, sizeof(mark[0]));
 	for (i = 0; i < ic_n; i++) {
-		if (IC_LLD(ic, i) && IC_LOC(ic, i) == loc && !mark[i]) {
+		if (IC_LLD(ic, i) == loc && !mark[i]) {
 			beg = i;
 			end = i + 1;
 			cnt = reg_region(ic, ic_n, loc, i, &beg, &end, mark);
@@ -112,7 +127,7 @@ static void reg_regions(struct ic *ic, long ic_n, long loc)
 		}
 	}
 	for (i = 0; i < ic_n; i++)
-		if (IC_LST(ic, i) && IC_LOC(ic, i) == loc && !mark[i])
+		if (IC_LST(ic, i) == loc && !mark[i])
 			rgn_add(loc, i, i + 1, 1);
 	free(mark);
 }
@@ -160,26 +175,29 @@ static void reg_glob(int leaf)
 
 void reg_init(struct ic *ic, long ic_n)
 {
+	long loc, off;
 	int *loc_sz;
 	int leaf = 1;
 	long i;
 	for (i = 0; i < ic_n; i++)
-		if (ic[i].op & O_LOC && loc_n < IC_LOC(ic, i) + 1)
-			loc_n = IC_LOC(ic, i) + 1;
+		if (ic[i].op & O_LOC && !ic_loc(ic, i, &loc, &off))
+			if (loc + 1 >= loc_n)
+				loc_n = loc + 1;
 	loc_ptr = calloc(loc_n, sizeof(loc_ptr[0]));
 	loc_sz = calloc(loc_n, sizeof(loc_sz[0]));
 	for (i = 0; i < ic_n; i++) {
 		long oc = O_C(ic[i].op);
+		if (ic_loc(ic, i, &loc, &off))
+			continue;
 		if (oc == (O_LD | O_LOC) || oc == (O_ST | O_LOC)) {
-			int loc = IC_LOC(ic, i);
 			int sz = T_SZ(O_T(ic[i].op));
 			if (!loc_sz[loc])
 				loc_sz[loc] = sz;
-			if (ic[i].arg2 || sz < 2 || sz != loc_sz[loc])
+			if (off || sz < 2 || sz != loc_sz[loc])
 				loc_ptr[loc]++;
 		}
 		if (oc == (O_MOV | O_LOC))
-			loc_ptr[IC_LOC(ic, i)]++;
+			loc_ptr[loc]++;
 	}
 	free(loc_sz);
 	for (i = 0; i < ic_n; i++)
@@ -193,8 +211,8 @@ void reg_init(struct ic *ic, long ic_n)
 		dst_next[i] = -1;
 	for (i = 0; i < ic_n; i++) {
 		if (ic[i].op & O_JXX) {
-			dst_next[i] = dst_head[ic[i].arg2];
-			dst_head[ic[i].arg2] = i;
+			dst_next[i] = dst_head[ic[i].a3];
+			dst_head[ic[i].a3] = i;
 		}
 	}
 	for (i = 0; i < loc_n; i++)
