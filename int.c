@@ -124,7 +124,14 @@ static int ic_const(long iv)
 static int ic_load(long iv)
 {
 	long oc = O_C(ic[iv].op);
-	return oc & O_LD && oc & (O_NUM | O_SYM | O_LOC);
+	int i;
+	if (oc & O_LD && oc & (O_NUM | O_SYM | O_LOC)) {
+		for (i = iv + 1; i < ic_n; i++)
+			if (ic[i].op & O_ST)
+				return 0;
+		return 1;
+	}
+	return 0;
 }
 
 void o_bop(long op)
@@ -149,9 +156,14 @@ void o_uop(long op)
 
 void o_assign(long bt)
 {
-	ic_put(O_MK(O_ST | O_NUM, bt), iv_get(0), iv_get(1), 0);
-	iv_swap(0, 1);
-	iv_pop();
+	int rv = iv_pop();
+	int lv = iv_pop();
+	if (ic_const(lv) || ic_load(lv)) {	/* load constants last */
+		ic_put(ic[lv].op, ic[lv].a1, ic[lv].a2, ic[lv].a3);
+		lv = iv_pop();
+	}
+	ic_put(O_MK(O_ST | O_NUM, bt), rv, lv, 0);
+	iv_put(rv);
 	io_loc();
 }
 
