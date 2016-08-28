@@ -1652,15 +1652,25 @@ static void compat_macros(void)
 	cpp_define("__builtin_va_list__", "long");
 }
 
+static int ncc_opt = 2;
+
+/* return one if the given optimization level is enabled */
+int opt(int level)
+{
+	return level <= ncc_opt;
+}
+
 int main(int argc, char *argv[])
 {
 	char obj[128] = "";
 	int ofd;
-	int i = 1;
+	int i;
 	compat_macros();
-	while (i < argc && argv[i][0] == '-') {
+	for (i = 1; i < argc && argv[i][0] == '-'; i++) {
 		if (argv[i][1] == 'I')
 			cpp_path(argv[i][2] ? argv[i] + 2 : argv[++i]);
+		if (argv[i][1] == 'O')
+			ncc_opt = atoi(argv[i] + 2);
 		if (argv[i][1] == 'D') {
 			char *name = argv[i] + 2;
 			char *def = "";
@@ -1673,7 +1683,6 @@ int main(int argc, char *argv[])
 		}
 		if (argv[i][1] == 'o')
 			strcpy(obj, argv[i][2] ? argv[i] + 2 : argv[++i]);
-		i++;
 	}
 	if (i == argc)
 		die("neatcc: no file given\n");

@@ -31,6 +31,7 @@
 void *mextend(void *old, long oldsz, long newsz, long memsz);
 void die(char *msg, ...);
 void err(char *fmt, ...);
+int opt(int level);
 
 /* variable length buffer */
 struct mem {

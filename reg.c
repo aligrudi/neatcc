@@ -132,6 +132,17 @@ static void reg_regions(struct ic *ic, long ic_n, long loc)
 	free(mark);
 }
 
+/* number of times a local is accessed */
+static long reg_loccnt(struct ic *ic, long ic_n, long loc)
+{
+	long cnt = 0;
+	long i;
+	for (i = 0; i < ic_n; i++)
+		if (IC_LLD(ic, i) == loc || IC_LST(ic, i) == loc)
+			cnt++;
+	return cnt;
+}
+
 /* perform global register allocation */
 static void reg_glob(int leaf)
 {
@@ -185,6 +196,8 @@ void reg_init(struct ic *ic, long ic_n)
 				loc_n = loc + 1;
 	loc_ptr = calloc(loc_n, sizeof(loc_ptr[0]));
 	loc_sz = calloc(loc_n, sizeof(loc_sz[0]));
+	for (i = 0; i < loc_n; i++)
+		loc_ptr[i] = !opt(1);
 	for (i = 0; i < ic_n; i++) {
 		long oc = O_C(ic[i].op);
 		if (ic_loc(ic, i, &loc, &off))
@@ -215,9 +228,12 @@ void reg_init(struct ic *ic, long ic_n)
 			dst_head[ic[i].a3] = i;
 		}
 	}
-	for (i = 0; i < loc_n; i++)
-		if (!loc_ptr[i])
+	for (i = 0; i < loc_n; i++) {
+		if (!loc_ptr[i] && opt(2))
 			reg_regions(ic, ic_n, i);
+		if (!loc_ptr[i] && !opt(2))
+			rgn_add(i, 0, ic_n, reg_loccnt(ic, ic_n, i));
+	}
 	reg_glob(leaf);
 }
 

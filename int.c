@@ -138,40 +138,45 @@ void o_bop(long op)
 {
 	int r1 = iv_pop();
 	int r2 = iv_pop();
-	if (ic_const(r2) && !ic_const(r1)) {	/* load constants last */
+	/* load constants as late as possible */
+	if (opt(1) && ic_const(r2) && !ic_const(r1)) {
 		ic_put(ic[r2].op, ic[r2].a1, ic[r2].a2, ic[r2].a3);
 		r2 = iv_pop();
 	}
 	ic_put(op, r2, r1, 0);
-	io_num() && io_mul2() && io_addr() && io_imm();
+	if (opt(1))
+		io_num() && io_mul2() && io_addr() && io_imm();
 }
 
 void o_uop(long op)
 {
 	int r1 = iv_pop();
 	ic_put(op, r1, 0, 0);
-	if (io_num())
-		io_cmp();
+	if (opt(1))
+		io_num() && io_cmp();
 }
 
 void o_assign(long bt)
 {
 	int rv = iv_pop();
 	int lv = iv_pop();
-	if (ic_const(lv) || ic_load(lv)) {	/* load constants last */
+	/* load constants as late as possible */
+	if (opt(1) && (ic_const(lv) || ic_load(lv))) {
 		ic_put(ic[lv].op, ic[lv].a1, ic[lv].a2, ic[lv].a3);
 		lv = iv_pop();
 	}
 	ic_put(O_MK(O_ST | O_NUM, bt), rv, lv, 0);
 	iv_put(rv);
-	io_loc();
+	if (opt(1))
+		io_loc();
 }
 
 void o_deref(long bt)
 {
 	int r1 = iv_pop();
 	ic_put(O_MK(O_LD | O_NUM, bt), r1, 0, 0);
-	io_loc();
+	if (opt(1))
+		io_loc();
 }
 
 void o_cast(long bt)
@@ -179,7 +184,8 @@ void o_cast(long bt)
 	if (T_SZ(bt) != ULNG) {
 		int r1 = iv_pop();
 		ic_put(O_MK(O_MOV, bt), r1, 0, 0);
-		io_num();
+		if (opt(1))
+			io_num();
 	}
 }
 
@@ -208,7 +214,8 @@ void o_call(int argc, int ret)
 		args[i] = iv_pop();
 	for (i = argc - 1; i >= 0; --i) {
 		int iv = args[i];
-		if (ic_const(iv) || ic_load(iv)) {	/* load constants last */
+		/* load constants as late as possible */
+		if (opt(1) && (ic_const(iv) || ic_load(iv))) {
 			ic_put(ic[iv].op, ic[iv].a1, ic[iv].a2, ic[iv].a3);
 			args[i] = iv_pop();
 		}
@@ -217,7 +224,8 @@ void o_call(int argc, int ret)
 	c = ic_put(O_CALL, r1, 0, argc);
 	c->args = args;
 	iv_drop(ret == 0);
-	io_call();
+	if (opt(1))
+		io_call();
 }
 
 void o_ret(int ret)
@@ -247,7 +255,8 @@ void o_jmp(long id)
 void o_jz(long id)
 {
 	ic_put(O_JZ, iv_pop(), 0, id);
-	io_jmp();
+	if (opt(1))
+		io_jmp();
 }
 
 int o_popnum(long *n)
