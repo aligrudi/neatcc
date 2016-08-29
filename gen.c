@@ -243,6 +243,8 @@ static void ra_map(int *rd, int *r1, int *r2, int *r3, long *mt)
 		all |= (1 << *r3);
 	}
 	if (c->op & O_OUT) {
+		long m4 = (md ? md : m1) & ~all;
+		long a4 = md ? ic_i : c->a1;
 		if (n >= 1 && !md)
 			*rd = *r1;
 		else if (n >= 2 && md & (1 << *r2) && ic_luse[*r2] <= ic_i)
@@ -251,22 +253,14 @@ static void ra_map(int *rd, int *r1, int *r2, int *r3, long *mt)
 			*rd = *r1;
 		else
 			*rd = ra_regget(ic_i, ra_gmask[ic_i], md, 0);
-	}
-	/* if r0 is overwritten and it is a local; use another register */
-	if (oc & O_OUT && ra_lmap[*rd] >= 0) {
-		long m4 = (md ? md : m1) & ~(all | (1 << *rd));
-		long a4 = md ? ic_i : c->a1;
-		if (m4) {
-			int r4 = ra_regget(a4, ra_gmask[ic_i], m4, 0);
-			if (n >= 1 && *rd == *r1)
-				*r1 = r4;
-			if (n >= 2 && *rd == *r2)
-				*r2 = r4;
-			*rd = r4;
-		}
-	}
-	if (oc & O_OUT)
+		/* if overwriting a local, use another register */
+		if (ra_lmap[*rd] >= 0)
+			if (m4 & ~(1 << *rd))
+				*rd = ra_regget(a4, ra_gmask[ic_i], m4 & ~(1 << *rd), 0);
+		if (n >= 1 && !md)
+			*r1 = *rd;
 		all |= (1 << *rd);
+	}
 	func_regs |= all | *mt;
 }
 
@@ -492,6 +486,8 @@ static void ra_init(struct ic *ic, long ic_n)
 			ra_gmask[ic[i].a2] = m2;
 		if (n >= 3)
 			ra_gmask[ic[i].a3] = m3;
+		if (O_C(op) == (O_ST | O_LOC) && reg_lmap(i, ic[i].a2))
+			ra_gmask[ic[i].a1] = 1 << reg_lmap(i, ic[i].a2);
 		if (op & O_CALL)
 			for (j = 0; j < MIN(N_ARGS, ic[i].a3); j++)
 				ra_gmask[ic[i].args[j]] = 1 << argregs[j];
