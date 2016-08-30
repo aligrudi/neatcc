@@ -147,6 +147,11 @@ static void i_push(int reg)
 	op_x(I_PUSH | (reg & 0x7), 0, reg, LONGSZ);
 }
 
+static void i_pop(int reg)
+{
+	op_x(I_POP | (reg & 0x7), 0, reg, LONGSZ);
+}
+
 void i_mov(int rd, int rn)
 {
 	op_rr(movrx_op(LONGSZ, I_MOVR), rd, rn, movrx_bt(LONGSZ));
@@ -431,14 +436,47 @@ static void i_saveargs(long sargs)
 	os("\x50", 1);		/* push rax */
 }
 
-static void i_saveregs(long sregs, long sregs_pos, int st)
+static void i_subsp(long val)
 {
-	int nsregs = 0;
+	if (!val)
+		return;
+	if (val <= 127 && val >= -128) {
+		os("\x48\x83\xec", 3);
+		oi(val, 1);
+	} else {
+		os("\x48\x81\xec", 3);
+		oi(val, 4);
+	}
+}
+
+static int regs_count(long regs)
+{
+	int cnt = 0;
 	int i;
-	for (i = 0; i < N_TMPS; i++)
-		if ((1 << tmpregs[i]) & sregs)
-			op_rm(st ? I_MOV : I_MOVR, tmpregs[i], REG_FP,
-				sregs_pos + nsregs++ * ULNG, ULNG);
+	for (i = 0; i < N_REGS; i++)
+		if (((1 << i) & R_TMPS) & regs)
+			cnt++;
+	return cnt;
+}
+
+static void regs_save(long sregs, long dis)
+{
+	int i;
+	for (i = 0; i < N_REGS; i++)
+		if (((1 << i) & R_TMPS) & sregs)
+			i_push(i);
+	if (dis)
+		i_subsp(dis);
+}
+
+static void regs_load(long sregs, long dis)
+{
+	int i;
+	if (dis)
+		i_subsp(-dis);
+	for (i = N_REGS - 1; i >= 0; --i)
+		if (((1 << i) & R_TMPS) & sregs)
+			i_pop(i);
 }
 
 void i_wrap(int argc, long sargs, long spsub, int initfp, long sregs, long sregs_pos)
@@ -469,16 +507,17 @@ void i_wrap(int argc, long sargs, long spsub, int initfp, long sregs, long sregs
 			nsargs++;
 	mod16 = (spsub + nsargs * LONGSZ) % 16;	/* forcing 16-byte alignment */
 	if (spsub) {
-		os("\x48\x81\xec", 3);
 		spsub = spsub + (16 - mod16);
-		oi(spsub, 4);
+		i_subsp(sregs ? -sregs_pos - regs_count(sregs) * ULNG : spsub);
 	}
-	i_saveregs(sregs, sregs_pos, 1);	/* saving registers */
+	if (sregs)		/* saving registers */
+		regs_save(sregs, spsub + sregs_pos);
 	diff = mem_len(&cs);
 	mem_put(&cs, body, body_n);
 	free(body);
 	/* generating function epilogue */
-	i_saveregs(sregs, sregs_pos, 0);	/* restoring saved registers */
+	if (sregs)		/* restoring saved registers */
+		regs_load(sregs, spsub + sregs_pos);
 	if (initfp)
 		os("\xc9", 1);			/* leave */
 	if (sargs) {
