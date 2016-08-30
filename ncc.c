@@ -1670,7 +1670,7 @@ int main(int argc, char *argv[])
 		if (argv[i][1] == 'I')
 			cpp_path(argv[i][2] ? argv[i] + 2 : argv[++i]);
 		if (argv[i][1] == 'O')
-			ncc_opt = atoi(argv[i] + 2);
+			ncc_opt = argv[i][2] ? atoi(argv[i] + 2) : 2;
 		if (argv[i][1] == 'D') {
 			char *name = argv[i] + 2;
 			char *def = "";
@@ -1683,6 +1683,16 @@ int main(int argc, char *argv[])
 		}
 		if (argv[i][1] == 'o')
 			strcpy(obj, argv[i][2] ? argv[i] + 2 : argv[++i]);
+		if (argv[i][1] == 'h') {
+			printf("neatcc: [options] source\n");
+			printf("\n");
+			printf("Options:\n");
+			printf("  -I dir     \tspecify a header directory\n");
+			printf("  -o out     \tspecify output file name\n");
+			printf("  -Dname=val \tdefine macro\n");
+			printf("  -On        \toptimize (-O0 to disable)\n");
+			return 0;
+		}
 	}
 	if (i == argc)
 		die("neatcc: no file given\n");
