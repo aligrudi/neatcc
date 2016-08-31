@@ -441,9 +441,14 @@ static int ic_off(struct ic *ic, long iv, long *base_iv, long *off)
 {
 	long n;
 	long oc = O_C(ic[iv].op);
-	if (oc != O_ADD && oc != O_SUB) {
-		*base_iv = iv;
-		*off = 0;
+	if (oc == (O_ADD | O_NUM)) {
+		*base_iv = ic[iv].a1;
+		*off = ic[iv].a2;
+		return 0;
+	}
+	if (oc == (O_SUB | O_NUM)) {
+		*base_iv = ic[iv].a1;
+		*off = -ic[iv].a2;
 		return 0;
 	}
 	if (oc == O_ADD) {
@@ -462,7 +467,9 @@ static int ic_off(struct ic *ic, long iv, long *base_iv, long *off)
 		*off -= n;
 		return 0;
 	}
-	return 1;
+	*base_iv = iv;
+	*off = 0;
+	return 0;
 }
 
 /* number of register arguments */
@@ -667,6 +674,14 @@ static int io_addr(void)
 	return 1;
 }
 
+static int imm_ok(long op, long n, int arg)
+{
+	long m0, m1, m2, m3, mt;
+	if (i_reg(op | O_NUM, &m0, &m1, &m2, &m3, &mt))
+		return 0;
+	return i_imm(arg == 2 ? m2 : m1, n);
+}
+
 /* optimise loading and storing locals */
 static int io_loc(void)
 {
@@ -681,8 +696,10 @@ static int io_loc(void)
 			c->a2 += ic[iv].a2 + off;
 			return 0;
 		}
-		c->a1 = iv;
-		c->a2 += off;
+		if (imm_ok(c->op, 2, off)) {
+			c->a1 = iv;
+			c->a2 += off;
+		}
 		return 0;
 	}
 	if (c->op & O_ST && c->op & O_NUM) {
@@ -694,19 +711,13 @@ static int io_loc(void)
 			c->a3 += ic[iv].a2 + off;
 			return 0;
 		}
-		c->a2 = iv;
-		c->a3 += off;
+		if (imm_ok(c->op, 2, off)) {
+			c->a2 = iv;
+			c->a3 += off;
+		}
 		return 0;
 	}
 	return 1;
-}
-
-static int imm_ok(long op, long n, int arg)
-{
-	long m0, m1, m2, m3, mt;
-	if (i_reg(op | O_NUM, &m0, &m1, &m2, &m3, &mt))
-		return 0;
-	return i_imm(arg == 2 ? m2 : m1, n);
 }
 
 /* use instruction immediates */
