@@ -247,6 +247,8 @@ static void ra_map(int *rd, int *r1, int *r2, int *r3, long *mt)
 		long a4 = md ? ic_i : c->a1;
 		if (n >= 1 && !md)
 			*rd = *r1;
+		else if (ra_gmask[ic_i] & md & ~all)
+			*rd = ra_regget(ic_i, ra_gmask[ic_i], md, 0);
 		else if (n >= 2 && md & (1 << *r2) && ic_luse[*r2] <= ic_i)
 			*rd = *r2;
 		else if (n >= 1 && md & (1 << *r1) && ic_luse[*r1] <= ic_i)
