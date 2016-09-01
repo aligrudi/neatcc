@@ -144,16 +144,22 @@ void o_bop(long op)
 		r2 = iv_pop();
 	}
 	ic_put(op, r2, r1, 0);
-	if (opt(1))
-		io_num() && io_mul2() && io_addr() && io_imm();
+	if (opt(1)) {
+		io_num();
+		io_mul2();
+		io_addr();
+		io_imm();
+	}
 }
 
 void o_uop(long op)
 {
 	int r1 = iv_pop();
 	ic_put(op, r1, 0, 0);
-	if (opt(1))
-		io_num() && io_cmp();
+	if (opt(1)) {
+		io_num();
+		io_cmp();
+	}
 }
 
 void o_assign(long bt)
