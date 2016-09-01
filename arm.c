@@ -531,7 +531,7 @@ long i_reg(long op, long *rd, long *r1, long *r2, long *r3, long *tmp)
 	*tmp = 0;
 	if (oc & O_MOV) {
 		*rd = R_TMPS;
-		*r1 = oc & (O_NUM | O_SYM) ? LONGSZ * 8 : R_TMPS;
+		*r1 = oc & (O_NUM | O_SYM) ? 32 : R_TMPS;
 		return 0;
 	}
 	if (oc & O_MUL && oc & (O_NUM | O_SYM))

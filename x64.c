@@ -612,7 +612,7 @@ long i_reg(long op, long *rd, long *r1, long *r2, long *r3, long *tmp)
 	*tmp = 0;
 	if (oc & O_MOV) {
 		*rd = R_TMPS;
-		*r1 = oc & (O_NUM | O_SYM) ? 0 : R_TMPS;
+		*r1 = oc & (O_NUM | O_SYM) ? 32 : R_TMPS;
 		return 0;
 	}
 	if (oc & O_ADD) {
@@ -681,13 +681,13 @@ long i_reg(long op, long *rd, long *r1, long *r2, long *r3, long *tmp)
 	if (oc & O_LD) {
 		*rd = R_TMPS;
 		*r1 = R_TMPS;
-		*r2 = oc & O_NUM ? 0 : R_TMPS;
+		*r2 = oc & O_NUM ? 32 : R_TMPS;
 		return 0;
 	}
 	if (oc & O_ST) {
 		*r1 = R_TMPS;
 		*r2 = R_TMPS;
-		*r3 = oc & O_NUM ? 0 : R_TMPS;
+		*r3 = oc & O_NUM ? 32 : R_TMPS;
 		return 0;
 	}
 	if (oc & O_JZ) {

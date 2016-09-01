@@ -676,10 +676,10 @@ static int io_addr(void)
 
 static int imm_ok(long op, long n, int arg)
 {
-	long m0, m1, m2, m3, mt;
-	if (i_reg(op | O_NUM, &m0, &m1, &m2, &m3, &mt))
+	long m[5];
+	if (i_reg(op | O_NUM, m + 0, m + 1, m + 2, m + 3, m + 4))
 		return 0;
-	return i_imm(arg == 2 ? m2 : m1, n);
+	return i_imm(m[arg], n);
 }
 
 /* optimise loading and storing locals */
@@ -696,7 +696,7 @@ static int io_loc(void)
 			c->a2 += ic[iv].a2 + off;
 			return 0;
 		}
-		if (imm_ok(c->op, 2, off)) {
+		if (imm_ok(c->op, off, 2)) {
 			c->a1 = iv;
 			c->a2 += off;
 		}
@@ -711,7 +711,7 @@ static int io_loc(void)
 			c->a3 += ic[iv].a2 + off;
 			return 0;
 		}
-		if (imm_ok(c->op, 2, off)) {
+		if (imm_ok(c->op, off, 3)) {
 			c->a2 = iv;
 			c->a3 += off;
 		}
