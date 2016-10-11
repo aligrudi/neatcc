@@ -1684,12 +1684,12 @@ int main(int argc, char *argv[])
 		if (argv[i][1] == 'o')
 			strcpy(obj, argv[i][2] ? argv[i] + 2 : argv[++i]);
 		if (argv[i][1] == 'h') {
-			printf("neatcc: [options] source\n");
+			printf("Usage: %s [options] source\n", argv[0]);
 			printf("\n");
 			printf("Options:\n");
 			printf("  -I dir     \tspecify a header directory\n");
 			printf("  -o out     \tspecify output file name\n");
-			printf("  -Dname=val \tdefine macro\n");
+			printf("  -Dname=val \tdefine a macro\n");
 			printf("  -On        \toptimize (-O0 to disable)\n");
 			return 0;
 		}
