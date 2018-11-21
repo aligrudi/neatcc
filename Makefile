@@ -8,7 +8,7 @@ LDFLAGS =
 OBJS = ncc.o tok.o out.o cpp.o gen.o int.o reg.o mem.o $(OUT).o
 
 all: ncc
-%.o: %.c ncc.h
+%.o: %.c ncc.h $(OUT).h
 	$(CC) -c $(CFLAGS) $<
 ncc: $(OBJS)
 	$(CC) -o $@ $(OBJS) $(LDFLAGS)
