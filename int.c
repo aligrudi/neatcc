@@ -756,7 +756,7 @@ static int io_imm(void)
 		c->a2 = t;
 		c->op ^= 1;
 	}
-	if (oc & O_JCC && !ic_num(ic, c->a2, &n) && imm_ok(c->op, n, 1)) {
+	if (oc & O_JCC && !ic_num(ic, c->a2, &n) && imm_ok(c->op, n, 2)) {
 		c->op |= O_NUM;
 		c->a2 = n;
 		return 0;
