@@ -2,7 +2,7 @@
 OUT = x64
 
 CC = cc
-CFLAGS = -Wall -O2 -DNEATCC_`echo $(OUT) | tr xarm XARM`
+CFLAGS = -Wall -O2 -DNEATCC_`echo $(OUT) | tr "[:lower:]" "[:upper:]"`
 LDFLAGS =
 
 OBJS = ncc.o tok.o out.o cpp.o gen.o int.o reg.o mem.o $(OUT).o
