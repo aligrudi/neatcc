@@ -726,6 +726,13 @@ static int io_loc(void)
 	return 1;
 }
 
+/* reverse the order of comparison operands (e.g., <= to >=) */
+static int flip_cond(int op) {
+	/* lt -> gt, ge -> le, eq -> eq, ne -> ne, le -> ge, gt -> lt */
+	static int cond[] = {5, 4, 2, 3, 1, 0};
+	return (op & ~0x0f) | cond[op & 0x0f];
+}
+
 /* use instruction immediates */
 static int io_imm(void)
 {
@@ -747,14 +754,14 @@ static int io_imm(void)
 			int t = c->a1;
 			c->a1 = c->a2;
 			c->a2 = t;
-			c->op ^= 1;
+			c->op = flip_cond(c->op);
 		}
 	}
 	if (oc & O_JCC && !ic_num(ic, c->a1, &n)) {
 		int t = c->a1;
 		c->a1 = c->a2;
 		c->a2 = t;
-		c->op ^= 1;
+		c->op = flip_cond(c->op);
 	}
 	if (oc & O_JCC && !ic_num(ic, c->a2, &n) && imm_ok(c->op, n, 2)) {
 		c->op |= O_NUM;
