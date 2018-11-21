@@ -384,8 +384,28 @@ static int tok_grp(void)
 /* the result of a binary operation on variables of type bt1 and bt2 */
 static unsigned bt_op(unsigned bt1, unsigned bt2)
 {
+	/* Type conversion according to ISO9899, sec. 6.3.1.8.
+	 * http://www.open-std.org/jtc1/sc22/wg14/www/docs/n1256.pdf
+	 *
+	 * Summary:
+	 *  Size: Always convert to largest size.
+	 *  Sign:
+	 *    - Same sign: Keep sign.
+	 *    - Same size or unsigned larger: Convert to unsigned.
+	 *    - Signed larger: Convert to unsigned.
+	 */
 	int sz = MAX(T_SZ(bt1), T_SZ(bt2));
-	return ((bt1 | bt2) & T_MSIGN) | MAX(sz, UINT);
+	int sg;
+	if ((bt1 & T_MSIGN) == (bt2 & T_MSIGN)) {
+	  sg = (bt1 & T_MSIGN);
+	} else if ((!(bt1 & T_MSIGN) && T_SZ(bt1) >= T_SZ(bt2)) ||
+	           (!(bt2 & T_MSIGN) && T_SZ(bt2) >= T_SZ(bt1))) {
+	  sg = 0;
+	} else if (((bt1 & T_MSIGN) && T_SZ(bt1) > T_SZ(bt2)) ||
+	           ((bt2 & T_MSIGN) && T_SZ(bt2) > T_SZ(bt1))) {
+	  sg = T_MSIGN;
+	}
+	return sg | MAX(sz, UINT);
 }
 
 /* the result of a unary operation on variables of bt */
