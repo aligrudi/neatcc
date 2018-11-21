@@ -72,6 +72,7 @@ int cpp_read(char **buf, long *len);
 #define T_MSIZE		0x000f
 #define T_MSIGN		0x0010
 #define T_SZ(bt)	((bt) & T_MSIZE)
+#define T_SG(bt)	((bt) & T_MSIGN)
 #define T_MK(sign, size)	(((sign) & T_MSIGN) | ((size) & T_MSIZE))
 
 /* number of bytes in basic types */
