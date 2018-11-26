@@ -1386,7 +1386,6 @@ static void readswitch(void)
 	o_local(val_addr);
 	o_tmpswap();
 	o_assign(TYPE_BT(&t));
-	ts_de(0);
 	o_tmpdrop(1);
 	tok_req(")");
 	tok_req("{");
