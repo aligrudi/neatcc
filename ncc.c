@@ -405,7 +405,7 @@ static unsigned bt_op(unsigned bt1, unsigned bt2)
 /* the result of a unary operation on variables of bt */
 static unsigned bt_uop(unsigned bt)
 {
-	return bt_op(bt, UINT);
+	return bt_op(bt, SINT);
 }
 
 /* push the result of a binary operation on the type stack */
