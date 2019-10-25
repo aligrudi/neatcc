@@ -2021,7 +2021,9 @@ static int readdefs_int(void (*def)(long data, struct name *name, unsigned flags
 {
 	struct type base;
 	unsigned flags = 0;
+	int nobase = 0;
 	if (basetype(&base, &flags)) {
+		nobase = 1;
 		if (tok_grp() != 'a')
 			return 1;
 		memset(&base, 0, sizeof(base));
@@ -2032,6 +2034,8 @@ static int readdefs_int(void (*def)(long data, struct name *name, unsigned flags
 			struct name name = {{""}};
 			if (readname(&name.type, name.name, &base))
 				break;
+			if (nobase && tok_grp() == 'a')
+				err("type missing!\n");
 			def(data, &name, flags);
 		} while (!tok_jmp(","));
 	}
