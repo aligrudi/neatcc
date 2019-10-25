@@ -17,7 +17,7 @@
 #define NTMPS		64		/* number of expression temporaries */
 #define NFIELDS		128		/* number of fields in structs */
 #define NAMELEN		128		/* size of identifiers */
-#define NDEFS		1024		/* number of macros */
+#define NDEFS		4096		/* number of macros */
 #define MARGLEN		1024		/* size of macro arguments */
 #define MDEFLEN		2048		/* size of macro definitions */
 #define NBUFS		32		/* macro expansion stack depth */
