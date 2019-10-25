@@ -1652,6 +1652,7 @@ static void compat_macros(void)
 	cpp_define("__STDC__", "");
 	cpp_define("__linux__", "");
 	cpp_define(I_ARCH, "");
+	cpp_define("__neatcc__", "");
 
 	/* ignored keywords */
 	cpp_define("const", "");
