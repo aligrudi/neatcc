@@ -1726,7 +1726,8 @@ int main(int argc, char *argv[])
 	out_init(0);
 	parse();
 	if (!*obj) {
-		strcpy(obj, argv[i]);
+		char *cp = strrchr(argv[i], '/');
+		strcpy(obj, cp ? cp + 1 : argv[i]);
 		obj[strlen(obj) - 1] = 'o';
 	}
 	free(locals);
