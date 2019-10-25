@@ -1677,6 +1677,7 @@ int main(int argc, char *argv[])
 {
 	char obj[128] = "";
 	int ofd;
+	int cpp = 0;
 	int i;
 	compat_macros();
 	for (i = 1; i < argc && argv[i][0] == '-'; i++) {
@@ -1684,6 +1685,8 @@ int main(int argc, char *argv[])
 			cpp_path(argv[i][2] ? argv[i] + 2 : argv[++i]);
 		if (argv[i][1] == 'O')
 			ncc_opt = argv[i][2] ? atoi(argv[i] + 2) : 2;
+		if (argv[i][1] == 'E')
+			cpp = 1;
 		if (argv[i][1] == 'D') {
 			char *name = argv[i] + 2;
 			char *def = "";
@@ -1702,6 +1705,7 @@ int main(int argc, char *argv[])
 			printf("Options:\n");
 			printf("  -I dir     \tspecify a header directory\n");
 			printf("  -o out     \tspecify output file name\n");
+			printf("  -E         \tpreprocess only\n");
 			printf("  -Dname=val \tdefine a macro\n");
 			printf("  -On        \toptimize (-O0 to disable)\n");
 			return 0;
@@ -1711,6 +1715,13 @@ int main(int argc, char *argv[])
 		die("neatcc: no file given\n");
 	if (cpp_init(argv[i]))
 		die("neatcc: cannot open <%s>\n", argv[i]);
+	if (cpp) {
+		long clen;
+		char *cbuf;
+		while (!cpp_read(&cbuf, &clen))
+			write(1, cbuf, clen);
+		return 0;
+	}
 	out_init(0);
 	parse();
 	if (!*obj) {
