@@ -83,9 +83,63 @@ static void buf_file(char *path, char *dat, int dlen)
 	strcpy(bufs[bufs_n - 1].path, path ? path : "");
 }
 
+static int macro_arg(struct macro *m, char *arg);
+
 static void buf_macro(struct macro *m)
 {
-	buf_new(BUF_MACRO, m->def, strlen(m->def));
+	struct mem mem;
+	char *s = m->def;
+	char arg[NAMELEN];
+	int len;
+	int quote = 0;
+	mem_init(&mem);
+	while (*s) {
+		int numsign = 0;
+		if (quote && s[0] == quote)
+			quote = 0;
+		else if (!quote && s[0] == '"')
+			quote = s[0];
+		else if (!quote && s[0] == '\'')
+			quote = s[0];
+		if (!quote && s[0] == '#')
+			numsign = s[1] == '#' ? 2 : 1;
+		if (numsign && s[numsign]) {
+			struct buf *mbuf = &bufs[bufs_n];
+			char *r = s + numsign;
+			char *d = arg;
+			while (*r && d - arg < sizeof(arg) - 1 &&
+					(isalnum((unsigned char) *r) || *r == '_'))
+				*d++ = *r++;
+			*d++ = '\0';
+			if (macro_arg(m, arg) >= 0) {
+				char *def = mbuf->args[macro_arg(m, arg)];
+				if (def && numsign == 1) {
+					mem_putc(&mem, '\"');
+					while (*def) {
+						if (*def == '\"')
+							mem_putc(&mem, '\\');
+						mem_putc(&mem, (unsigned char) *def++);
+					}
+					mem_putc(&mem, '\"');
+					s = r;
+					continue;
+				}
+				if (def && numsign == 2) {
+					while (*def)
+						mem_putc(&mem, (unsigned char) *def++);
+					s = r;
+					continue;
+				}
+			}
+		}
+		if (quote && s[0] == '\\')
+			mem_putc(&mem, (unsigned char) *s++);
+		if (s[0])
+			mem_putc(&mem, (unsigned char) *s++);
+	}
+	len = mem_len(&mem);
+	buf_new(BUF_MACRO, mem_get(&mem), len);
+	mem_done(&mem);
 	bufs[bufs_n - 1].macro = m;
 }
 
@@ -98,7 +152,7 @@ static void buf_arg(char *arg, int mbuf)
 static void buf_pop(void)
 {
 	bufs_n--;
-	if (bufs[bufs_n].type == BUF_FILE)
+	if (bufs[bufs_n].type == BUF_FILE || bufs[bufs_n].type == BUF_MACRO)
 		free(buf);
 	if (bufs_n) {
 		cur = bufs[bufs_n - 1].cur;
