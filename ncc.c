@@ -1677,7 +1677,7 @@ int opt(int level)
 int main(int argc, char *argv[])
 {
 	char obj[128] = "";
-	int ofd;
+	int ofd = 1;
 	int cpp = 0;
 	int i;
 	compat_macros();
@@ -1719,8 +1719,12 @@ int main(int argc, char *argv[])
 	if (cpp) {
 		long clen;
 		char *cbuf;
+		if (*obj)
+			ofd = open(obj, O_WRONLY | O_TRUNC | O_CREAT, 0600);
 		while (!cpp_read(&cbuf, &clen))
-			write(1, cbuf, clen);
+			write(ofd, cbuf, clen);
+		if (*obj)
+			close(ofd);
 		return 0;
 	}
 	out_init(0);
