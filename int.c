@@ -321,41 +321,61 @@ void ic_free(struct ic *ic)
 
 /* intermediate code queries */
 
-static long cb(long op, long a, long b)
+static long cb(long op, long *r, long a, long b)
 {
 	switch (O_C(op)) {
 	case O_ADD:
-		return a + b;
+		*r = a + b;
+		break;
 	case O_SUB:
-		return a - b;
+		*r = a - b;
+		break;
 	case O_AND:
-		return a & b;
+		*r = a & b;
+		break;
 	case O_OR:
-		return a | b;
+		*r = a | b;
+		break;
 	case O_XOR:
-		return a ^ b;
+		*r = a ^ b;
+		break;
 	case O_MUL:
-		return a * b;
+		*r = a * b;
+		break;
 	case O_DIV:
-		return a / b;
+		if (!b)
+			return 1;
+		*r = a / b;
+		break;
 	case O_MOD:
-		return a % b;
+		if (!b)
+			return 1;
+		*r = a % b;
+		break;
 	case O_SHL:
-		return a << b;
+		*r = a << b;
+		break;
 	case O_SHR:
-		return O_T(op) & T_MSIGN ? a >> b : (unsigned long) a >> b;
+		*r = O_T(op) & T_MSIGN ? a >> b : (unsigned long) a >> b;
+		break;
 	case O_LT:
-		return a < b;
+		*r = a < b;
+		break;
 	case O_GT:
-		return a > b;
+		*r = a > b;
+		break;
 	case O_LE:
-		return a <= b;
+		*r = a <= b;
+		break;
 	case O_GE:
-		return a >= b;
+		*r = a >= b;
+		break;
 	case O_EQ:
-		return a == b;
+		*r = a == b;
+		break;
 	case O_NE:
-		return a != b;
+		*r = a != b;
+		break;
 	}
 	return 0;
 }
@@ -397,8 +417,7 @@ int ic_num(struct ic *ic, long iv, long *n)
 			return 1;
 		if (ic_num(ic, ic[iv].a2, &n2))
 			return 1;
-		*n = cb(ic[iv].op, n1, n2);
-		return 0;
+		return cb(ic[iv].op, n, n1, n2);
 	}
 	if (oc & O_UOP) {
 		if (ic_num(ic, ic[iv].a1, &n1))
