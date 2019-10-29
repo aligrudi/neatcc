@@ -1269,6 +1269,7 @@ static void globalinit(void *obj, int off, struct type *t)
 		}
 	}
 	readexpr();
+	ts_de(1);
 	o_dsset(elfname, off, TYPE_BT(t));
 	ts_pop(NULL);
 }
