@@ -100,11 +100,11 @@ void o_dsset(char *name, long off, long bt)
 	long num, roff, rsym;
 	if (!o_popnum(&num)) {
 		mem_cpy(&ds, sym_off, &num, T_SZ(bt));
-		return;
-	}
-	if (!o_popsym(&rsym, &roff)) {
+	} else if (!o_popsym(&rsym, &roff)) {
 		out_rel(rsym, OUT_DS, sym_off);
 		mem_cpy(&ds, sym_off, &roff, T_SZ(bt));
+	} else {
+		err("illegal assignment to static variables\n");
 	}
 }
 
