@@ -379,7 +379,7 @@ void i_mov(int rd, int rn)
  * |COND|000|P|U|1|W|L| Rn | Rd |off1|1|S|H|1|off2|
  * +----------------------------------------------+
  *
- * S: singed
+ * S: signed
  * H: halfword
  */
 #define LDR(l, rd, rn, b, u, p, w)		\
